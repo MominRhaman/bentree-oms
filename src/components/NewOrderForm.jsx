@@ -18,7 +18,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         discountValue: '',
         deliveryCharge: '',
         advanceAmount: '',
-        receiver: '',
+        receiver: '', // Added to State
         recipientName: '',
         recipientPhone: '',
         recipientAddress: '',
@@ -338,13 +338,38 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
 
                     {orderType === 'Online' && (
                         <div className="space-y-4">
+                            {/* Row 1: Source, Profile */}
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div><label className="block text-sm font-medium text-slate-700 mb-1">Source</label><select className="w-full p-2 border rounded-md" value={formData.orderSource} onChange={(e) => setFormData({ ...formData, orderSource: e.target.value })}><option>Facebook</option><option>Instagram</option><option>Whatsapp</option><option>Website</option><option>Other</option></select></div>
                                 <div><label className="block text-sm font-medium text-slate-700 mb-1">Profile</label><input className="w-full p-2 border rounded-md" value={formData.orderProfile} onChange={(e) => setFormData({ ...formData, orderProfile: e.target.value })} /></div>
                             </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div><label className="block text-sm font-medium text-slate-700 mb-1">Shift</label><select className="w-full p-2 border rounded-md" value={formData.shift} onChange={(e) => setFormData({ ...formData, shift: e.target.value })}><option>Shift 1</option><option>Shift 2</option><option>Shift 3</option></select></div>
-                                <div><label className="block text-sm font-medium text-slate-700 mb-1">Status</label><select className="w-full p-2 border rounded-md" value={formData.checkOutStatus} onChange={(e) => setFormData({ ...formData, checkOutStatus: e.target.value })}><option value="Pending">Pending</option><option value="Completed">Completed</option></select></div>
+                            {/* Row 2: Receiver (NEW), Shift */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Order Receiver Name</label>
+                                    <input 
+                                        className="w-full p-2 border rounded-md bg-white" 
+                                        placeholder="Name of person taking order"
+                                        value={formData.receiver} 
+                                        onChange={(e) => setFormData({ ...formData, receiver: e.target.value })} 
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Shift</label>
+                                    <select className="w-full p-2 border rounded-md" value={formData.shift} onChange={(e) => setFormData({ ...formData, shift: e.target.value })}>
+                                        <option>Shift 1</option>
+                                        <option>Shift 2</option>
+                                        <option>Shift 3</option>
+                                    </select>
+                                </div>
+                            </div>
+                            {/* Row 3: Status */}
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">Status</label>
+                                <select className="w-full p-2 border rounded-md" value={formData.checkOutStatus} onChange={(e) => setFormData({ ...formData, checkOutStatus: e.target.value })}>
+                                    <option value="Pending">Pending</option>
+                                    <option value="Completed">Completed</option>
+                                </select>
                             </div>
                         </div>
                     )}
@@ -374,7 +399,23 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                                         {rowError?.code && <p className="text-xs text-red-500">{rowError.code}</p>}
                                     </div>
                                     <div className="flex gap-2 w-full sm:w-auto">
-                                        <div className="flex-1 sm:w-24"><input placeholder="Size" className={`w-full p-2 border rounded ${rowError?.stock ? 'border-red-500 bg-red-50' : ''}`} value={prod.size} onChange={e => updateProduct(idx, 'size', e.target.value)} /></div>
+                                        {/* SIZE DROPDOWN (UPDATED) */}
+                                        <div className="flex-1 sm:w-24">
+                                            <select 
+                                                className={`w-full p-2 border rounded ${rowError?.stock ? 'border-red-500 bg-red-50' : ''}`} 
+                                                value={prod.size} 
+                                                onChange={e => updateProduct(idx, 'size', e.target.value)}
+                                            >
+                                                <option value="">Size</option>
+                                                <option value="S">S</option>
+                                                <option value="M">M</option>
+                                                <option value="L">L</option>
+                                                <option value="XL">XL</option>
+                                                <option value="2XL">2XL</option>
+                                                <option value="3XL">3XL</option>
+                                            </select>
+                                        </div>
+                                        
                                         <div className="flex-1 sm:w-20"><input type="number" min="1" className={`w-full p-2 border rounded ${rowError?.qty ? 'border-red-500' : ''}`} value={prod.qty} onChange={e => updateProduct(idx, 'qty', e.target.value)} onWheel={disableScroll} /></div>
                                         <div className="flex-1 sm:w-28"><input type="number" min="0" placeholder="Price" className={`w-full p-2 border rounded ${rowError?.price ? 'border-red-500' : ''}`} value={prod.price} onChange={e => updateProduct(idx, 'price', e.target.value)} onWheel={disableScroll} /></div>
                                         {formData.products.length > 1 && <button type="button" onClick={() => removeProduct(idx)} className="p-2 text-red-500 hover:bg-red-50 rounded"><Trash2 size={18} /></button>}
@@ -408,7 +449,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                             <div><label className="block text-sm font-medium mb-1">Due Bill (Collect)</label><input type="text" readOnly className="w-full p-2 border rounded bg-slate-100 text-slate-500 font-bold" value={totals.due.toFixed(2)} /></div>
                         </div>
 
-                        {/* ORDER DETAILS SECTION - RESTORED FIELDS */}
+                        {/* ORDER DETAILS SECTION */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-4 bg-emerald-50 rounded-lg border border-emerald-100">
                             <div className="space-y-4">
                                 <h4 className="font-semibold text-emerald-800">Recipient Info</h4>

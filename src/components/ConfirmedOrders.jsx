@@ -17,12 +17,11 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, inventory }) => 
     const [deliveryModal, setDeliveryModal] = useState(null); // Stores order object for delivery
     const [returnModal, setReturnModal] = useState(null);     // Stores order object for return
 
-    // --- 1. Duplicate Logic (Updated to exclude Delivered, Cancelled, Hold) ---
+    // --- 1. Duplicate Logic ---
     const duplicateIds = useMemo(() => {
         const dupeIds = new Set();
         const byPhone = {};
 
-        // Filter valid orders for duplicate check
         const activeForCheck = allOrders.filter(o => 
             !['Delivered', 'Cancelled', 'Hold', 'Returned'].includes(o.status)
         );
@@ -36,12 +35,10 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, inventory }) => 
 
         Object.values(byPhone).forEach(group => {
             if (group.length < 2) return;
-            // Identify true duplicates within the group
             for (let i = 0; i < group.length; i++) {
                 for (let j = i + 1; j < group.length; j++) {
                     const a = group[i];
                     const b = group[j];
-                    // Logic: Same Amount OR Same Product
                     const amountMatch = (Number(a.dueAmount) === Number(b.dueAmount));
                     const productMatch = a.products?.some(ap => b.products?.some(bp => bp.code === ap.code));
                     
@@ -55,9 +52,11 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, inventory }) => 
         return dupeIds;
     }, [allOrders]);
 
-    // --- 2. Filter Logic ---
+    // --- 2. Filter Logic (UPDATED FIX) ---
     const filteredOrders = useMemo(() => {
-        let res = orders.filter(o => o.status !== 'Hold'); // Primary exclusion for this view
+        // FIX: Exclude 'Pending' orders so they only appear in Primary Orders
+        let res = orders.filter(o => o.status !== 'Pending' && o.status !== 'Hold');
+        
         if (filterDate) res = res.filter(o => o.date === filterDate);
         if (filterStatus !== 'All') res = res.filter(o => o.status === filterStatus);
         
@@ -91,18 +90,28 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, inventory }) => 
     const processDelivery = (e) => {
         e.preventDefault();
         const received = Number(e.target.received.value);
-        const due = Number(deliveryModal.dueAmount || 0);
+        const newDeliveryCharge = Number(e.target.deliveryCharge.value);
         
-        // REVENUE LOSS LOGIC:
-        // If Received < Due, the difference (e.g. -50) is stored as 'revenueAdjustment'.
-        // This negative value will be treated as a loss and subtracted from Product Revenue in reports.
-        const adjustment = received - due; 
+        // Original Values
+        const oldDeliveryCharge = Number(deliveryModal.deliveryCharge || 0);
+        const oldDue = Number(deliveryModal.dueAmount || 0);
+        const oldGrandTotal = Number(deliveryModal.grandTotal || 0);
+
+        // 1. Recalculate Totals based on New Delivery Charge
+        const newDue = oldDue - oldDeliveryCharge + newDeliveryCharge;
+        const newGrandTotal = oldGrandTotal - oldDeliveryCharge + newDeliveryCharge;
+
+        // 2. Calculate Loss/Adjustment
+        const adjustment = received - newDue; 
         
         onUpdate(deliveryModal.id, 'Delivered', {
             collectedAmount: received,
-            revenueAdjustment: adjustment, // Stored on order. SalesReport reads this.
+            deliveryCharge: newDeliveryCharge, // Update delivery charge
+            grandTotal: newGrandTotal,         // Update grand total
+            dueAmount: 0,                      // Paid off
+            revenueAdjustment: adjustment,     // Store the loss/surplus
             paymentNote: adjustment !== 0 
-                ? `Collected ${received} (Due ${due}). Loss/Adj: ${adjustment}` 
+                ? `Collected ${received} (Exp: ${newDue}). Loss/Adj: ${adjustment}` 
                 : 'Full Payment Received'
         });
         setDeliveryModal(null);
@@ -199,7 +208,6 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, inventory }) => 
                                 </td>
                                 <td className="p-3">
                                     <div className="flex justify-center gap-1" onClick={(e) => e.stopPropagation()}>
-                                        {/* Delivery Button */}
                                         <button
                                             title="Mark as Delivered"
                                             onClick={() => {
@@ -210,34 +218,10 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, inventory }) => 
                                         >
                                             <CheckCircle size={16} />
                                         </button>
-
-                                        {/* Return Button */}
-                                        <button 
-                                            title="Mark as Returned" 
-                                            onClick={() => setReturnModal(order)} 
-                                            className="p-1.5 bg-red-100 text-red-700 rounded hover:bg-red-200"
-                                        >
-                                            <XCircle size={16} />
-                                        </button>
-
-                                        {/* Exchange Button */}
+                                        <button title="Mark as Returned" onClick={() => setReturnModal(order)} className="p-1.5 bg-red-100 text-red-700 rounded hover:bg-red-200"><XCircle size={16} /></button>
                                         <button title="Exchanged" onClick={() => setExchangeModal(order)} className="p-1.5 bg-yellow-100 text-yellow-700 rounded hover:bg-yellow-200"><ArrowRightLeft size={16} /></button>
-                                        
-                                        {/* Hold Button */}
                                         <button title="Hold" onClick={() => onUpdate(order.id, 'Hold')} className="p-1.5 bg-purple-100 text-purple-700 rounded hover:bg-purple-200"><PauseCircle size={16} /></button>
-
-                                        {/* Cancel Button (Red) */}
-                                        <button 
-                                            title="Cancel Order" 
-                                            onClick={() => {
-                                                if (confirm('Are you sure you want to cancel this order?')) {
-                                                    onUpdate(order.id, 'Cancelled');
-                                                }
-                                            }} 
-                                            className="p-1.5 bg-red-100 text-red-700 rounded hover:bg-red-200"
-                                        >
-                                            <Ban size={16} />
-                                        </button>
+                                        <button title="Cancel Order" onClick={() => { if (confirm('Are you sure?')) onUpdate(order.id, 'Cancelled'); }} className="p-1.5 bg-red-100 text-red-700 rounded hover:bg-red-200"><Ban size={16} /></button>
                                     </div>
                                 </td>
                             </tr>
@@ -246,7 +230,7 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, inventory }) => 
                 </table>
             </div>
 
-            {/* --- Delivery Confirmation Modal --- */}
+            {/* --- Delivery Confirmation Modal (Updated with Delivery Charge Field) --- */}
             {deliveryModal && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
                     <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm">
@@ -254,25 +238,39 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, inventory }) => 
                             <h3 className="text-lg font-bold text-slate-800">Confirm Delivery</h3>
                             <button onClick={() => setDeliveryModal(null)}><X size={20} className="text-slate-400" /></button>
                         </div>
-                        <form onSubmit={processDelivery}>
-                            <div className="mb-4 bg-emerald-50 p-3 rounded border border-emerald-100">
-                                <label className="block text-xs font-bold text-emerald-800 uppercase">Total Due Amount</label>
+                        <form onSubmit={processDelivery} className="space-y-4">
+                            <div className="bg-emerald-50 p-3 rounded border border-emerald-100">
+                                <label className="block text-xs font-bold text-emerald-800 uppercase">System Due Amount</label>
                                 <p className="text-2xl font-bold text-emerald-700">৳{deliveryModal.dueAmount || 0}</p>
                             </div>
-                            <div className="mb-6">
-                                <label className="block text-sm font-medium text-slate-700 mb-2">Received Amount</label>
+                            
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">Total Received Amount</label>
                                 <input 
                                     name="received" 
                                     type="number" 
                                     defaultValue={deliveryModal.dueAmount || 0} 
-                                    className="w-full p-3 border rounded text-lg font-bold"
+                                    className="w-full p-2 border rounded font-bold"
                                     autoFocus
+                                    required
                                 />
-                                <p className="text-xs text-slate-500 mt-2">
-                                    * If Received is less than Due, the difference will be recorded as a Revenue Loss on the products.
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">Delivery Charge (Included)</label>
+                                <input 
+                                    name="deliveryCharge" 
+                                    type="number" 
+                                    defaultValue={deliveryModal.deliveryCharge || 0} 
+                                    className="w-full p-2 border rounded"
+                                    required
+                                />
+                                <p className="text-xs text-slate-500 mt-1">
+                                    Change this if you added extra delivery charge.
                                 </p>
                             </div>
-                            <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded">
+
+                            <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded shadow-sm">
                                 Confirm Delivered
                             </button>
                         </form>
@@ -291,45 +289,21 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, inventory }) => 
                         <form onSubmit={processReturn}>
                             <div className="mb-4">
                                 <label className="block text-sm font-medium text-slate-700 mb-1">Cash Received (if any)</label>
-                                <input 
-                                    name="returnCash" 
-                                    type="number" 
-                                    placeholder="0" 
-                                    className="w-full p-2 border rounded"
-                                />
+                                <input name="returnCash" type="number" placeholder="0" className="w-full p-2 border rounded" />
                             </div>
                             <div className="mb-6 flex items-center gap-3 bg-slate-50 p-3 rounded border">
-                                <input 
-                                    type="checkbox" 
-                                    id="dcReceived" 
-                                    name="deliveryFeeReceived" 
-                                    className="w-5 h-5 text-emerald-600 rounded"
-                                />
-                                <label htmlFor="dcReceived" className="text-sm font-medium text-slate-700">
-                                    Delivery Fee Received?
-                                </label>
+                                <input type="checkbox" id="dcReceived" name="deliveryFeeReceived" className="w-5 h-5 text-emerald-600 rounded" />
+                                <label htmlFor="dcReceived" className="text-sm font-medium text-slate-700">Delivery Fee Received?</label>
                             </div>
-                            <button type="submit" className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded">
-                                Confirm Return
-                            </button>
+                            <button type="submit" className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded">Confirm Return</button>
                         </form>
                     </div>
                 </div>
             )}
 
             {/* Existing Popups */}
-            {exchangeModal && (
-                <ExchangeModal order={exchangeModal} onClose={() => setExchangeModal(null)} onConfirm={(orderId, data) => onUpdate(orderId, 'Exchanged', data)} inventory={inventory} />
-            )}
-
-            {selectedOrder && (
-                <OrderDetailsPopup
-                    order={selectedOrder}
-                    onClose={() => setSelectedOrder(null)}
-                    getStatusColor={getStatusColor}
-                    onEdit={onEdit}
-                />
-            )}
+            {exchangeModal && <ExchangeModal order={exchangeModal} onClose={() => setExchangeModal(null)} onConfirm={(orderId, data) => onUpdate(orderId, 'Exchanged', data)} inventory={inventory} />}
+            {selectedOrder && <OrderDetailsPopup order={selectedOrder} onClose={() => setSelectedOrder(null)} getStatusColor={getStatusColor} onEdit={onEdit} />}
         </div>
     );
 };
