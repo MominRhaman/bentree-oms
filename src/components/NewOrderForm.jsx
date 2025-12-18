@@ -43,7 +43,6 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         setOrderType(type);
         setErrors({});
         setGlobalError('');
-        // We reset form but keep the Date
         setFormData(prev => ({
             ...prev,
             date: new Date().toISOString().split('T')[0],
@@ -280,14 +279,11 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         }
 
         try {
-            // Deduct Stock
             for (const p of formData.products) {
                 await updateInventoryStock(p.code, p.size, -Number(p.qty), inventory);
             }
-            // Save Order
             await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), payload);
             
-            // Redirect
             if (orderType === 'Online') setActiveTab('primary');
             else setActiveTab('store-sales');
 
@@ -297,21 +293,16 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         }
     };
 
-    // --- Helpers ---
     const updateProduct = (index, field, value) => {
         const newProducts = [...formData.products];
         newProducts[index][field] = value;
-
-        // --- NEW: AUTO-PRICE FETCH LOGIC ---
         if (field === 'code') {
             const normalizedCode = value.trim().toUpperCase();
             const foundItem = inventory.find(i => i.code.toUpperCase() === normalizedCode);
             if (foundItem) {
-                // Auto-fill price with MRP if product found
                 newProducts[index].price = foundItem.mrp || '';
             }
         }
-        
         setFormData({ ...formData, products: newProducts });
     };
 
@@ -329,7 +320,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                 </div>
             </div>
 
-            {/* Global Error Alert */}
+            {/* Global Error */}
             {globalError && (
                 <div className="mx-6 mt-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center text-red-700 font-bold animate-pulse">
                     <XCircle size={20} className="mr-2" /> {globalError}
@@ -338,14 +329,13 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
 
             <form onSubmit={handleSubmit} className="p-6 space-y-6">
                 
-                {/* 1. Date Field (Universal) */}
+                {/* Date Field */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
                         <label className="block text-sm font-medium text-slate-700 mb-1">Order Date</label>
                         <input type="date" required className="w-full p-2 border border-slate-300 rounded-md" value={formData.date} onChange={(e) => setFormData({ ...formData, date: e.target.value })} />
                     </div>
 
-                    {/* Online Specific Top Fields */}
                     {orderType === 'Online' && (
                         <div className="space-y-4">
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -360,7 +350,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                     )}
                 </div>
 
-                {/* 2. Product Entry Section (Validation Critical) */}
+                {/* Product Section */}
                 <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
                     <div className="flex justify-between items-center mb-3">
                         <h3 className="font-semibold text-slate-700">Products <span className="text-red-500">*</span></h3>
@@ -380,12 +370,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                                             value={prod.code}
                                             onChange={e => updateProduct(idx, 'code', e.target.value)}
                                         />
-                                        {/* STOCK ERROR MESSAGE */}
-                                        {rowError?.stock && (
-                                            <div className="text-xs text-red-600 font-bold mt-1 flex items-center">
-                                                <AlertTriangle size={12} className="mr-1"/> {rowError.stock}
-                                            </div>
-                                        )}
+                                        {rowError?.stock && <div className="text-xs text-red-600 font-bold mt-1 flex items-center"><AlertTriangle size={12} className="mr-1"/> {rowError.stock}</div>}
                                         {rowError?.code && <p className="text-xs text-red-500">{rowError.code}</p>}
                                     </div>
                                     <div className="flex gap-2 w-full sm:w-auto">
@@ -400,7 +385,6 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                         <button type="button" onClick={addProduct} className="flex items-center text-sm text-emerald-600 font-bold hover:bg-emerald-50 p-2 rounded border border-dashed border-emerald-200 w-full justify-center sm:justify-start"><Plus size={16} className="mr-1" /> Add Product</button>
                     </div>
 
-                    {/* Totals & Discounts */}
                     <div className="mt-4 pt-4 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
                             <label className="block text-sm font-medium mb-1">Discount</label>
@@ -416,7 +400,6 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                     </div>
                 </div>
 
-                {/* 3. Online Specific Bottom Fields */}
                 {orderType === 'Online' && (
                     <>
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
@@ -425,6 +408,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                             <div><label className="block text-sm font-medium mb-1">Due Bill (Collect)</label><input type="text" readOnly className="w-full p-2 border rounded bg-slate-100 text-slate-500 font-bold" value={totals.due.toFixed(2)} /></div>
                         </div>
 
+                        {/* ORDER DETAILS SECTION - RESTORED FIELDS */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-4 bg-emerald-50 rounded-lg border border-emerald-100">
                             <div className="space-y-4">
                                 <h4 className="font-semibold text-emerald-800">Recipient Info</h4>
@@ -433,11 +417,38 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                                 <div><textarea placeholder="Address *" className={`w-full p-2 border rounded h-20 ${errors.recipientAddress ? 'border-red-500 bg-red-50' : ''}`} value={formData.recipientAddress} onChange={e => setFormData({ ...formData, recipientAddress: e.target.value })} />{errors.recipientAddress && <p className="text-xs text-red-500 mt-1">{errors.recipientAddress}</p>}</div>
                                 <div className="grid grid-cols-3 gap-2"><input placeholder="City" className="w-full p-2 border rounded" value={formData.recipientCity} onChange={e => setFormData({ ...formData, recipientCity: e.target.value })} /><input placeholder="Zone" className="w-full p-2 border rounded" value={formData.recipientZone} onChange={e => setFormData({ ...formData, recipientZone: e.target.value })} /><input placeholder="Area" className="w-full p-2 border rounded" value={formData.recipientArea} onChange={e => setFormData({ ...formData, recipientArea: e.target.value })} /></div>
                             </div>
+                            
                             <div className="space-y-4">
                                 <h4 className="font-semibold text-emerald-800">Order Details</h4>
                                 <div className="grid grid-cols-2 gap-4">
-                                    <div><label className="text-xs text-emerald-700">Merchant ID</label><input className="w-full p-2 border rounded" value={formData.merchantOrderId} onChange={e => setFormData({ ...formData, merchantOrderId: e.target.value })} /></div>
-                                    <div><label className="text-xs text-emerald-700">Payment Type</label><select className="w-full p-2 border rounded bg-white" value={formData.paymentType} onChange={e => setFormData({ ...formData, paymentType: e.target.value })}><option>COD</option><option>Advance</option><option>Partial</option></select></div>
+                                    <div>
+                                        <label className="text-xs text-emerald-700">Item Type</label>
+                                        <input value="Parcel" readOnly className="w-full p-2 border rounded bg-white text-slate-500" />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs text-emerald-700">Store Name</label>
+                                        <input value="Bentree" readOnly className="w-full p-2 border rounded bg-white text-slate-500" />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs text-emerald-700">Merchant Order ID (Auto)</label>
+                                        <input className="w-full p-2 border rounded" value={formData.merchantOrderId} onChange={e => setFormData({ ...formData, merchantOrderId: e.target.value })} />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs text-emerald-700">Payment Type</label>
+                                        <select className="w-full p-2 border rounded bg-white" value={formData.paymentType} onChange={e => setFormData({ ...formData, paymentType: e.target.value })}>
+                                            <option>COD</option>
+                                            <option>Advance</option>
+                                            <option>Partial</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="text-xs text-emerald-700">Auto Generated Description</label>
+                                    <input value={totals.productDesc} readOnly className="w-full p-2 border rounded bg-slate-100 text-slate-600 text-sm" />
+                                </div>
+                                <div>
+                                    <label className="text-xs text-emerald-700">Total Weight</label>
+                                    <input value={totals.weight} readOnly className="w-full p-2 border rounded bg-slate-100 text-slate-600 text-sm" />
                                 </div>
                             </div>
                         </div>
@@ -445,7 +456,6 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                     </>
                 )}
 
-                {/* 4. Store Specific Bottom Fields */}
                 {orderType === 'Store' && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div className="space-y-4">
