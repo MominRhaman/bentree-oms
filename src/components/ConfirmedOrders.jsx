@@ -14,8 +14,8 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, inventory }) => 
     const [selectedOrder, setSelectedOrder] = useState(null);
 
     // New Modals for Custom Logic
-    const [deliveryModal, setDeliveryModal] = useState(null); // Stores order object for delivery
-    const [returnModal, setReturnModal] = useState(null);     // Stores order object for return
+    const [deliveryModal, setDeliveryModal] = useState(null); 
+    const [returnModal, setReturnModal] = useState(null);     
 
     // --- 1. Duplicate Logic ---
     const duplicateIds = useMemo(() => {
@@ -52,10 +52,14 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, inventory }) => 
         return dupeIds;
     }, [allOrders]);
 
-    // --- 2. Filter Logic (UPDATED FIX) ---
+    // --- 2. Filter Logic (FIXED) ---
     const filteredOrders = useMemo(() => {
-        // FIX: Exclude 'Pending' orders so they only appear in Primary Orders
-        let res = orders.filter(o => o.status !== 'Pending' && o.status !== 'Hold');
+        // FIX: Exclude 'Pending' (Primary) AND 'Store' orders
+        let res = orders.filter(o => 
+            o.status !== 'Pending' && 
+            o.status !== 'Hold' && 
+            o.type !== 'Store'
+        );
         
         if (filterDate) res = res.filter(o => o.date === filterDate);
         if (filterStatus !== 'All') res = res.filter(o => o.status === filterStatus);
@@ -92,24 +96,22 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, inventory }) => 
         const received = Number(e.target.received.value);
         const newDeliveryCharge = Number(e.target.deliveryCharge.value);
         
-        // Original Values
         const oldDeliveryCharge = Number(deliveryModal.deliveryCharge || 0);
         const oldDue = Number(deliveryModal.dueAmount || 0);
         const oldGrandTotal = Number(deliveryModal.grandTotal || 0);
 
-        // 1. Recalculate Totals based on New Delivery Charge
+        // Recalculate based on new delivery charge
         const newDue = oldDue - oldDeliveryCharge + newDeliveryCharge;
         const newGrandTotal = oldGrandTotal - oldDeliveryCharge + newDeliveryCharge;
 
-        // 2. Calculate Loss/Adjustment
         const adjustment = received - newDue; 
         
         onUpdate(deliveryModal.id, 'Delivered', {
             collectedAmount: received,
-            deliveryCharge: newDeliveryCharge, // Update delivery charge
-            grandTotal: newGrandTotal,         // Update grand total
-            dueAmount: 0,                      // Paid off
-            revenueAdjustment: adjustment,     // Store the loss/surplus
+            deliveryCharge: newDeliveryCharge,
+            grandTotal: newGrandTotal,
+            dueAmount: 0,
+            revenueAdjustment: adjustment,
             paymentNote: adjustment !== 0 
                 ? `Collected ${received} (Exp: ${newDue}). Loss/Adj: ${adjustment}` 
                 : 'Full Payment Received'
@@ -158,79 +160,81 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, inventory }) => 
                 </div>
             </div>
 
-            {/* Table Section */}
-            <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto">
-                <table className="w-full text-sm text-left min-w-[800px]">
-                    <thead className="bg-slate-50 text-slate-600 font-medium border-b">
-                        <tr>
-                            <th className="p-3 w-8"></th>
-                            <th className="p-3">Date</th>
-                            <th className="p-3">Recipient</th>
-                            <th className="p-3">Items</th>
-                            <th className="p-3">Status</th>
-                            <th className="p-3">Tracking ID</th>
-                            <th className="p-3 text-center">Outcome</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {filteredOrders.map(order => (
-                            <tr
-                                key={order.id}
-                                className={`border-b hover:bg-slate-50 ${getStatusColor(order.status)} bg-opacity-20 cursor-pointer`}
-                                onClick={() => setSelectedOrder(order)}
-                            >
-                                <td className="p-3">
-                                    {duplicateIds.has(order.id) && (
-                                        <div title="Duplicate Alert" className="text-amber-500 animate-pulse"><AlertTriangle size={16} /></div>
-                                    )}
-                                </td>
-                                <td className="p-3">{order.date}</td>
-                                <td className="p-3">
-                                    <div className="font-medium">{order.recipientName}</div>
-                                    <div className="text-xs opacity-75">{order.recipientPhone}</div>
-                                    <div className="text-[10px] font-bold text-slate-500 mt-1">Due: ৳{order.dueAmount}</div>
-                                </td>
-                                <td className="p-3 text-xs">
-                                    {(order.products || []).map((p, i) => <div key={i}>{p.code} ({p.size})</div>)}
-                                </td>
-                                <td className="p-3 font-bold">
-                                    <span className={`px-2 py-1 rounded ${getStatusColor(order.status)}`}>{order.status}</span>
-                                </td>
-                                <td className="p-3">
-                                    <input
-                                        className="border border-slate-300 rounded px-2 py-1 text-xs w-32 focus:ring-1 focus:ring-emerald-500"
-                                        placeholder="Enter ID"
-                                        defaultValue={order.trackingId || ''}
-                                        onClick={(e) => e.stopPropagation()}
-                                        onBlur={(e) => onUpdate(order.id, order.status, { trackingId: e.target.value })}
-                                        onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
-                                    />
-                                </td>
-                                <td className="p-3">
-                                    <div className="flex justify-center gap-1" onClick={(e) => e.stopPropagation()}>
-                                        <button
-                                            title="Mark as Delivered"
-                                            onClick={() => {
-                                                if (order.status !== 'Dispatched') return alert("Order must be Dispatched before Delivery.");
-                                                setDeliveryModal(order);
-                                            }}
-                                            className={`p-1.5 rounded ${order.status === 'Dispatched' ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}
-                                        >
-                                            <CheckCircle size={16} />
-                                        </button>
-                                        <button title="Mark as Returned" onClick={() => setReturnModal(order)} className="p-1.5 bg-red-100 text-red-700 rounded hover:bg-red-200"><XCircle size={16} /></button>
-                                        <button title="Exchanged" onClick={() => setExchangeModal(order)} className="p-1.5 bg-yellow-100 text-yellow-700 rounded hover:bg-yellow-200"><ArrowRightLeft size={16} /></button>
-                                        <button title="Hold" onClick={() => onUpdate(order.id, 'Hold')} className="p-1.5 bg-purple-100 text-purple-700 rounded hover:bg-purple-200"><PauseCircle size={16} /></button>
-                                        <button title="Cancel Order" onClick={() => { if (confirm('Are you sure?')) onUpdate(order.id, 'Cancelled'); }} className="p-1.5 bg-red-100 text-red-700 rounded hover:bg-red-200"><Ban size={16} /></button>
-                                    </div>
-                                </td>
+            {/* Table Section with Sticky Header */}
+            <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+                <div className="overflow-x-auto max-h-[600px] relative">
+                    <table className="w-full text-sm text-left min-w-[800px]">
+                        <thead className="bg-slate-50 text-slate-600 font-medium border-b sticky top-0 z-10 shadow-sm">
+                            <tr>
+                                <th className="p-3 w-8"></th>
+                                <th className="p-3">Date</th>
+                                <th className="p-3">Recipient</th>
+                                <th className="p-3">Items</th>
+                                <th className="p-3">Status</th>
+                                <th className="p-3">Tracking ID</th>
+                                <th className="p-3 text-center">Outcome</th>
                             </tr>
-                        ))}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            {filteredOrders.map(order => (
+                                <tr
+                                    key={order.id}
+                                    className={`border-b hover:bg-slate-50 ${getStatusColor(order.status)} bg-opacity-20 cursor-pointer`}
+                                    onClick={() => setSelectedOrder(order)}
+                                >
+                                    <td className="p-3">
+                                        {duplicateIds.has(order.id) && (
+                                            <div title="Duplicate Alert" className="text-amber-500 animate-pulse"><AlertTriangle size={16} /></div>
+                                        )}
+                                    </td>
+                                    <td className="p-3">{order.date}</td>
+                                    <td className="p-3">
+                                        <div className="font-medium">{order.recipientName}</div>
+                                        <div className="text-xs opacity-75">{order.recipientPhone}</div>
+                                        <div className="text-[10px] font-bold text-slate-500 mt-1">Due: ৳{order.dueAmount}</div>
+                                    </td>
+                                    <td className="p-3 text-xs">
+                                        {(order.products || []).map((p, i) => <div key={i}>{p.code} ({p.size})</div>)}
+                                    </td>
+                                    <td className="p-3 font-bold">
+                                        <span className={`px-2 py-1 rounded ${getStatusColor(order.status)}`}>{order.status}</span>
+                                    </td>
+                                    <td className="p-3">
+                                        <input
+                                            className="border border-slate-300 rounded px-2 py-1 text-xs w-32 focus:ring-1 focus:ring-emerald-500"
+                                            placeholder="Enter ID"
+                                            defaultValue={order.trackingId || ''}
+                                            onClick={(e) => e.stopPropagation()}
+                                            onBlur={(e) => onUpdate(order.id, order.status, { trackingId: e.target.value })}
+                                            onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                                        />
+                                    </td>
+                                    <td className="p-3">
+                                        <div className="flex justify-center gap-1" onClick={(e) => e.stopPropagation()}>
+                                            <button
+                                                title="Mark as Delivered"
+                                                onClick={() => {
+                                                    if (order.status !== 'Dispatched') return alert("Order must be Dispatched before Delivery.");
+                                                    setDeliveryModal(order);
+                                                }}
+                                                className={`p-1.5 rounded ${order.status === 'Dispatched' ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}
+                                            >
+                                                <CheckCircle size={16} />
+                                            </button>
+                                            <button title="Mark as Returned" onClick={() => setReturnModal(order)} className="p-1.5 bg-red-100 text-red-700 rounded hover:bg-red-200"><XCircle size={16} /></button>
+                                            <button title="Exchanged" onClick={() => setExchangeModal(order)} className="p-1.5 bg-yellow-100 text-yellow-700 rounded hover:bg-yellow-200"><ArrowRightLeft size={16} /></button>
+                                            <button title="Hold" onClick={() => onUpdate(order.id, 'Hold')} className="p-1.5 bg-purple-100 text-purple-700 rounded hover:bg-purple-200"><PauseCircle size={16} /></button>
+                                            <button title="Cancel Order" onClick={() => { if (confirm('Are you sure?')) onUpdate(order.id, 'Cancelled'); }} className="p-1.5 bg-red-100 text-red-700 rounded hover:bg-red-200"><Ban size={16} /></button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
             </div>
 
-            {/* --- Delivery Confirmation Modal (Updated with Delivery Charge Field) --- */}
+            {/* --- Delivery Confirmation Modal --- */}
             {deliveryModal && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
                     <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm">
@@ -265,14 +269,10 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, inventory }) => 
                                     className="w-full p-2 border rounded"
                                     required
                                 />
-                                <p className="text-xs text-slate-500 mt-1">
-                                    Change this if you added extra delivery charge.
-                                </p>
+                                <p className="text-xs text-slate-500 mt-1">Change if needed.</p>
                             </div>
 
-                            <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded shadow-sm">
-                                Confirm Delivered
-                            </button>
+                            <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded shadow-sm">Confirm Delivered</button>
                         </form>
                     </div>
                 </div>
@@ -301,7 +301,6 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, inventory }) => 
                 </div>
             )}
 
-            {/* Existing Popups */}
             {exchangeModal && <ExchangeModal order={exchangeModal} onClose={() => setExchangeModal(null)} onConfirm={(orderId, data) => onUpdate(orderId, 'Exchanged', data)} inventory={inventory} />}
             {selectedOrder && <OrderDetailsPopup order={selectedOrder} onClose={() => setSelectedOrder(null)} getStatusColor={getStatusColor} onEdit={onEdit} />}
         </div>

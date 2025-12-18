@@ -52,7 +52,7 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
         return summary;
     }, [inventory]);
 
-    // --- 2. Main Inventory Logic (The complex calculation part) ---
+    // --- 2. Main Inventory Logic ---
     const inventoryStats = useMemo(() => {
         let filtered = inventory;
 
@@ -229,7 +229,6 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
         downloadCSV(data, fileName);
     };
 
-    // --- CSV Import Functionality ---
     const handleImportCSV = (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -237,11 +236,9 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
         const reader = new FileReader();
         reader.onload = async (event) => {
             const text = event.target.result;
-            // Split rows (handling basic newlines)
             const rows = text.split(/\r?\n/).filter(row => row.trim() !== '');
             if (rows.length < 2) return alert("Invalid CSV: Not enough data.");
 
-            // Parse Headers to find column indices
             const headers = rows[0].split(',').map(h => h.trim().toLowerCase().replace(/['"]+/g, ''));
             
             const getIdx = (key) => headers.findIndex(h => h.includes(key));
@@ -257,7 +254,6 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
             let skippedCount = 0;
 
             for (let i = 1; i < rows.length; i++) {
-                // Simple regex to split by comma but ignore commas inside quotes
                 const row = rows[i].match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g);
                 if (!row) continue;
 
@@ -266,24 +262,22 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
                 const code = clean(row[idxCode]);
                 if (!code) continue;
 
-                // Check for duplicate in current inventory state
                 const exists = inventory.some(item => item.code.toUpperCase() === code.toUpperCase());
                 if (exists) {
                     skippedCount++;
                     continue;
                 }
 
-                // Construct New Item
                 const newItem = {
                     code: code.toUpperCase(),
                     category: idxCat > -1 ? clean(row[idxCat]) : 'Uncategorized',
-                    type: 'Single', // Import defaults to Single, Variable import is too complex for flat CSV
+                    type: 'Single',
                     totalStock: idxStock > -1 ? Number(clean(row[idxStock])) || 0 : 0,
                     stock: {},
                     unitCost: idxCost > -1 ? Number(clean(row[idxCost])) || 0 : 0,
                     mrp: idxMrp > -1 ? Number(clean(row[idxMrp])) || 0 : 0,
                     date: new Date().toISOString().split('T')[0],
-                    locationId: '', // User must edit location later
+                    locationId: '',
                     shelfRow: '',
                     addedBy: user?.displayName || 'Import',
                     createdAt: serverTimestamp()
@@ -297,7 +291,7 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
                 }
             }
             alert(`Import Complete!\nAdded: ${addedCount}\nSkipped (Duplicates): ${skippedCount}`);
-            e.target.value = ''; // Reset input
+            e.target.value = '';
         };
         reader.readAsText(file);
     };
@@ -448,7 +442,7 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
             )}
 
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                {/* Responsive Header for Table */}
+                {/* Header for Table */}
                 <div className="p-4 border-b bg-slate-50 flex flex-col md:flex-row md:justify-between md:items-center gap-4">
                     <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
                         <div className="w-full md:w-auto">
@@ -468,7 +462,6 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
                             <input type="date" className="text-xs outline-none text-slate-600 bg-transparent" value={historyEnd} onChange={e => setHistoryEnd(e.target.value)} />
                         </div>
                         
-                        {/* INPUT FOR IMPORT */}
                         <input type="file" accept=".csv" ref={fileInputRef} className="hidden" onChange={handleImportCSV} />
                         
                         <div className="flex gap-2">
@@ -482,9 +475,10 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
                     </div>
                 </div>
 
-                <div className="overflow-x-auto">
+                {/* Table with Sticky Header */}
+                <div className="overflow-x-auto max-h-[600px] relative">
                     <table className="w-full text-sm text-left min-w-[900px]">
-                        <thead className="bg-white text-slate-600 font-bold border-b">
+                        <thead className="bg-white text-slate-600 font-bold border-b sticky top-0 z-10 shadow-sm">
                             <tr>
                                 <th className="p-3">Code</th>
                                 <th className="p-3">Category</th>
