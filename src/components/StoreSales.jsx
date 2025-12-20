@@ -18,13 +18,19 @@ const StoreSalesTab = ({ orders, inventory, onEdit, onDelete }) => {
     const { salesData, totals } = useMemo(() => {
         const safeNum = (v) => Number(v) || 0;
 
-        // 1. THE FIREWALL: Strictly isolate Store Orders FIRST.
-        // This guarantees NO Online orders can ever enter the pipeline.
-        let processedOrders = (orders || []).filter(o => 
-            o.type === 'Store' && o.status === 'Completed'
-        );
+        // 1. THE FIREWALL (PERMISSIVE MODE)
+        // Show everything that is TYPE=STORE, unless it's explicitly Cancelled or Returned.
+        // This ensures 'Delivered', 'Paid', 'Completed', or Empty statuses ALL show up.
+        let processedOrders = (orders || []).filter(o => {
+            const status = (o.status || '').toLowerCase();
+            return (
+                o.type === 'Store' && 
+                status !== 'cancelled' && 
+                status !== 'returned'
+            );
+        });
 
-        // 2. Date Filter (Applied to Store Orders only)
+        // 2. Date Filter
         if (startDate) processedOrders = processedOrders.filter(o => o.date >= startDate);
         if (endDate) processedOrders = processedOrders.filter(o => o.date <= endDate);
 
@@ -143,7 +149,7 @@ const StoreSalesTab = ({ orders, inventory, onEdit, onDelete }) => {
                             <SearchBar searchTerm={searchTerm} setSearchTerm={setSearchTerm} placeholder="Search Order ID or Phone..." />
                         </div>
                         
-                        {/* CATEGORY FILTER */}
+                        {/* CATEGORY FILTER DROPDOWN */}
                         <div className="relative">
                             <select
                                 className="p-2 pl-8 border rounded text-sm bg-white outline-none w-full md:w-40 appearance-none cursor-pointer hover:border-emerald-400 transition-colors"
@@ -220,7 +226,7 @@ const StoreSalesTab = ({ orders, inventory, onEdit, onDelete }) => {
                                 </tr>
                             ))}
                             {salesData.length === 0 && (
-                                <tr><td colSpan="10" className="p-10 text-center text-slate-400">No completed store sales found.</td></tr>
+                                <tr><td colSpan="10" className="p-10 text-center text-slate-400">No store sales found.</td></tr>
                             )}
                         </tbody>
                         <tfoot className="sticky bottom-0 bg-slate-100 border-t-2 border-slate-200 font-bold text-slate-700 z-10 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">

@@ -175,7 +175,14 @@ function App() {
             case 'dispatch': return <DispatchTab orders={orders.filter(o => o.type === 'Online' && ['Confirmed', 'Dispatched', 'Exchanged'].includes(o.status))} onUpdate={handleUpdateStatus} />;
             case 'store-sales': return <StoreSales orders={orders.filter(o => o.type === 'Store')} {...orderProps} />;
             case 'exchange': return <ExchangeTab orders={orders.filter(o => o.type === 'Online' && (o.status === 'Exchanged' || o.exchangeDetails))} />;
-            case 'cancelled': return <CancelledOrders orders={orders.filter(o => o.type === 'Online' && o.status === 'Cancelled')} onUpdate={handleUpdateStatus} />;
+            
+            // --- FIX IS HERE: INCLUDE 'Returned' IN FILTER ---
+            case 'cancelled': 
+                return <CancelledOrders 
+                    orders={orders.filter(o => o.type === 'Online' && (o.status === 'Cancelled' || o.status === 'Returned'))} 
+                    onUpdate={handleUpdateStatus} 
+                />;
+            
             case 'online-sales': return <OnlineSalesTab {...orderProps} />;
             case 'reports': return userRole === 'master' ? <SalesReports {...orderProps} /> : <div className="p-10 text-center text-slate-400">Restricted Access</div>;
             default: return <div>Select a tab</div>;

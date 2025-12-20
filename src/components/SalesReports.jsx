@@ -17,19 +17,22 @@ const SalesReports = ({ orders, inventory }) => {
 
     // --- MAIN DATA CALCULATION ---
     const { stats, salesData, totals } = useMemo(() => {
-        // 1. Base Filtering (Search, Date, Platform)
-        // We do NOT apply Category filter here yet, because Delivery/Returns are Order-level, not Item-level.
         let filteredOrders = orders || [];
 
+        // 1. Date Filter
         if (startDate) filteredOrders = filteredOrders.filter(o => o.date >= startDate);
         if (endDate) filteredOrders = filteredOrders.filter(o => o.date <= endDate);
         
-        // Platform Filter
+        // 2. Platform Filter (Updated to handle "Store")
         if (platformFilter && platformFilter !== "") {
-            filteredOrders = filteredOrders.filter(o => (o.orderSource || '') === platformFilter);
+            if (platformFilter === 'Store') {
+                filteredOrders = filteredOrders.filter(o => o.type === 'Store');
+            } else {
+                filteredOrders = filteredOrders.filter(o => (o.orderSource || '') === platformFilter);
+            }
         }
 
-        // Search Filter
+        // 3. Search Filter
         if (searchTerm) {
             const term = searchTerm.toLowerCase();
             filteredOrders = filteredOrders.filter(o =>
@@ -42,26 +45,33 @@ const SalesReports = ({ orders, inventory }) => {
 
         const safeNum = (v) => Number(v) || 0;
 
-        // 2. Identify "Realized" Orders (Actual Money In)
+        // 4. Identify "Realized" Orders (Actual Money In)
         const onlineDelivered = filteredOrders.filter(o => o.type === 'Online' && o.status === 'Delivered');
-        const storeCompleted = filteredOrders.filter(o => o.type === 'Store' && o.status === 'Completed');
+        
+        // FIX: Store Logic - Include anything that is NOT Cancelled/Returned
+        const storeRealized = filteredOrders.filter(o => 
+            o.type === 'Store' && 
+            (o.status || '').toLowerCase() !== 'cancelled' && 
+            (o.status || '').toLowerCase() !== 'returned'
+        );
+
         const returns = filteredOrders.filter(o => o.type === 'Online' && o.status === 'Returned');
 
-        // 3. Generate Table Rows (Product Level Data) & Apply Category Filter
+        // 5. Generate Table Rows
         const data = [];
-        
-        // Combine Online Delivered & Store Completed for the Product Table
-        const realizedOrders = [...onlineDelivered, ...storeCompleted];
+        const realizedOrders = [...onlineDelivered, ...storeRealized];
 
         realizedOrders.forEach(order => {
             const orderId = order.type === 'Store' ? order.storeOrderId : order.merchantOrderId;
-            const salesBy = order.type === 'Online' ? order.orderSource : (order.storePaymentMode || 'Store');
+            
+            // Set "Store" as sales source for Store orders so it shows in the column
+            const salesBy = order.type === 'Store' ? 'Store' : (order.orderSource || 'Online');
+            
             const addedBy = order.addedBy || 'System';
 
-            // --- Advanced Revenue Distribution Logic ---
             const orderSubtotal = safeNum(order.subtotal);
             const orderDiscount = safeNum(order.discountValue);
-            const revenueAdjustment = Math.abs(safeNum(order.revenueAdjustment)); // E.g. Short payment
+            const revenueAdjustment = Math.abs(safeNum(order.revenueAdjustment)); 
             
             const totalDeductions = orderDiscount + revenueAdjustment;
 
@@ -69,12 +79,9 @@ const SalesReports = ({ orders, inventory }) => {
                 const invItem = inventory.find(i => i.code.toUpperCase() === (prod.code || '').toUpperCase());
                 const category = invItem ? invItem.category : 'N/A';
 
-                // --- CATEGORY FILTERING APPLIED HERE ---
                 if (catFilter && catFilter !== "" && category !== catFilter) return;
 
                 const unitCost = invItem ? safeNum(invItem.unitCost) : 0;
-                
-                // Inventory State
                 let currentStock = 0;
                 if (invItem) {
                     if (invItem.type === 'Variable') {
@@ -87,10 +94,7 @@ const SalesReports = ({ orders, inventory }) => {
                 const salePrice = safeNum(prod.price);
                 const qty = safeNum(prod.qty);
 
-                // --- Item Math ---
                 const grossItemRevenue = salePrice * qty;
-                
-                // Calculate Pro-rated Deduction for this item
                 const ratio = orderSubtotal > 0 ? (grossItemRevenue / orderSubtotal) : 0;
                 const itemDeductionShare = totalDeductions * ratio;
 
@@ -120,22 +124,13 @@ const SalesReports = ({ orders, inventory }) => {
             });
         });
 
-        // 4. Calculate Stats (Dynamic based on filtered data)
-        
-        // Summing up from 'data' ensures Category Filter is respected for Sales
+        // 6. Calculate Stats
         const netProductSales = data.filter(d => d.type === 'Online').reduce((acc, item) => acc + item.revenue, 0);
         const storeSales = data.filter(d => d.type === 'Store').reduce((acc, item) => acc + item.revenue, 0);
-
-        // (Usually delivery fee isn't "categorized" by product, so we keep order-level sums)
         const deliveryIncome = onlineDelivered.reduce((acc, o) => acc + safeNum(o.deliveryCharge), 0);
-        
-        const returnDeliveryLoss = returns.reduce((acc, o) => 
-            !o.isDeliveryFeeReceived ? acc + safeNum(o.deliveryCharge) : acc, 0);
-
-        // UPDATED FORMULA: (Sales + Delivery) - Return Loss
+        const returnDeliveryLoss = returns.reduce((acc, o) => !o.isDeliveryFeeReceived ? acc + safeNum(o.deliveryCharge) : acc, 0);
         const totalRevenue = (netProductSales + storeSales + deliveryIncome) - returnDeliveryLoss;
 
-        // 5. Calculate Table Footer Totals
         const totals = data.reduce((acc, row) => ({
             unitSold: acc.unitSold + row.unitSold,
             revenue: acc.revenue + row.revenue,
@@ -172,7 +167,7 @@ const SalesReports = ({ orders, inventory }) => {
                 <p className="text-xs text-slate-500">Live reports summary by category</p>
             </div>
 
-            {/* 1. Summary Cards Section */}
+            {/* Summary Cards */}
             <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
                 <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100 shadow-sm">
                     <h3 className="text-slate-500 font-bold text-xs mb-1 uppercase">Net Online Sales</h3>
@@ -199,17 +194,16 @@ const SalesReports = ({ orders, inventory }) => {
                 </div>
             </div>
 
-            {/* 2. Controls & Filters Section */}
+            {/* Controls */}
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                 <div className="p-4 border-b bg-slate-50 flex flex-col md:flex-row md:justify-between md:items-center gap-4">
                     
-                    {/* Left Side: Filters */}
                     <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
                         <div className="w-full md:w-64">
                             <SearchBar searchTerm={searchTerm} setSearchTerm={setSearchTerm} placeholder="Search product, phone, or ID..." />
                         </div>
                         
-                        {/* Platform Filter */}
+                        {/* PLATFORM FILTER WITH STORE OPTION */}
                         <div className="relative">
                             <select
                                 className="p-2 pl-8 border rounded text-sm bg-white outline-none w-full md:w-40 appearance-none cursor-pointer hover:border-emerald-400 transition-colors"
@@ -217,6 +211,7 @@ const SalesReports = ({ orders, inventory }) => {
                                 onChange={e => setPlatformFilter(e.target.value)}
                             >
                                 <option value="">All Platforms</option>
+                                <option value="Store">Store Sales</option> {/* NEW OPTION */}
                                 <option value="Facebook">Facebook</option>
                                 <option value="Instagram">Instagram</option>
                                 <option value="Whatsapp">Whatsapp</option>
@@ -227,7 +222,6 @@ const SalesReports = ({ orders, inventory }) => {
                             <Filter size={14} className="absolute left-2.5 top-3 text-slate-400 pointer-events-none" />
                         </div>
 
-                        {/* Category Filter */}
                         <select
                             className="p-2 border rounded text-sm bg-white outline-none w-full md:w-40 cursor-pointer hover:border-emerald-400 transition-colors"
                             value={catFilter}
@@ -238,7 +232,6 @@ const SalesReports = ({ orders, inventory }) => {
                         </select>
                     </div>
 
-                    {/* Right Side: Actions & Date */}
                     <div className="flex flex-col md:flex-row gap-2 w-full md:w-auto">
                         <div className="flex items-center bg-white border rounded px-2 py-1 gap-2 w-full md:w-auto justify-between md:justify-start">
                             <span className="text-[10px] font-bold text-slate-400 uppercase">History:</span>
@@ -247,18 +240,16 @@ const SalesReports = ({ orders, inventory }) => {
                             <input type="date" className="text-xs outline-none text-slate-600 bg-transparent cursor-pointer" value={endDate} onChange={e => setEndDate(e.target.value)} />
                         </div>
                         
-                        <div className="flex gap-2 w-full md:w-auto">
-                            <button 
-                                onClick={handleExport} 
-                                className="flex items-center justify-center gap-1 text-emerald-600 bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded text-sm font-medium transition-colors w-1/2 md:w-auto"
-                            >
-                                <Download size={16} /> Export
-                            </button>
-                        </div>
+                        <button 
+                            onClick={handleExport} 
+                            className="flex items-center justify-center gap-1 text-emerald-600 bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded text-sm font-medium transition-colors w-1/2 md:w-auto"
+                        >
+                            <Download size={16} /> Export
+                        </button>
                     </div>
                 </div>
 
-                {/* 3. Detailed Data Table (Sticky Header + Footer Totals) */}
+                {/* Table */}
                 <div className="overflow-x-auto max-h-[600px]">
                     <table className="w-full text-sm text-left min-w-[1000px]">
                         <thead className="bg-white text-slate-600 font-bold border-b text-xs uppercase sticky top-0 z-10 shadow-sm">
@@ -287,15 +278,10 @@ const SalesReports = ({ orders, inventory }) => {
                                     <td className="p-3 text-right text-slate-600">৳{row.costUnit.toFixed(2)}</td>
                                     <td className="p-3 text-right text-slate-400">৳{row.totalValue.toFixed(0)}</td>
                                     <td className="p-3 text-center font-medium text-slate-800">{row.unitSold}</td>
-                                    
-                                    <td className="p-3 text-right text-emerald-700 font-medium">
-                                        ৳{row.revenue.toFixed(2)}
-                                    </td>
-                                    
+                                    <td className="p-3 text-right text-emerald-700 font-medium">৳{row.revenue.toFixed(2)}</td>
                                     <td className={`p-3 text-right font-bold ${row.profitLoss >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                                         {row.profitLoss.toFixed(2)}
                                     </td>
-                                    
                                     <td className="p-3 text-xs text-slate-500 truncate max-w-[100px]" title={row.salesBy}>
                                         {row.salesBy}
                                     </td>
@@ -327,7 +313,6 @@ const SalesReports = ({ orders, inventory }) => {
                 </div>
             </div>
 
-            {/* Order Details Popup */}
             {selectedOrder && (
                 <OrderDetailsPopup
                     order={selectedOrder}

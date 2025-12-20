@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Calendar, Download, AlertTriangle, CheckCircle, XCircle, ArrowRightLeft, PauseCircle, Ban, X } from 'lucide-react';
+import { Calendar, Download, AlertTriangle, CheckCircle, ArrowRightLeft, PauseCircle, Ban, X, RotateCcw } from 'lucide-react';
 import OrderDetailsPopup from './OrderDetailsPopup';
 import SearchBar from './SearchBar';
 import ExchangeModal from './ExchangeModal';
@@ -15,7 +15,7 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, inventory }) => 
 
     // New Modals for Custom Logic
     const [deliveryModal, setDeliveryModal] = useState(null); 
-    const [returnModal, setReturnModal] = useState(null);     
+    const [returnPopupOrder, setReturnPopupOrder] = useState(null);    
 
     // --- 1. Duplicate Logic ---
     const duplicateIds = useMemo(() => {
@@ -52,9 +52,8 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, inventory }) => 
         return dupeIds;
     }, [allOrders]);
 
-    // --- 2. Filter Logic (FIXED) ---
+    // --- 2. Filter Logic ---
     const filteredOrders = useMemo(() => {
-        // FIX: Exclude 'Pending' (Primary) AND 'Store' orders
         let res = orders.filter(o => 
             o.status !== 'Pending' && 
             o.status !== 'Hold' && 
@@ -119,19 +118,6 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, inventory }) => 
         setDeliveryModal(null);
     };
 
-    const processReturn = (e) => {
-        e.preventDefault();
-        const cashReceived = Number(e.target.returnCash.value || 0);
-        const isDeliveryFeeReceived = e.target.deliveryFeeReceived.checked;
-
-        onUpdate(returnModal.id, 'Returned', {
-            returnCashReceived: cashReceived,
-            isDeliveryFeeReceived: isDeliveryFeeReceived,
-            note: `Return Processed. Cash: ${cashReceived}, DC Received: ${isDeliveryFeeReceived ? 'Yes' : 'No'}`
-        });
-        setReturnModal(null);
-    };
-
     return (
         <div className="space-y-4">
             {/* Header Section */}
@@ -160,7 +146,7 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, inventory }) => 
                 </div>
             </div>
 
-            {/* Table Section with Sticky Header */}
+            {/* Table Section */}
             <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
                 <div className="overflow-x-auto max-h-[600px] relative">
                     <table className="w-full text-sm text-left min-w-[800px]">
@@ -221,7 +207,16 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, inventory }) => 
                                             >
                                                 <CheckCircle size={16} />
                                             </button>
-                                            <button title="Mark as Returned" onClick={() => setReturnModal(order)} className="p-1.5 bg-red-100 text-red-700 rounded hover:bg-red-200"><XCircle size={16} /></button>
+                                            
+                                            {/* CHANGED: Return Button - Orange color and Undo Icon */}
+                                            <button 
+                                                title="Mark as Returned" 
+                                                onClick={() => setReturnPopupOrder(order)} 
+                                                className="p-1.5 bg-orange-100 text-orange-700 rounded hover:bg-orange-200"
+                                            >
+                                                <RotateCcw size={16} />
+                                            </button>
+                                            
                                             <button title="Exchanged" onClick={() => setExchangeModal(order)} className="p-1.5 bg-yellow-100 text-yellow-700 rounded hover:bg-yellow-200"><ArrowRightLeft size={16} /></button>
                                             <button title="Hold" onClick={() => onUpdate(order.id, 'Hold')} className="p-1.5 bg-purple-100 text-purple-700 rounded hover:bg-purple-200"><PauseCircle size={16} /></button>
                                             <button title="Cancel Order" onClick={() => { if (confirm('Are you sure?')) onUpdate(order.id, 'Cancelled'); }} className="p-1.5 bg-red-100 text-red-700 rounded hover:bg-red-200"><Ban size={16} /></button>
@@ -278,31 +273,28 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, inventory }) => 
                 </div>
             )}
 
-            {/* --- Return Processing Modal --- */}
-            {returnModal && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm">
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-bold text-slate-800">Process Return</h3>
-                            <button onClick={() => setReturnModal(null)}><X size={20} className="text-slate-400" /></button>
-                        </div>
-                        <form onSubmit={processReturn}>
-                            <div className="mb-4">
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Cash Received (if any)</label>
-                                <input name="returnCash" type="number" placeholder="0" className="w-full p-2 border rounded" />
-                            </div>
-                            <div className="mb-6 flex items-center gap-3 bg-slate-50 p-3 rounded border">
-                                <input type="checkbox" id="dcReceived" name="deliveryFeeReceived" className="w-5 h-5 text-emerald-600 rounded" />
-                                <label htmlFor="dcReceived" className="text-sm font-medium text-slate-700">Delivery Fee Received?</label>
-                            </div>
-                            <button type="submit" className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded">Confirm Return</button>
-                        </form>
-                    </div>
-                </div>
+            {/* --- Modals and Popups --- */}
+            {exchangeModal && <ExchangeModal order={exchangeModal} onClose={() => setExchangeModal(null)} onConfirm={(orderId, data) => onUpdate(orderId, 'Exchanged', data)} inventory={inventory} />}
+            
+            {selectedOrder && (
+                <OrderDetailsPopup 
+                    order={selectedOrder} 
+                    onClose={() => setSelectedOrder(null)} 
+                    getStatusColor={getStatusColor} 
+                    onEdit={onEdit} 
+                />
             )}
 
-            {exchangeModal && <ExchangeModal order={exchangeModal} onClose={() => setExchangeModal(null)} onConfirm={(orderId, data) => onUpdate(orderId, 'Exchanged', data)} inventory={inventory} />}
-            {selectedOrder && <OrderDetailsPopup order={selectedOrder} onClose={() => setSelectedOrder(null)} getStatusColor={getStatusColor} onEdit={onEdit} />}
+            {returnPopupOrder && (
+                <OrderDetailsPopup 
+                    order={returnPopupOrder} 
+                    onClose={() => setReturnPopupOrder(null)} 
+                    getStatusColor={getStatusColor} 
+                    onEdit={onEdit}
+                    inventory={inventory}
+                    isReturnMode={true} 
+                />
+            )}
         </div>
     );
 };

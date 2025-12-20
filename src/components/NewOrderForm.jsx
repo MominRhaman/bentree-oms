@@ -18,7 +18,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         discountValue: '',
         deliveryCharge: '',
         advanceAmount: '',
-        receiver: '', // Added to State
+        receiver: '', 
         recipientName: '',
         recipientPhone: '',
         recipientAddress: '',
@@ -296,6 +296,8 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
     const updateProduct = (index, field, value) => {
         const newProducts = [...formData.products];
         newProducts[index][field] = value;
+        
+        // Auto-fill price if code is found
         if (field === 'code') {
             const normalizedCode = value.trim().toUpperCase();
             const foundItem = inventory.find(i => i.code.toUpperCase() === normalizedCode);
@@ -303,7 +305,32 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                 newProducts[index].price = foundItem.mrp || '';
             }
         }
+        
         setFormData({ ...formData, products: newProducts });
+
+        // --- REAL-TIME ERROR CHECKING ---
+        // Calculate stock error for this specific row immediately
+        const stockError = getStockError(newProducts[index]);
+        
+        setErrors(prev => {
+            const currentProductsErrors = prev.products ? { ...prev.products } : {};
+            const currentRowErrors = currentProductsErrors[index] ? { ...currentProductsErrors[index] } : {};
+
+            if (stockError) {
+                currentRowErrors.stock = stockError;
+            } else {
+                delete currentRowErrors.stock;
+            }
+
+            // Clean up empty error objects
+            if (Object.keys(currentRowErrors).length === 0) {
+                delete currentProductsErrors[index];
+            } else {
+                currentProductsErrors[index] = currentRowErrors;
+            }
+
+            return { ...prev, products: currentProductsErrors };
+        });
     };
 
     const addProduct = () => setFormData({ ...formData, products: [...formData.products, { code: '', size: '', qty: 1, price: '' }] });
@@ -399,7 +426,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                                         {rowError?.code && <p className="text-xs text-red-500">{rowError.code}</p>}
                                     </div>
                                     <div className="flex gap-2 w-full sm:w-auto">
-                                        {/* SIZE DROPDOWN (UPDATED) */}
+                                        {/* SIZE DROPDOWN */}
                                         <div className="flex-1 sm:w-24">
                                             <select 
                                                 className={`w-full p-2 border rounded ${rowError?.stock ? 'border-red-500 bg-red-50' : ''}`} 
