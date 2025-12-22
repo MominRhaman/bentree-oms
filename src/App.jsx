@@ -3,7 +3,7 @@ import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { collection, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, arrayUnion } from 'firebase/firestore';
 import { auth, db, appId } from './firebase';
 import { updateInventoryStock } from './utils';
-import { Menu } from 'lucide-react'; // Import Menu Icon
+import { Menu } from 'lucide-react'; 
 
 // Component Imports
 import LoginPage from './components/LoginPage';
@@ -25,18 +25,18 @@ import SalesReports from './components/SalesReports';
 function App() {
     const savedRole = localStorage.getItem('bentree_role');
     
-    // --- UPDATED: Check URL Params for Tab on Load ---
+    // --- UPDATED: Check URL Path for Tab on Load (Clean URL) ---
     const getInitialTab = () => {
-        const params = new URLSearchParams(window.location.search);
-        const urlTab = params.get('tab');
-        if (urlTab) return urlTab;
+        // Gets "/dispatch" and removes the "/" to get "dispatch"
+        const path = window.location.pathname.substring(1);
+        if (path && path.length > 0) return path;
         return localStorage.getItem('bentree_tab') || 'new-order';
     };
 
     const [user, setUser] = useState(null);
     const [userRole, setUserRole] = useState(savedRole);
-    const [activeTab, setActiveTab] = useState(getInitialTab); // Initialize with function
-    const [isSidebarOpen, setIsSidebarOpen] = useState(false); // New Sidebar State
+    const [activeTab, setActiveTab] = useState(getInitialTab); 
+    const [isSidebarOpen, setIsSidebarOpen] = useState(false); 
 
     const [isAuthChecking, setIsAuthChecking] = useState(true);
     const [loading, setLoading] = useState(false);
@@ -76,15 +76,26 @@ function App() {
                 setUserRole(null);
             }
         });
-        return () => unsubscribe();
+        
+        // Listen for back/forward button clicks to update tab
+        const handlePopState = () => {
+            const path = window.location.pathname.substring(1);
+            if (path) setActiveTab(path);
+        };
+        window.addEventListener('popstate', handlePopState);
+        
+        return () => {
+            unsubscribe();
+            window.removeEventListener('popstate', handlePopState);
+        };
     }, []);
 
     const handleTabChange = (tabId) => {
         setActiveTab(tabId);
         localStorage.setItem('bentree_tab', tabId);
         
-        // Optional: Update URL without reloading when clicking normally
-        const newUrl = `${window.location.pathname}?tab=${tabId}`;
+        // --- UPDATED: Clean URL Format (e.g. /dispatch) ---
+        const newUrl = `/${tabId}`;
         window.history.pushState({ path: newUrl }, '', newUrl);
     };
 
@@ -130,10 +141,10 @@ function App() {
         return () => { unsubOrders(); unsubInv(); unsubLoc(); unsubExp(); };
     }, [user]);
 
-    // CRUD
     const handleUpdateStatus = async (orderId, newStatus, extraData = {}) => {
         const order = orders.find(o => o.id === orderId);
         if (!order) return;
+        
         if (newStatus === 'Cancelled' && order.status !== 'Cancelled') for (const p of order.products) await updateInventoryStock(p.code, p.size, Number(p.qty), inventory);
         if (newStatus === 'Confirmed' && order.status === 'Cancelled') for (const p of order.products) await updateInventoryStock(p.code, p.size, -Number(p.qty), inventory);
         if (newStatus === 'Returned' && order.status !== 'Returned') for (const p of order.products) await updateInventoryStock(p.code, p.size, Number(p.qty), inventory);
@@ -141,12 +152,28 @@ function App() {
         
         try {
             const orderRef = doc(db, 'artifacts', appId, 'public', 'data', 'orders', orderId);
+            
             if (newStatus === 'Confirmed' && extraData.isUnhold) {
                 extraData.createdAt = serverTimestamp();
                 delete extraData.isUnhold;
             }
-            const historyEntry = { status: newStatus, timestamp: new Date().toISOString(), note: extraData.note || '', updatedBy: user?.displayName || 'System' };
-            await updateDoc(orderRef, { status: newStatus, ...extraData, history: arrayUnion(historyEntry) });
+
+            const cleanExtraData = Object.fromEntries(
+                Object.entries(extraData).filter(([_, v]) => v !== undefined)
+            );
+
+            const historyEntry = { 
+                status: newStatus, 
+                timestamp: new Date().toISOString(), 
+                note: cleanExtraData.note || '', 
+                updatedBy: user?.displayName || 'System' 
+            };
+
+            await updateDoc(orderRef, { 
+                status: newStatus, 
+                ...cleanExtraData, 
+                history: arrayUnion(historyEntry) 
+            });
         } catch (err) { console.error(err); }
     };
 
@@ -187,13 +214,12 @@ function App() {
             case 'store-sales': return <StoreSales orders={orders.filter(o => o.type === 'Store')} {...orderProps} />;
             case 'exchange': return <ExchangeTab orders={orders.filter(o => o.type === 'Online' && (o.status === 'Exchanged' || o.exchangeDetails))} />;
             
-            // --- FIX IS HERE: INCLUDE 'Returned' IN FILTER ---
             case 'cancelled': 
                 return <CancelledOrders 
                     orders={orders.filter(o => o.type === 'Online' && (o.status === 'Cancelled' || o.status === 'Returned'))} 
                     onUpdate={handleUpdateStatus} 
-                    onDelete={handleDeleteOrder} // Passed delete handler
-                    onEdit={handleEditOrderWithStock} // Passed edit handler
+                    onDelete={handleDeleteOrder} 
+                    onEdit={handleEditOrderWithStock} 
                 />;
             
             case 'online-sales': return <OnlineSalesTab {...orderProps} />;

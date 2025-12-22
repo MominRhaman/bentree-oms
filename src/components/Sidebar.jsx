@@ -24,7 +24,6 @@ const Sidebar = ({ activeTab, setActiveTab, userRole, onLogout, user, setUser, i
         { id: 'monthly-profit', label: 'Monthly Profit', icon: PieChart, roles: ['master'] },
     ];
 
-    const FAVICON_IMG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAA4AAAAQCAMAAAARSr4IAAAATlBMVEVHcEwjICBwbm7NzMy5t7f///+xsbF0cnLz8fFdXFzCwsK/vb2Vk5OqtqwjICDW1NTLy8sfjEfh4+KrqqpfmW0LpVA/lVmjo6MjICCNi4szkx4hAAAAGnRSTlMAIDDnv/+vW/9A38+A/xDv////n////99Azyg4CxwAAABoSURBVHgBVY7FAcAwDMRCKjN3/0GLQSUGvc7CIkWM0okbssjygqIMWgG1twZayK11PcM40Xe/zrCsCzSflQXtuq4tk/xDiu3RrcC8ITANL19YpwlUQjYv+7B/0x9pbOjxcg7nN8VBzA3aTwXP2BFpKAAAAABJRU5ErkJggg==";
     const menuItems = allItems.filter(item => item.roles.includes(userRole));
 
     const handleImageUpload = (e) => {
@@ -41,7 +40,7 @@ const Sidebar = ({ activeTab, setActiveTab, userRole, onLogout, user, setUser, i
         }
     };
 
-    const displayImage = user?.photoURL || FAVICON_IMG;
+    const displayImage = user?.photoURL;
 
     return (
         <>
@@ -67,12 +66,19 @@ const Sidebar = ({ activeTab, setActiveTab, userRole, onLogout, user, setUser, i
                 <div className="p-6 border-b border-slate-800">
                     <div className="flex items-center gap-3 mb-4">
                         <div className="relative group cursor-pointer" onClick={() => fileInputRef.current.click()}>
-                            <img
-                                src={displayImage}
-                                alt="Profile"
-                                referrerPolicy="no-referrer"
-                                className="w-12 h-12 rounded-full object-cover border-2 border-emerald-500 shadow-md bg-white"
-                            />
+                            {displayImage ? (
+                                <img
+                                    src={displayImage}
+                                    alt="Profile"
+                                    referrerPolicy="no-referrer"
+                                    className="w-12 h-12 rounded-full object-cover border-2 border-emerald-500 shadow-md bg-white"
+                                />
+                            ) : (
+                                <div className="w-12 h-12 rounded-full bg-slate-700 border-2 border-slate-600 flex items-center justify-center">
+                                    <Camera size={20} className="text-slate-400" />
+                                </div>
+                            )}
+                            
                             <div className="absolute inset-0 bg-black bg-opacity-50 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                                 <Camera size={16} className="text-white" />
                             </div>
@@ -101,10 +107,22 @@ const Sidebar = ({ activeTab, setActiveTab, userRole, onLogout, user, setUser, i
                     {menuItems.map((item) => (
                         <a
                             key={item.id}
-                            href={`?tab=${item.id}`} // Tells new tab which page to load
-                            target="_blank"          // Forces new tab
-                            rel="noopener noreferrer" // Security best practice
-                            onClick={() => onClose()} // Closes mobile menu if open
+                            href={`/${item.id}`} // UPDATED: Path based URL
+                            onClick={(e) => {
+                                // 1. Check if CTRL (Windows) or META (Mac Command) key is pressed
+                                if (e.ctrlKey || e.metaKey) {
+                                    return; // Let browser open new tab
+                                }
+                                
+                                // 2. Normal Click
+                                e.preventDefault();
+                                setActiveTab(item.id);
+                                onClose(); 
+
+                                // 3. Update URL with clean path
+                                const newUrl = `/${item.id}`;
+                                window.history.pushState({ path: newUrl }, '', newUrl);
+                            }}
                             className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors cursor-pointer text-decoration-none ${activeTab === item.id
                                 ? 'bg-emerald-600 text-white shadow-lg'
                                 : 'text-slate-300 hover:bg-slate-800'

@@ -154,7 +154,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                 }
             }
 
-            // --- FIX: Inventory Automation (Return Old -> Deduct New) ---
+            // --- Inventory Automation ---
             if (inventory.length > 0) {
                 // 1. Return Original Items to Stock
                 for (const p of (order.products || [])) {
@@ -183,8 +183,10 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
             
             const sanitizedOrder = sanitizeForFirebase(rawUpdatedOrder);
 
-            // Pass ID, Status (optional depending on your func signature), and Data
-            onEdit(order.id, statusToSave, sanitizedOrder);
+            // --- FIX: ALWAYS CALL WITH 2 ARGUMENTS (id, data) ---
+            // This ensures it works with 'handleEditOrderWithStock' in App.jsx
+            // The 'status' is already inside 'sanitizedOrder', so it will be updated correctly.
+            onEdit(order.id, sanitizedOrder);
             
             setIsEditing(false);
             if (isReturnMode) onClose();
@@ -215,7 +217,8 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
             ]
         };
         
-        onEdit(order.id, 'Pending', sanitizeForFirebase(recalculateTotals(reorderUpdate)));
+        // FIX: Call with 2 arguments here as well
+        onEdit(order.id, sanitizeForFirebase(recalculateTotals(reorderUpdate)));
         setIsEditing(false);
         onClose();
     };
@@ -299,7 +302,6 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                                     <p className="font-medium">{order.type}</p>
                                 </div>
                                 
-                                {/* FIX: Added Order ID Editing */}
                                 <div className="col-span-2">
                                     <p className="text-slate-500 text-xs">Order ID</p>
                                     {isEditing ? (
@@ -316,7 +318,6 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                                     )}
                                 </div>
 
-                                {/* FIX: Added Check Out Status Editing */}
                                 <div className="col-span-2">
                                     <p className="text-slate-500 text-xs">Check Out Status</p>
                                     {isEditing ? (
@@ -384,8 +385,6 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                                                 <div className="flex gap-2">
                                                     <div className="w-20">
                                                         <label className="text-[10px] text-slate-400 font-bold uppercase sm:hidden">Size</label>
-                                                        
-                                                        {/* FIX: Size Dropdown */}
                                                         {availableSizes.length > 0 ? (
                                                             <select 
                                                                 className="w-full p-2 border rounded text-sm bg-white"

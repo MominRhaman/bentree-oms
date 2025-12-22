@@ -72,18 +72,53 @@ const MonthlyProfitTab = ({ orders, inventory, expenses }) => {
         // 1. Filter Orders for Month/Year
         const monthlyOrders = orders.filter(o => {
             const d = new Date(o.date);
-            return d.getMonth() === Number(month) &&
-                   d.getFullYear() === Number(year) &&
-                   o.status !== 'Cancelled' &&
-                   o.status !== 'Returned';
+            return d.getMonth() === Number(month) && d.getFullYear() === Number(year);
         });
 
-        // 2. Calculate Revenue
-        const revenue = monthlyOrders.reduce((acc, o) => acc + (Number(o.grandTotal) || 0), 0);
+        // 2. Identify Groups for Calculation
+        // Group A: Revenue Generators (Delivered Online + Valid Store)
+        const revenueOrders = monthlyOrders.filter(o => {
+            if (o.type === 'Online') return o.status === 'Delivered';
+            if (o.type === 'Store') return o.status !== 'Cancelled' && o.status !== 'Returned';
+            return false;
+        });
 
-        // 3. Calculate COGS (Cost of Goods Sold)
+        // Group B: Loss Generators (Returned Online orders)
+        const returnOrders = monthlyOrders.filter(o => o.type === 'Online' && o.status === 'Returned');
+
+        // 3. Calculate Online Net Sales (EXCLUDING Delivery Income)
+        // This matches "Net Product Sales" from Sales Reports
+        const onlineNetSales = revenueOrders
+            .filter(o => o.type === 'Online')
+            .reduce((acc, o) => {
+                const grandTotal = Number(o.grandTotal) || 0;
+                const delivery = Number(o.deliveryCharge) || 0;
+                // Subtract delivery to get pure product revenue (Net Sales)
+                return acc + (grandTotal - delivery);
+            }, 0);
+
+        // 4. Calculate Store Sales
+        const storeSales = revenueOrders
+            .filter(o => o.type === 'Store')
+            .reduce((acc, o) => acc + (Number(o.grandTotal) || 0), 0);
+
+        // 5. Calculate Return Delivery Loss
+        // If deliveryCharge is 0 on a return, it means we lost the original shipping cost.
+        const returnLoss = returnOrders.reduce((acc, o) => {
+            const currentCharge = Number(o.deliveryCharge) || 0;
+            if (currentCharge === 0) {
+                return acc + (Number(o.originalDeliveryCharge) || 0);
+            }
+            return acc;
+        }, 0);
+
+        // 6. Total Revenue = "Total Cash In" from Sales Reports
+        // Formula: (Online Net Sales + Store Sales) - Return Loss
+        const totalRevenue = (onlineNetSales + storeSales) - returnLoss;
+
+        // 7. Calculate COGS (Cost of Goods Sold) - Only for sold/delivered items
         let cogs = 0;
-        monthlyOrders.forEach(o => {
+        revenueOrders.forEach(o => {
             (o.products || []).forEach(p => {
                 if (p.code) {
                     const invItem = inventory.find(i => i.code.toUpperCase() === p.code.toUpperCase());
@@ -94,17 +129,20 @@ const MonthlyProfitTab = ({ orders, inventory, expenses }) => {
             });
         });
 
-        // 4. Calculate Operating Expenses
+        // 8. Calculate Operating Expenses
         const totalExp = EXPENSE_FIELDS.reduce((acc, key) => {
             const val = newExpense[key];
             return acc + (Number(val) || 0);
         }, 0);
 
         return {
-            revenue,
+            onlineNetSales,
+            storeSales,
+            returnLoss,
+            totalRevenue,
             cogs,
             totalExp,
-            netProfit: revenue - cogs - totalExp
+            netProfit: totalRevenue - cogs - totalExp
         };
     }, [orders, inventory, newExpense, month, year]);
 
@@ -115,7 +153,9 @@ const MonthlyProfitTab = ({ orders, inventory, expenses }) => {
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-4 rounded-xl shadow-sm border border-slate-200">
                <div>
                 <h2 className="text-xl font-bold text-slate-800">Monthly Profit & Loss</h2>
-                <p className="text-xs text-slate-500">Live reports summary by date</p>
+                <p className="text-xs text-slate-500">
+                    Revenue source: <strong>Total Cash In</strong> (from Sales Reports). Excludes delivery income.
+                </p>
                 </div> 
                 
                 <div className="flex gap-2 w-full md:w-auto">
@@ -181,21 +221,41 @@ const MonthlyProfitTab = ({ orders, inventory, expenses }) => {
                     <h3 className="font-bold text-slate-700 mb-4 border-b pb-2">Financial Overview</h3>
                     
                     <div className="space-y-4">
-                        <div className="flex justify-between items-center p-3 bg-emerald-50 rounded-lg border border-emerald-100">
-                            <span className="text-emerald-800 font-medium">Total Revenue (Sales)</span>
-                            <span className="text-emerald-800 font-bold text-lg">৳{financials.revenue.toLocaleString()}</span>
+                        
+                        {/* Breakdown */}
+                        <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-2">
+                            <div className="flex justify-between items-center text-sm text-slate-600">
+                                <span>Online Sales (Product Only)</span>
+                                <span className="font-medium text-emerald-600">+ ৳{financials.onlineNetSales.toLocaleString()}</span>
+                            </div>
+                            <div className="flex justify-between items-center text-sm text-slate-600">
+                                <span>Store Sales</span>
+                                <span className="font-medium text-purple-600">+ ৳{financials.storeSales.toLocaleString()}</span>
+                            </div>
+                            <div className="flex justify-between items-center text-sm text-slate-600">
+                                <span>Return Delivery Loss</span>
+                                <span className="font-medium text-red-500">- ৳{financials.returnLoss.toLocaleString()}</span>
+                            </div>
+                            <div className="border-t border-slate-200 my-1"></div>
+                            <div className="flex justify-between items-center">
+                                <span className="text-emerald-800 font-bold">Total Revenue (Sales)</span>
+                                <span className="text-emerald-800 font-bold text-lg">৳{financials.totalRevenue.toLocaleString()}</span>
+                            </div>
                         </div>
                         
+                        {/* COGS */}
                         <div className="flex justify-between items-center p-3 bg-red-50 rounded-lg border border-red-100">
                             <span className="text-red-800 font-medium">Cost of Goods Sold (COGS)</span>
                             <span className="text-red-800 font-bold text-lg">- ৳{financials.cogs.toLocaleString()}</span>
                         </div>
                         
+                        {/* Expenses */}
                         <div className="flex justify-between items-center p-3 bg-orange-50 rounded-lg border border-orange-100">
                             <span className="text-orange-800 font-medium">Operating Expenses</span>
                             <span className="text-orange-800 font-bold text-lg">- ৳{financials.totalExp.toLocaleString()}</span>
                         </div>
                         
+                        {/* Net Profit */}
                         <div className="border-t pt-4 mt-4 flex justify-between items-center">
                             <span className="text-lg font-bold text-slate-800">Net Monthly Profit</span>
                             <span className={`text-2xl font-bold ${financials.netProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
