@@ -1,11 +1,12 @@
 import React, { useState, useMemo } from 'react';
-import { Calendar, Download, AlertTriangle, CheckCircle, ArrowRightLeft, PauseCircle, Ban, X, RotateCcw } from 'lucide-react';
+import { Calendar, Download, AlertTriangle, CheckCircle, ArrowRightLeft, PauseCircle, Ban, X, RotateCcw, Trash2 } from 'lucide-react';
 import OrderDetailsPopup from './OrderDetailsPopup';
 import SearchBar from './SearchBar';
 import ExchangeModal from './ExchangeModal';
 import { getStatusColor, downloadCSV } from '../utils';
 
-const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, inventory }) => {
+// ADDED: onDelete prop
+const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, inventory }) => {
     // --- States ---
     const [filterDate, setFilterDate] = useState('');
     const [filterStatus, setFilterStatus] = useState('All');
@@ -15,7 +16,10 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, inventory }) => 
 
     // New Modals for Custom Logic
     const [deliveryModal, setDeliveryModal] = useState(null); 
-    const [returnPopupOrder, setReturnPopupOrder] = useState(null);    
+    const [returnPopupOrder, setReturnPopupOrder] = useState(null);
+    
+    // ADDED: Hold Modal State
+    const [holdModal, setHoldModal] = useState(null);
 
     // --- 1. Duplicate Logic ---
     const duplicateIds = useMemo(() => {
@@ -118,6 +122,22 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, inventory }) => 
         setDeliveryModal(null);
     };
 
+    // ADDED: Process Hold Handler
+    const processHold = (e) => {
+        e.preventDefault();
+        const remark = e.target.holdRemark.value.trim();
+        
+        if (!remark) {
+            alert("Please enter a remark to put this order on Hold.");
+            return;
+        }
+
+        onUpdate(holdModal.id, 'Hold', {
+            note: `Order put on Hold. Remarks: ${remark}`
+        });
+        setHoldModal(null);
+    };
+
     return (
         <div className="space-y-4">
             {/* Header Section */}
@@ -208,7 +228,6 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, inventory }) => 
                                                 <CheckCircle size={16} />
                                             </button>
                                             
-                                            {/* CHANGED: Return Button - Orange color and Undo Icon */}
                                             <button 
                                                 title="Mark as Returned" 
                                                 onClick={() => setReturnPopupOrder(order)} 
@@ -218,8 +237,47 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, inventory }) => 
                                             </button>
                                             
                                             <button title="Exchanged" onClick={() => setExchangeModal(order)} className="p-1.5 bg-yellow-100 text-yellow-700 rounded hover:bg-yellow-200"><ArrowRightLeft size={16} /></button>
-                                            <button title="Hold" onClick={() => onUpdate(order.id, 'Hold')} className="p-1.5 bg-purple-100 text-purple-700 rounded hover:bg-purple-200"><PauseCircle size={16} /></button>
-                                            <button title="Cancel Order" onClick={() => { if (confirm('Are you sure?')) onUpdate(order.id, 'Cancelled'); }} className="p-1.5 bg-red-100 text-red-700 rounded hover:bg-red-200"><Ban size={16} /></button>
+                                            
+                                            {/* CHANGED: Hold Button Triggers Modal */}
+                                            <button 
+                                                title="Hold" 
+                                                onClick={() => setHoldModal(order)} 
+                                                className="p-1.5 bg-purple-100 text-purple-700 rounded hover:bg-purple-200"
+                                            >
+                                                <PauseCircle size={16} />
+                                            </button>
+                                            
+                                            {/* CHANGED: Block Cancel if Delivered */}
+                                            <button 
+                                                title="Cancel Order" 
+                                                onClick={() => { 
+                                                    if (order.status === 'Delivered') {
+                                                        alert("Delivered orders cannot be Cancelled.");
+                                                        return;
+                                                    }
+                                                    if (confirm('Are you sure you want to Cancel this order?')) onUpdate(order.id, 'Cancelled'); 
+                                                }} 
+                                                className="p-1.5 bg-red-100 text-red-700 rounded hover:bg-red-200"
+                                            >
+                                                <Ban size={16} />
+                                            </button>
+
+                                            {/* ADDED: DELETE BUTTON */}
+                                            <button 
+                                                title="Delete Permanently" 
+                                                onClick={() => { 
+                                                    if (confirm('⚠️ Are you sure you want to PERMANENTLY DELETE this order? This cannot be undone.')) {
+                                                        if (onDelete) {
+                                                            onDelete(order.id);
+                                                        } else {
+                                                            alert("Delete function not connected!");
+                                                        }
+                                                    }
+                                                }} 
+                                                className="p-1.5 bg-slate-200 text-slate-700 rounded hover:bg-slate-300"
+                                            >
+                                                <Trash2 size={16} />
+                                            </button>
                                         </div>
                                     </td>
                                 </tr>
@@ -268,6 +326,36 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, inventory }) => 
                             </div>
 
                             <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded shadow-sm">Confirm Delivered</button>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* --- ADDED: Hold Confirmation Modal --- */}
+            {holdModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-bold text-purple-800 flex items-center gap-2">
+                                <PauseCircle size={20} /> Hold Order
+                            </h3>
+                            <button onClick={() => setHoldModal(null)}><X size={20} className="text-slate-400" /></button>
+                        </div>
+                        <form onSubmit={processHold} className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">Reason / Remarks</label>
+                                <textarea 
+                                    name="holdRemark" 
+                                    rows="3" 
+                                    placeholder="Why is this order on hold?" 
+                                    className="w-full p-2 border rounded text-sm focus:ring-1 focus:ring-purple-500 outline-none"
+                                    required
+                                    autoFocus
+                                />
+                            </div>
+                            <button type="submit" className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 rounded shadow-sm">
+                                Confirm Hold
+                            </button>
                         </form>
                     </div>
                 </div>

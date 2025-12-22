@@ -23,7 +23,7 @@ const SalesReports = ({ orders, inventory }) => {
         if (startDate) filteredOrders = filteredOrders.filter(o => o.date >= startDate);
         if (endDate) filteredOrders = filteredOrders.filter(o => o.date <= endDate);
         
-        // 2. Platform Filter (Updated to handle "Store")
+        // 2. Platform Filter
         if (platformFilter && platformFilter !== "") {
             if (platformFilter === 'Store') {
                 filteredOrders = filteredOrders.filter(o => o.type === 'Store');
@@ -45,34 +45,42 @@ const SalesReports = ({ orders, inventory }) => {
 
         const safeNum = (v) => Number(v) || 0;
 
-        // 4. Identify "Realized" Orders (Actual Money In)
-        const onlineDelivered = filteredOrders.filter(o => o.type === 'Online' && o.status === 'Delivered');
-        
-        // FIX: Store Logic - Include anything that is NOT Cancelled/Returned
-        const storeRealized = filteredOrders.filter(o => 
-            o.type === 'Store' && 
-            (o.status || '').toLowerCase() !== 'cancelled' && 
-            (o.status || '').toLowerCase() !== 'returned'
+        // 4. Identify Orders (Using case-insensitive check for robustness)
+        const onlineDelivered = filteredOrders.filter(o => 
+            o.type === 'Online' && (o.status || '').toLowerCase() === 'delivered'
+        );
+        const returns = filteredOrders.filter(o => 
+            o.type === 'Online' && (o.status || '').toLowerCase() === 'returned'
         );
 
-        const returns = filteredOrders.filter(o => o.type === 'Online' && o.status === 'Returned');
+        // 5. Generate Table Rows & Calculate Totals
+        const realizedOrders = filteredOrders.filter(o => {
+            const status = (o.status || '').toLowerCase();
+            const isOnlineDelivered = o.type === 'Online' && status === 'delivered';
+            const isStoreValid = o.type === 'Store' && status !== 'cancelled' && status !== 'returned';
+            
+            return isOnlineDelivered || isStoreValid;
+        });
 
-        // 5. Generate Table Rows
         const data = [];
-        const realizedOrders = [...onlineDelivered, ...storeRealized];
+        let totalDiscount = 0; 
 
         realizedOrders.forEach(order => {
             const orderId = order.type === 'Store' ? order.storeOrderId : order.merchantOrderId;
-            
-            // Set "Store" as sales source for Store orders so it shows in the column
             const salesBy = order.type === 'Store' ? 'Store' : (order.orderSource || 'Online');
-            
             const addedBy = order.addedBy || 'System';
 
             const orderSubtotal = safeNum(order.subtotal);
-            const orderDiscount = safeNum(order.discountValue);
-            const revenueAdjustment = Math.abs(safeNum(order.revenueAdjustment)); 
             
+            // --- Discount Calculation ---
+            let orderDiscount = safeNum(order.discountValue);
+            if (order.discountType === 'Percent') {
+                orderDiscount = orderSubtotal * (orderDiscount / 100);
+            }
+            
+            totalDiscount += orderDiscount;
+
+            const revenueAdjustment = Math.abs(safeNum(order.revenueAdjustment)); 
             const totalDeductions = orderDiscount + revenueAdjustment;
 
             (order.products || []).forEach(prod => {
@@ -127,9 +135,32 @@ const SalesReports = ({ orders, inventory }) => {
         // 6. Calculate Stats
         const netProductSales = data.filter(d => d.type === 'Online').reduce((acc, item) => acc + item.revenue, 0);
         const storeSales = data.filter(d => d.type === 'Store').reduce((acc, item) => acc + item.revenue, 0);
-        const deliveryIncome = onlineDelivered.reduce((acc, o) => acc + safeNum(o.deliveryCharge), 0);
-        const returnDeliveryLoss = returns.reduce((acc, o) => !o.isDeliveryFeeReceived ? acc + safeNum(o.deliveryCharge) : acc, 0);
-        const totalRevenue = (netProductSales + storeSales + deliveryIncome) - returnDeliveryLoss;
+        
+        // --- UPDATED DELIVERY LOGIC START ---
+        
+        // A. Baseline Income: Only count Delivered orders
+        let deliveryIncome = onlineDelivered.reduce((acc, o) => acc + safeNum(o.deliveryCharge), 0);
+        let returnDeliveryLoss = 0;
+
+        // B. Process Returns Logic
+        returns.forEach(o => {
+            const currentCharge = safeNum(o.deliveryCharge);
+
+            if (currentCharge > 0) {
+                // If delivery charge exists (>0), it means it was paid. Add to Income.
+                deliveryIncome += currentCharge;
+            } else {
+                // If delivery charge is 0, we take the ORIGINAL charge and add to Loss.
+                // NOTE: This requires 'originalDeliveryCharge' to exist in your database object.
+                const originalCharge = safeNum(o.originalDeliveryCharge);
+                returnDeliveryLoss += originalCharge;
+            }
+        });
+        
+        // --- UPDATED DELIVERY LOGIC END ---
+
+        // Total Cash In = (Net Online Sales + Store Sales) - Return Loss
+        const totalRevenue = (netProductSales + storeSales) - returnDeliveryLoss;
 
         const totals = data.reduce((acc, row) => ({
             unitSold: acc.unitSold + row.unitSold,
@@ -138,7 +169,7 @@ const SalesReports = ({ orders, inventory }) => {
         }), { unitSold: 0, revenue: 0, profitLoss: 0 });
 
         return {
-            stats: { netProductSales, storeSales, deliveryIncome, returnDeliveryLoss, totalRevenue },
+            stats: { netProductSales, storeSales, deliveryIncome, returnDeliveryLoss, totalRevenue, totalDiscount },
             salesData: data,
             totals
         };
@@ -168,29 +199,41 @@ const SalesReports = ({ orders, inventory }) => {
             </div>
 
             {/* Summary Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
                 <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100 shadow-sm">
                     <h3 className="text-slate-500 font-bold text-xs mb-1 uppercase">Net Online Sales</h3>
                     <p className="text-xl font-bold text-emerald-700">৳{stats.netProductSales.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</p>
                     <p className="text-[10px] text-emerald-600/70 mt-1">Delivered Items</p>
                 </div>
+                
                 <div className="bg-purple-50 p-4 rounded-xl border border-purple-100 shadow-sm">
                     <h3 className="text-slate-500 font-bold text-xs mb-1 uppercase">Store Sales</h3>
                     <p className="text-xl font-bold text-purple-700">৳{stats.storeSales.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</p>
                     <p className="text-[10px] text-purple-600/70 mt-1">Completed Items</p>
                 </div>
+                
                 <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 shadow-sm">
                     <h3 className="text-slate-500 font-bold text-xs mb-1 uppercase">Delivery Income</h3>
                     <p className="text-xl font-bold text-blue-700">৳{stats.deliveryIncome.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</p>
+                    <p className="text-[10px] text-blue-600/70 mt-1">Net Delivery Earnings</p>
                 </div>
+
+                <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 shadow-sm">
+                    <h3 className="text-slate-500 font-bold text-xs mb-1 uppercase">Total Discount</h3>
+                    <p className="text-xl font-bold text-orange-700">৳{stats.totalDiscount.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</p>
+                    <p className="text-[10px] text-orange-600/70 mt-1">Given to Customers</p>
+                </div>
+                
                 <div className="bg-red-50 p-4 rounded-xl border border-red-100 shadow-sm">
                     <h3 className="text-slate-500 font-bold text-xs mb-1 uppercase">Return Loss</h3>
                     <p className="text-xl font-bold text-red-700">৳{stats.returnDeliveryLoss.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</p>
                     <p className="text-[10px] text-red-600/70 mt-1">Unpaid Delivery Fees</p>
                 </div>
+                
                 <div className="bg-slate-100 p-4 rounded-xl border border-slate-200 shadow-sm">
                     <h3 className="text-slate-500 font-bold text-xs mb-1 uppercase">Total Cash In</h3>
                     <p className="text-xl font-bold text-slate-800">৳{stats.totalRevenue.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</p>
+                    <p className="text-[10px] text-slate-500/70 mt-1">Online + Store - Returns</p>
                 </div>
             </div>
 
@@ -203,7 +246,7 @@ const SalesReports = ({ orders, inventory }) => {
                             <SearchBar searchTerm={searchTerm} setSearchTerm={setSearchTerm} placeholder="Search product, phone, or ID..." />
                         </div>
                         
-                        {/* PLATFORM FILTER WITH STORE OPTION */}
+                        {/* PLATFORM FILTER */}
                         <div className="relative">
                             <select
                                 className="p-2 pl-8 border rounded text-sm bg-white outline-none w-full md:w-40 appearance-none cursor-pointer hover:border-emerald-400 transition-colors"
@@ -211,7 +254,7 @@ const SalesReports = ({ orders, inventory }) => {
                                 onChange={e => setPlatformFilter(e.target.value)}
                             >
                                 <option value="">All Platforms</option>
-                                <option value="Store">Store Sales</option> {/* NEW OPTION */}
+                                <option value="Store">Store Sales</option>
                                 <option value="Facebook">Facebook</option>
                                 <option value="Instagram">Instagram</option>
                                 <option value="Whatsapp">Whatsapp</option>

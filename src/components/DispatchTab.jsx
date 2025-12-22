@@ -19,7 +19,8 @@ const DispatchTab = ({ orders, onUpdate }) => {
             Date: o.date,
             Products: (o.products || []).map(p => `${p.code}-${p.size} (x${p.qty})`).join(' | '),
             Phone: o.recipientPhone ? `'${o.recipientPhone}` : '',
-            SpecialInstructions: o.specialInstructions
+            SpecialInstructions: o.specialInstructions,
+            Remarks: o.dispatchRemark || '' // Added Remarks to export
         }));
         downloadCSV(data, 'dispatch_sheet.csv');
     };
@@ -68,6 +69,7 @@ const DispatchTab = ({ orders, onUpdate }) => {
                             <th className="p-3">Order Info</th>
                             <th className="p-3">Product Details (Code/Size/Qty)</th>
                             <th className="p-3">Instructions</th>
+                            <th className="p-3">Remarks</th> {/* Added Header */}
                             <th className="p-3">Action</th>
                         </tr>
                     </thead>
@@ -81,6 +83,20 @@ const DispatchTab = ({ orders, onUpdate }) => {
                                 </td>
                                 <td className="p-3">{(order.products || []).map((p, i) => (<div key={i} className="font-mono bg-slate-100 inline-block px-2 py-1 rounded mr-2 mb-1">{p.code} / {p.size} / Qty: {p.qty}</div>))}</td>
                                 <td className="p-3 text-xs italic max-w-xs">{order.specialInstructions || 'None'}</td>
+                                
+                                {/* Added Remarks Column */}
+                                <td className="p-3">
+                                    <input
+                                        type="text"
+                                        placeholder="Reason / Note..."
+                                        className="border rounded px-2 py-1 text-xs w-full focus:ring-1 focus:ring-blue-500 outline-none bg-white"
+                                        defaultValue={order.dispatchRemark || ''}
+                                        // Save to DB on Blur (clicking away) to avoid re-renders while typing
+                                        onBlur={(e) => onUpdate(order.id, order.status, { dispatchRemark: e.target.value })}
+                                        onClick={(e) => e.stopPropagation()}
+                                    />
+                                </td>
+
                                 <td className="p-3">
                                     {order.status === 'Confirmed' || order.status === 'Exchanged' ? (
                                         <button onClick={() => onUpdate(order.id, 'Dispatched')} className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700">Confirm Dispatch</button>

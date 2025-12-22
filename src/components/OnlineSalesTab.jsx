@@ -33,16 +33,23 @@ const OnlineSalesTab = ({ orders, inventory, onEdit, onDelete }) => {
 
         filtered.forEach(order => {
             // STRICT FILTER: Only 'Delivered' ONLINE orders
-            // 
             if (order.type !== 'Online' || order.status !== 'Delivered') return;
 
             const orderId = order.merchantOrderId;
             const salesBy = order.orderSource;
             const addedBy = order.addedBy || 'System';
+            const phone = order.recipientPhone || '-'; // Phone Added
+            const checkOutStatus = order.checkOutStatus || 'Pending'; // Check Out Status Added
 
             // Discount & Adjustment Calculations
             const orderSubtotal = safeNum(order.subtotal);
-            const orderDiscount = safeNum(order.discountValue);
+            
+            // --- FIX: Handle Percentage Discount ---
+            let orderDiscount = safeNum(order.discountValue);
+            if (order.discountType === 'Percent') {
+                orderDiscount = orderSubtotal * (orderDiscount / 100);
+            }
+
             const orderAdj = safeNum(order.revenueAdjustment);
             const totalDeduction = orderDiscount + Math.abs(orderAdj);
 
@@ -77,6 +84,8 @@ const OnlineSalesTab = ({ orders, inventory, onEdit, onDelete }) => {
                     id: order.id,
                     date: order.date,
                     orderId: orderId,
+                    phone: phone, // Pass phone
+                    checkOutStatus: checkOutStatus, // Pass status
                     code: prod.code,
                     category: category,
                     unitStock: currentStock,
@@ -106,6 +115,8 @@ const OnlineSalesTab = ({ orders, inventory, onEdit, onDelete }) => {
         const csvData = salesData.map(row => ({
             Date: row.date,
             'Order ID': row.orderId,
+            'Phone Number': row.phone, // Export Phone
+            'Check Out': row.checkOutStatus, // Export Check Out
             Code: row.code,
             Category: row.category,
             'Unit Sold': row.unitSold,
@@ -159,6 +170,8 @@ const OnlineSalesTab = ({ orders, inventory, onEdit, onDelete }) => {
                         <thead className="bg-white font-bold border-b text-slate-600 sticky top-0 z-10 shadow-sm">
                             <tr>
                                 <th className="p-3 bg-slate-50">Code</th>
+                                <th className="p-3 bg-slate-50">Phone Number</th> {/* Added Header */}
+                                <th className="p-3 bg-slate-50">Check Out</th> {/* Added Header */}
                                 <th className="p-3 bg-slate-50">Category</th>
                                 <th className="p-3 bg-slate-50 text-center">Unit (Stock)</th>
                                 <th className="p-3 bg-slate-50 text-right">Cost (Unit)</th>
@@ -178,6 +191,14 @@ const OnlineSalesTab = ({ orders, inventory, onEdit, onDelete }) => {
                                         <div className="text-xs text-slate-400">{row.date}</div>
                                         <div className="text-[10px] text-slate-500">{row.orderId}</div>
                                     </td>
+                                    {/* Added Phone Column */}
+                                    <td className="p-3 text-slate-600 font-mono text-xs">{row.phone}</td>
+                                    {/* Added Check Out Column */}
+                                    <td className="p-3">
+                                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${row.checkOutStatus === 'Completed' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
+                                            {row.checkOutStatus}
+                                        </span>
+                                    </td>
                                     <td className="p-3 text-slate-600">{row.category}</td>
                                     <td className="p-3 text-center text-slate-600">{row.unitStock}</td>
                                     <td className="p-3 text-right text-slate-600">৳{row.costUnit.toFixed(2)}</td>
@@ -196,7 +217,7 @@ const OnlineSalesTab = ({ orders, inventory, onEdit, onDelete }) => {
                             ))}
                             {salesData.length === 0 && (
                                 <tr>
-                                    <td colSpan="10" className="p-10 text-center text-slate-400">
+                                    <td colSpan="12" className="p-10 text-center text-slate-400">
                                         No delivered online sales found for this period.
                                     </td>
                                 </tr>
@@ -206,7 +227,7 @@ const OnlineSalesTab = ({ orders, inventory, onEdit, onDelete }) => {
                         {/* Sticky Footer */}
                         <tfoot className="sticky bottom-0 bg-slate-100 border-t-2 border-slate-200 font-bold text-slate-700 z-10 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
                             <tr>
-                                <td className="p-3 text-right uppercase text-xs text-slate-500" colSpan="4">TOTALS</td>
+                                <td className="p-3 text-right uppercase text-xs text-slate-500" colSpan="6">TOTALS</td>
                                 <td className="p-3 text-center">{totals.unitSold}</td>
                                 <td className="p-3 text-right text-emerald-800">৳{totals.revenue.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
                                 <td className={`p-3 text-right ${totals.profitLoss >= 0 ? 'text-emerald-800' : 'text-red-700'}`}>

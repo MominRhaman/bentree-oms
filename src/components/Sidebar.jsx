@@ -15,7 +15,7 @@ const Sidebar = ({ activeTab, setActiveTab, userRole, onLogout, user, setUser, i
         { id: 'dispatch', label: 'Dispatch Info', icon: Truck, roles: ['master', 'employee', 'qmt'] },
         { id: 'hold', label: 'Hold Orders', icon: PauseCircle, roles: ['master', 'employee', 'qmt'] },
         { id: 'exchange', label: 'Exchange Orders', icon: ArrowRightLeft, roles: ['master', 'employee', 'qmt'] },
-        { id: 'cancelled', label: 'Cancelled Orders', icon: Ban, roles: ['master', 'employee', 'qmt'] },
+        { id: 'cancelled', label: 'Cancel & Return', icon: Ban, roles: ['master', 'employee', 'qmt'] },
         { id: 'inventory', label: 'Inventory', icon: Layers, roles: ['master', 'employee'] },
         { id: 'stock-location', label: 'Stock Location', icon: MapPin, roles: ['master', 'employee'] },
         { id: 'online-sales', label: 'Online Sales', icon: Globe, roles: ['master', 'employee'] },
@@ -99,17 +99,20 @@ const Sidebar = ({ activeTab, setActiveTab, userRole, onLogout, user, setUser, i
 
                 <nav className="flex-1 p-4 space-y-2">
                     {menuItems.map((item) => (
-                        <button
+                        <a
                             key={item.id}
-                            onClick={() => { setActiveTab(item.id); onClose(); }} // Close menu on selection (mobile)
-                            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === item.id
+                            href={`?tab=${item.id}`} // Tells new tab which page to load
+                            target="_blank"          // Forces new tab
+                            rel="noopener noreferrer" // Security best practice
+                            onClick={() => onClose()} // Closes mobile menu if open
+                            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors cursor-pointer text-decoration-none ${activeTab === item.id
                                 ? 'bg-emerald-600 text-white shadow-lg'
                                 : 'text-slate-300 hover:bg-slate-800'
                                 }`}
                         >
                             <item.icon size={20} />
                             <span className="font-medium">{item.label}</span>
-                        </button>
+                        </a>
                     ))}
                 </nav>
 

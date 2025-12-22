@@ -1,21 +1,32 @@
 import React, { useState, useMemo } from 'react';
 import { Calendar, Download, Trash2, RefreshCw, Ban } from 'lucide-react';
+import { doc, deleteDoc } from "firebase/firestore"; 
+import { getStatusColor, downloadCSV } from '../utils';
+
+// ⚠️ IMPORTANT: Check this path matches your project structure!
+// It usually points to where you initialized 'db'
+import { db } from "../firebase"; 
 import OrderDetailsPopup from './OrderDetailsPopup';
 import SearchBar from './SearchBar';
-import { getStatusColor, downloadCSV } from '../utils';
 
 const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit }) => {
     // --- States ---
     const [filterDate, setFilterDate] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedOrder, setSelectedOrder] = useState(null);
+    
+    // Local state to hide rows immediately after deletion
+    const [deletedIds, setDeletedIds] = useState(new Set());
 
-    // --- Filter Logic (Fixed: Broad Match) ---
+    // --- Filter Logic ---
     const filteredOrders = useMemo(() => {
         let res = orders.filter(o => {
+            // 1. Immediately hide items that were just deleted
+            if (deletedIds.has(o.id)) return false;
+
             if (!o.status) return false;
             const s = o.status.toLowerCase();
-            // CHECK ROOT WORDS: "return" catches Returned/Return, "cancel" catches Cancelled/Cancel
+            // Match 'returned', 'return', 'cancelled', 'cancel'
             return s.includes('return') || s.includes('cancel');
         });
         
@@ -31,7 +42,7 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit }) => {
             );
         }
         return res;
-    }, [orders, filterDate, searchTerm]);
+    }, [orders, filterDate, searchTerm, deletedIds]);
 
     // --- Handlers ---
     const handleExport = () => {
@@ -47,14 +58,40 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit }) => {
     };
 
     const handleRestore = (order) => {
-        if (confirm(`Restore order #${order.merchantOrderId || order.storeOrderId} to Pending?`)) {
+        if (window.confirm(`Restore order #${order.merchantOrderId || order.storeOrderId} to Pending?`)) {
             onUpdate(order.id, 'Pending', {
                 note: 'Restored from Cancelled/Returned'
             });
         }
     };
 
-    // Helper for badge color to ensure high visibility
+    // --- DELETE LOGIC ---
+    const processDelete = async (orderId) => {
+        // 1. Confirmation
+        const confirmed = window.confirm('⚠️ Are you sure you want to PERMANENTLY delete this order?\n\nThis cannot be undone.');
+        if (!confirmed) return;
+
+        try {
+            // 2. Delete from Firebase
+            await deleteDoc(doc(db, "orders", orderId));
+
+            // 3. Update UI immediately (Hide the row)
+            setDeletedIds(prev => {
+                const newSet = new Set(prev);
+                newSet.add(orderId);
+                return newSet;
+            });
+
+            // 4. Notify parent if prop exists (optional cleanup)
+            if (onDelete) onDelete(orderId);
+
+        } catch (error) {
+            console.error("Delete failed:", error);
+            alert("Error deleting order: " + error.message);
+        }
+    };
+
+    // Helper for badge color
     const getBadgeColor = (statusRaw) => {
         const s = (statusRaw || '').toLowerCase();
         if (s.includes('return')) return 'bg-red-100 text-red-800 border border-red-200';
@@ -131,17 +168,23 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit }) => {
                                     <div className="flex justify-center gap-2">
                                         {/* RESTORE BUTTON */}
                                         <button 
-                                            onClick={() => handleRestore(order)}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleRestore(order);
+                                            }}
                                             className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"
                                             title="Restore to Pending"
                                         >
                                             <RefreshCw size={16} />
                                         </button>
                                         
-                                        {/* CANCEL BUTTON (Hidden if already Cancelled) */}
+                                        {/* CANCEL BUTTON */}
                                         {!(order.status || '').toLowerCase().includes('cancel') && (
                                             <button 
-                                                onClick={() => { if(confirm('Mark as Cancelled?')) onUpdate(order.id, 'Cancelled'); }}
+                                                onClick={(e) => { 
+                                                    e.stopPropagation();
+                                                    if(window.confirm('Mark as Cancelled?')) onUpdate(order.id, 'Cancelled'); 
+                                                }}
                                                 className="p-1.5 text-orange-600 hover:bg-orange-50 rounded"
                                                 title="Mark as Cancelled"
                                             >
@@ -151,8 +194,11 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit }) => {
 
                                         {/* DELETE BUTTON */}
                                         <button 
-                                            onClick={() => { if(confirm('Permanently delete?')) onDelete(order.id); }}
-                                            className="p-1.5 text-red-600 hover:bg-red-50 rounded"
+                                            onClick={(e) => { 
+                                                e.stopPropagation(); 
+                                                processDelete(order.id); 
+                                            }}
+                                            className="p-1.5 text-red-600 hover:bg-red-50 rounded border border-red-200"
                                             title="Delete Permanently"
                                         >
                                             <Trash2 size={16} />

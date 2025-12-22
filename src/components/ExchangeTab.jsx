@@ -32,6 +32,7 @@ const ExchangeTab = ({ orders }) => {
                         <tbody className="divide-y divide-slate-100">
                             {orders.map(order => {
                                 const details = order.exchangeDetails || {};
+                                // This deviation now comes from the corrected formula in ExchangeModal
                                 const deviation = details.priceDeviation || 0;
                                 
                                 return (
@@ -57,8 +58,8 @@ const ExchangeTab = ({ orders }) => {
                                             ))}
                                         </td>
                                         <td className="p-3 text-right">
-                                            <span className={`px-2 py-1 rounded text-xs font-bold ${deviation > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                                                {deviation > 0 ? `Customer Paid: ৳${deviation}` : `Store Refunded: ৳${Math.abs(deviation)}`}
+                                            <span className={`px-2 py-1 rounded text-xs font-bold ${deviation >= 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                                {deviation >= 0 ? `Customer Paid: ৳${deviation}` : `Store Refunded: ৳${Math.abs(deviation)}`}
                                             </span>
                                         </td>
                                         <td className="p-3 text-center">

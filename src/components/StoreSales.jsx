@@ -1,10 +1,10 @@
 import React, { useState, useMemo } from 'react';
-import { Download, Filter, Edit, Trash2 } from 'lucide-react';
+import { Download, Filter, Edit, Trash2, CheckCircle } from 'lucide-react';
 import SearchBar from './SearchBar';
 import OrderDetailsPopup from './OrderDetailsPopup';
 import { INVENTORY_CATEGORIES, downloadCSV } from '../utils';
 
-const StoreSalesTab = ({ orders, inventory, onEdit, onDelete }) => {
+const StoreSalesTab = ({ orders, inventory, onUpdate, onDelete }) => {
     // --- Filter States ---
     const [searchTerm, setSearchTerm] = useState('');
     const [catFilter, setCatFilter] = useState('');
@@ -19,8 +19,6 @@ const StoreSalesTab = ({ orders, inventory, onEdit, onDelete }) => {
         const safeNum = (v) => Number(v) || 0;
 
         // 1. THE FIREWALL (PERMISSIVE MODE)
-        // Show everything that is TYPE=STORE, unless it's explicitly Cancelled or Returned.
-        // This ensures 'Delivered', 'Paid', 'Completed', or Empty statuses ALL show up.
         let processedOrders = (orders || []).filter(o => {
             const status = (o.status || '').toLowerCase();
             return (
@@ -50,9 +48,16 @@ const StoreSalesTab = ({ orders, inventory, onEdit, onDelete }) => {
             const orderId = order.storeOrderId;
             const paymentMode = order.storePaymentMode || 'Cash';
             const addedBy = order.addedBy || 'System';
+            const phone = order.recipientPhone || '-'; // Phone Added
+            const checkOutStatus = order.checkOutStatus || 'Pending'; // Check Out Status Added
 
             const orderSubtotal = safeNum(order.subtotal);
-            const orderDiscount = safeNum(order.discountValue);
+            
+            // --- FIX: Handle Percentage Discount ---
+            let orderDiscount = safeNum(order.discountValue);
+            if (order.discountType === 'Percent') {
+                orderDiscount = orderSubtotal * (orderDiscount / 100);
+            }
             
             (order.products || []).forEach(prod => {
                 const invItem = inventory.find(i => i.code.toUpperCase() === (prod.code || '').toUpperCase());
@@ -91,6 +96,8 @@ const StoreSalesTab = ({ orders, inventory, onEdit, onDelete }) => {
                     id: order.id,
                     date: order.date,
                     orderId: orderId,
+                    phone: phone, // Pass phone
+                    checkOutStatus: checkOutStatus, // Pass status
                     code: prod.code,
                     category: category,
                     unitStock: currentStock,
@@ -121,6 +128,8 @@ const StoreSalesTab = ({ orders, inventory, onEdit, onDelete }) => {
         const csvData = salesData.map(row => ({
             Date: row.date,
             'Store Order ID': row.orderId,
+            'Phone Number': row.phone, // Export Phone
+            'Check Out': row.checkOutStatus, // Export Check Out
             Code: row.code,
             Category: row.category,
             'Unit Sold': row.unitSold,
@@ -134,13 +143,8 @@ const StoreSalesTab = ({ orders, inventory, onEdit, onDelete }) => {
 
     return (
         <div className="space-y-6">
-            <div>
-                <h2 className="text-xl font-bold text-slate-800">Store Sales Dashboard</h2>
-                <p className="text-xs text-slate-500">Live sales summary by category</p>
-            </div>
-            
-            {/* Controls Section */}
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                {/* Header Controls */}
                 <div className="p-4 border-b bg-slate-50 flex flex-col md:flex-row md:justify-between md:items-center gap-4">
                     
                     {/* Left: Search & Category Filter */}
@@ -166,7 +170,6 @@ const StoreSalesTab = ({ orders, inventory, onEdit, onDelete }) => {
                     {/* Right: Date & Export */}
                     <div className="flex flex-col md:flex-row gap-2 w-full md:w-auto">
                         <div className="flex items-center bg-white border rounded px-2 py-1 gap-2 w-full md:w-auto justify-between md:justify-start">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase">History:</span>
                             <input type="date" className="text-xs outline-none text-slate-600 bg-transparent cursor-pointer" value={startDate} onChange={e => setStartDate(e.target.value)} />
                             <span className="text-slate-300">-</span>
                             <input type="date" className="text-xs outline-none text-slate-600 bg-transparent cursor-pointer" value={endDate} onChange={e => setEndDate(e.target.value)} />
@@ -187,6 +190,8 @@ const StoreSalesTab = ({ orders, inventory, onEdit, onDelete }) => {
                         <thead className="bg-white text-slate-600 font-bold border-b text-xs uppercase sticky top-0 z-10 shadow-sm">
                             <tr>
                                 <th className="p-3 bg-slate-50">Code</th>
+                                <th className="p-3 bg-slate-50">Phone Number</th> {/* Added Header */}
+                                <th className="p-3 bg-slate-50">Check Out</th> {/* Added Header */}
                                 <th className="p-3 bg-slate-50">Category</th>
                                 <th className="p-3 bg-slate-50 text-center">Stock</th>
                                 <th className="p-3 bg-slate-50 text-right">Cost</th>
@@ -206,6 +211,44 @@ const StoreSalesTab = ({ orders, inventory, onEdit, onDelete }) => {
                                         <div className="text-[10px] text-slate-400 font-normal">{row.date}</div>
                                         <div className="text-[10px] text-slate-500">{row.orderId}</div>
                                     </td>
+                                    {/* Added Phone Column */}
+                                    <td className="p-3 text-slate-600 font-mono text-xs">{row.phone}</td>
+                                    
+                                    {/* Check Out Column (Logic Updated to Hide ID if Completed) */}
+                                    <td className="p-3" onClick={(e) => e.stopPropagation()}>
+                                        <div className="flex flex-col gap-1 w-28">
+                                            
+                                            {/* Hide input if completed */}
+                                            {row.checkOutStatus !== 'Completed' && (
+                                                <input
+                                                    type="text"
+                                                    placeholder="Order ID"
+                                                    className="border rounded px-2 py-1 text-[10px] w-full focus:ring-1 focus:ring-emerald-500 outline-none"
+                                                    defaultValue={row.originalOrder.storeOrderId || ''}
+                                                    onBlur={(e) => onUpdate(row.id, row.originalOrder.status, { storeOrderId: e.target.value })}
+                                                />
+                                            )}
+                                            
+                                            {/* Show Complete Button ONLY if ID exists */}
+                                            {row.originalOrder.storeOrderId ? (
+                                                <button 
+                                                    onClick={() => onUpdate(row.id, row.originalOrder.status, { 
+                                                        checkOutStatus: row.checkOutStatus === 'Completed' ? 'Pending' : 'Completed' 
+                                                    })}
+                                                    className={`w-full py-1 px-1 rounded text-[10px] font-bold flex items-center justify-center gap-1
+                                                        ${row.checkOutStatus === 'Completed' 
+                                                            ? 'bg-green-100 text-green-700 border border-green-200' 
+                                                            : 'bg-slate-800 text-white shadow-sm'
+                                                        }`}
+                                                >
+                                                    {row.checkOutStatus === 'Completed' ? <><CheckCircle size={10} /> Done</> : 'Complete'}
+                                                </button>
+                                            ) : (
+                                                <div className="text-[9px] text-red-500 italic text-center bg-red-50 rounded border border-red-100">* ID Req</div>
+                                            )}
+                                        </div>
+                                    </td>
+
                                     <td className="p-3 text-slate-600">{row.category}</td>
                                     <td className="p-3 text-center text-slate-600">{row.unitStock}</td>
                                     <td className="p-3 text-right text-slate-600">৳{row.costUnit.toFixed(0)}</td>
@@ -226,12 +269,12 @@ const StoreSalesTab = ({ orders, inventory, onEdit, onDelete }) => {
                                 </tr>
                             ))}
                             {salesData.length === 0 && (
-                                <tr><td colSpan="10" className="p-10 text-center text-slate-400">No store sales found.</td></tr>
+                                <tr><td colSpan="12" className="p-10 text-center text-slate-400">No store sales found.</td></tr>
                             )}
                         </tbody>
                         <tfoot className="sticky bottom-0 bg-slate-100 border-t-2 border-slate-200 font-bold text-slate-700 z-10 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
                             <tr>
-                                <td className="p-3" colSpan="4">TOTALS</td>
+                                <td className="p-3" colSpan="6">TOTALS</td>
                                 <td className="p-3 text-center">{totals.unitSold}</td>
                                 <td className="p-3 text-right text-emerald-800">৳{totals.revenue.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
                                 <td className={`p-3 text-right ${totals.profitLoss >= 0 ? 'text-emerald-800' : 'text-red-700'}`}>
@@ -244,13 +287,14 @@ const StoreSalesTab = ({ orders, inventory, onEdit, onDelete }) => {
                 </div>
             </div>
 
-            {/* Popup */}
+            {/* Popup - Passing inventory prop */}
             {selectedOrder && (
                 <OrderDetailsPopup 
                     order={selectedOrder} 
                     onClose={() => setSelectedOrder(null)} 
                     getStatusColor={() => 'text-purple-600 bg-purple-50'}
-                    onEdit={onEdit} 
+                    onEdit={onUpdate} 
+                    inventory={inventory} 
                 />
             )}
         </div>

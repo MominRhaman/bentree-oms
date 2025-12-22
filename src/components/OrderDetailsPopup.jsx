@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { X, Edit2, Save, Trash2, Printer, MapPin, Phone, User, Package, Plus, Clock, RefreshCw, AlertTriangle, RotateCcw } from 'lucide-react';
-import { disableScroll } from '../utils';
+import { X, Edit2, Save, Trash2, Printer, MapPin, Phone, User, Package, Plus, Clock, RefreshCw, AlertTriangle, RotateCcw, CheckCircle } from 'lucide-react';
+import { disableScroll, updateInventoryStock } from '../utils';
 
 const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory = [], isReturnMode = false }) => {
-    // If opening in Return Mode, start in editing state automatically
     const [isEditing, setIsEditing] = useState(isReturnMode);
     const [editedOrder, setEditedOrder] = useState(null);
     const [errors, setErrors] = useState({});
@@ -11,13 +10,24 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
     // Sync state when order opens
     useEffect(() => {
         if (order) {
-            setEditedOrder(JSON.parse(JSON.stringify(order))); // Deep copy
+            setEditedOrder(JSON.parse(JSON.stringify(order))); // Deep copy to detach from source
             setErrors({});
-            if (isReturnMode) setIsEditing(true); // Force edit mode for returns
+            if (isReturnMode) setIsEditing(true); 
         }
     }, [order, isReturnMode]);
 
     if (!order || !editedOrder) return null;
+
+    // --- Helper: Get Sizes for a Code (Fixed for Dropdown) ---
+    const getAvailableSizes = (code) => {
+        if (!code || !inventory.length) return [];
+        const item = inventory.find(i => i.code.toUpperCase() === code.toUpperCase());
+        if (!item) return [];
+        if (item.type === 'Variable' && item.stock) {
+            return Object.keys(item.stock);
+        }
+        return [];
+    };
 
     // --- Stock Logic ---
     const getStockError = (prod) => {
@@ -59,9 +69,13 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
 
         const totalAfterDiscount = subtotal - discount;
         const grandTotal = totalAfterDiscount + Number(currentOrder.deliveryCharge || 0);
-        const dueAmount = grandTotal - Number(currentOrder.advanceAmount || 0) - Number(currentOrder.collectedAmount || 0);
+        
+        // Ensure collectedAmount is treated as a number
+        const collected = Number(currentOrder.collectedAmount || 0);
+        const advance = Number(currentOrder.advanceAmount || 0);
+        const dueAmount = grandTotal - advance - collected;
 
-        return { ...currentOrder, subtotal, grandTotal, dueAmount };
+        return { ...currentOrder, subtotal, grandTotal, dueAmount, collectedAmount: collected };
     };
 
     // --- Handlers ---
@@ -73,10 +87,17 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
         const newProducts = [...editedOrder.products];
         newProducts[index][field] = value;
         
-        // Auto-fill price
-        if (field === 'code') {
+        // FIX: Auto-fill price & size when Code changes
+        if (field === 'code' && inventory.length > 0) {
             const foundItem = inventory.find(i => i.code.toUpperCase() === value.toUpperCase());
-            if (foundItem) newProducts[index].price = foundItem.mrp || 0;
+            if (foundItem) {
+                newProducts[index].price = foundItem.mrp || 0;
+                // Auto-select first size if available
+                if(foundItem.type === 'Variable' && foundItem.stock) {
+                    const sizes = Object.keys(foundItem.stock);
+                    if(sizes.length > 0) newProducts[index].size = sizes[0];
+                }
+            }
         }
 
         setEditedOrder(prev => recalculateTotals({ ...prev, products: newProducts }));
@@ -101,45 +122,79 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
     const removeProduct = (index) => {
         const newProducts = editedOrder.products.filter((_, i) => i !== index);
         setEditedOrder(prev => recalculateTotals({ ...prev, products: newProducts }));
-        setErrors(prev => { const n = { ...prev }; delete n[index]; return n; });
+        // Clean up errors for removed index
+        setErrors(prev => { 
+            const n = { ...prev }; 
+            delete n[index]; 
+            return n; 
+        });
     };
 
-    const saveChanges = () => {
+    // --- SANITIZATION FUNCTION ---
+    const sanitizeForFirebase = (obj) => {
+        return JSON.parse(JSON.stringify(obj));
+    };
+
+    // --- SAVE / CONFIRM RETURN HANDLER ---
+    const saveChanges = async () => {
         if (Object.keys(errors).length > 0) {
             alert("Please fix stock errors before saving.");
             return;
         }
 
         if (onEdit) {
-            // Logic for Return Mode vs Normal Edit
             const statusToSave = isReturnMode ? 'Returned' : order.status;
             const noteText = isReturnMode ? 'Returned (Partial/Edited)' : 'Order details edited manually';
 
-            const updatedOrder = {
+            // Return Logic Preservation
+            let originalChargeToSave = order.originalDeliveryCharge; 
+            if (isReturnMode) {
+                if (!originalChargeToSave) {
+                    originalChargeToSave = Number(order.deliveryCharge || 0);
+                }
+            }
+
+            // --- FIX: Inventory Automation (Return Old -> Deduct New) ---
+            if (inventory.length > 0) {
+                // 1. Return Original Items to Stock
+                for (const p of (order.products || [])) {
+                    await updateInventoryStock(p.code, p.size, Number(p.qty), inventory); 
+                }
+                // 2. Deduct New/Edited Items from Stock
+                for (const p of (editedOrder.products || [])) {
+                    await updateInventoryStock(p.code, p.size, -Number(p.qty), inventory);
+                }
+            }
+
+            const rawUpdatedOrder = {
                 ...editedOrder,
                 status: statusToSave,
+                originalDeliveryCharge: originalChargeToSave, 
                 history: [
                     ...(order.history || []),
                     {
                         status: statusToSave,
                         timestamp: new Date().toISOString(),
                         note: noteText,
-                        updatedBy: 'User'
+                        updatedBy: 'Admin'
                     }
                 ]
             };
             
-            // Pass Status + Object
-            onEdit(order.id, statusToSave, updatedOrder);
+            const sanitizedOrder = sanitizeForFirebase(rawUpdatedOrder);
+
+            // Pass ID, Status (optional depending on your func signature), and Data
+            onEdit(order.id, statusToSave, sanitizedOrder);
             
             setIsEditing(false);
-            if (isReturnMode) onClose(); // Close popup after returning
+            if (isReturnMode) onClose();
+        } else {
+            console.error("onEdit function is missing!");
         }
     };
 
     const handleReorder = () => {
-        if (!confirm("Are you sure you want to Reorder this returned item? This will reset the order to 'Pending'.")) return;
-        
+        if (!confirm("Are you sure you want to Reorder?")) return;
         const reorderUpdate = {
             ...editedOrder,
             status: 'Pending',
@@ -148,26 +203,25 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
             returnCashReceived: 0,
             isDeliveryFeeReceived: false,
             revenueAdjustment: 0,
+            originalDeliveryCharge: 0, 
             history: [
                 ...(order.history || []),
                 {
                     status: 'Pending',
                     timestamp: new Date().toISOString(),
-                    note: 'Reordered from Returned status',
-                    updatedBy: 'User'
+                    note: 'Reordered',
+                    updatedBy: 'Admin'
                 }
             ]
         };
         
-        const finalUpdate = recalculateTotals(reorderUpdate);
-        onEdit(order.id, 'Pending', finalUpdate);
+        onEdit(order.id, 'Pending', sanitizeForFirebase(recalculateTotals(reorderUpdate)));
         setIsEditing(false);
         onClose();
     };
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-            {/* ADDED: Amber border if Return Mode to indicate special action */}
             <div className={`bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden ${isReturnMode ? 'border-4 border-amber-400' : ''}`}>
                 
                 {/* Header */}
@@ -189,9 +243,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                         </h2>
                         {isReturnMode ? (
                             <p className="text-xs text-amber-600 mt-1">
-                                1. Remove items that were KEPT by customer.<br/>
-                                2. Adjust Delivery Charge (Return Cost).<br/>
-                                3. Click Confirm Return.
+                                1. Remove kept items. 2. Adjust Delivery Charge. 3. Confirm.
                             </p>
                         ) : (
                             <p className="text-xs text-slate-500">{new Date(order.createdAt?.seconds * 1000 || order.date).toLocaleString()}</p>
@@ -212,7 +264,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                 {/* Content */}
                 <div className="flex-1 overflow-y-auto p-6 space-y-6">
                     
-                    {/* Customer Info Section */}
+                    {/* Customer Info */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div className="space-y-3">
                             <h3 className="font-semibold text-slate-700 flex items-center gap-2 border-b pb-2">
@@ -220,9 +272,9 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                             </h3>
                             {isEditing ? (
                                 <div className="space-y-2">
-                                    <input className="w-full p-2 border rounded text-sm" placeholder="Name" value={editedOrder.recipientName} onChange={e => handleInputChange('recipientName', e.target.value)} />
-                                    <input className="w-full p-2 border rounded text-sm" placeholder="Phone" value={editedOrder.recipientPhone} onChange={e => handleInputChange('recipientPhone', e.target.value)} />
-                                    <textarea className="w-full p-2 border rounded text-sm" placeholder="Address" rows="3" value={editedOrder.recipientAddress} onChange={e => handleInputChange('recipientAddress', e.target.value)} />
+                                    <input className="w-full p-2 border rounded text-sm" value={editedOrder.recipientName} onChange={e => handleInputChange('recipientName', e.target.value)} placeholder="Name" />
+                                    <input className="w-full p-2 border rounded text-sm" value={editedOrder.recipientPhone} onChange={e => handleInputChange('recipientPhone', e.target.value)} placeholder="Phone" />
+                                    <textarea className="w-full p-2 border rounded text-sm" rows="3" value={editedOrder.recipientAddress} onChange={e => handleInputChange('recipientAddress', e.target.value)} placeholder="Address" />
                                 </div>
                             ) : (
                                 <div className="text-sm space-y-1">
@@ -246,6 +298,43 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                                     <p className="text-slate-500 text-xs">Type</p>
                                     <p className="font-medium">{order.type}</p>
                                 </div>
+                                
+                                {/* FIX: Added Order ID Editing */}
+                                <div className="col-span-2">
+                                    <p className="text-slate-500 text-xs">Order ID</p>
+                                    {isEditing ? (
+                                        <input 
+                                            className="border rounded px-2 py-1 w-full text-sm" 
+                                            value={editedOrder.merchantOrderId || editedOrder.storeOrderId || ''} 
+                                            onChange={e => {
+                                                handleInputChange('merchantOrderId', e.target.value);
+                                                handleInputChange('storeOrderId', e.target.value);
+                                            }} 
+                                        />
+                                    ) : (
+                                        <p className="font-mono bg-slate-100 px-2 py-0.5 rounded inline-block">{order.merchantOrderId || order.storeOrderId || 'N/A'}</p>
+                                    )}
+                                </div>
+
+                                {/* FIX: Added Check Out Status Editing */}
+                                <div className="col-span-2">
+                                    <p className="text-slate-500 text-xs">Check Out Status</p>
+                                    {isEditing ? (
+                                        <select 
+                                            className="border rounded px-2 py-1 w-full text-sm" 
+                                            value={editedOrder.checkOutStatus || 'Pending'} 
+                                            onChange={e => handleInputChange('checkOutStatus', e.target.value)}
+                                        >
+                                            <option value="Pending">Pending</option>
+                                            <option value="Completed">Completed</option>
+                                        </select>
+                                    ) : (
+                                        <span className={`px-2 py-0.5 rounded text-xs font-bold ${editedOrder.checkOutStatus === 'Completed' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                                            {editedOrder.checkOutStatus || 'Pending'}
+                                        </span>
+                                    )}
+                                </div>
+
                                 <div>
                                     <p className="text-slate-500 text-xs">Tracking ID</p>
                                     {isEditing ? (
@@ -276,6 +365,8 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                         <div className="space-y-2">
                             {editedOrder.products.map((p, i) => {
                                 const hasError = errors[i];
+                                const availableSizes = getAvailableSizes(p.code);
+
                                 return (
                                     <div key={i} className={`flex flex-col sm:flex-row gap-2 ${isEditing ? 'bg-slate-50 p-3 rounded-lg border border-slate-200' : 'border-b border-slate-100 pb-2 last:border-0'}`}>
                                         {isEditing ? (
@@ -293,7 +384,20 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                                                 <div className="flex gap-2">
                                                     <div className="w-20">
                                                         <label className="text-[10px] text-slate-400 font-bold uppercase sm:hidden">Size</label>
-                                                        <input className="w-full p-2 border rounded text-sm bg-white" placeholder="Size" value={p.size} onChange={e => handleProductChange(i, 'size', e.target.value)} />
+                                                        
+                                                        {/* FIX: Size Dropdown */}
+                                                        {availableSizes.length > 0 ? (
+                                                            <select 
+                                                                className="w-full p-2 border rounded text-sm bg-white"
+                                                                value={p.size}
+                                                                onChange={e => handleProductChange(i, 'size', e.target.value)}
+                                                            >
+                                                                {!availableSizes.includes(p.size) && <option value={p.size}>{p.size}</option>}
+                                                                {availableSizes.map(sz => <option key={sz} value={sz}>{sz}</option>)}
+                                                            </select>
+                                                        ) : (
+                                                            <input className="w-full p-2 border rounded text-sm bg-white" placeholder="Size" value={p.size} onChange={e => handleProductChange(i, 'size', e.target.value)} />
+                                                        )}
                                                     </div>
                                                     <div className="w-20">
                                                         <label className="text-[10px] text-slate-400 font-bold uppercase sm:hidden">Qty</label>
@@ -305,15 +409,13 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                                                     </div>
                                                 </div>
                                                 <div className="flex items-end sm:w-auto w-full mt-2 sm:mt-0">
-                                                    {editedOrder.products.length > 1 && (
-                                                        <button 
-                                                            onClick={() => removeProduct(i)} 
-                                                            className="p-2 bg-white text-red-500 border border-red-100 hover:bg-red-50 rounded sm:w-auto w-full flex justify-center items-center shadow-sm"
-                                                            title="Remove (Kept by customer?)"
-                                                        >
-                                                            <Trash2 size={18} />
-                                                        </button>
-                                                    )}
+                                                    <button 
+                                                        onClick={() => removeProduct(i)} 
+                                                        className="p-2 bg-white text-red-500 border border-red-100 hover:bg-red-50 rounded sm:w-auto w-full flex justify-center items-center shadow-sm"
+                                                        title="Remove (Kept by customer?)"
+                                                    >
+                                                        <Trash2 size={18} />
+                                                    </button>
                                                 </div>
                                             </>
                                         ) : (
@@ -359,13 +461,27 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                             <span>Grand Total</span>
                             <span>৳{editedOrder.grandTotal}</span>
                         </div>
-                        <div className="flex justify-between text-sm text-slate-500 pt-1">
+                        
+                        <div className="flex justify-between text-sm text-slate-500 pt-1 items-center">
                             <span>Advance / Collected</span>
-                            <span>- ৳{(Number(editedOrder.advanceAmount||0) + Number(editedOrder.collectedAmount||0))}</span>
+                            {isEditing ? (
+                                <input 
+                                    className="w-32 p-1 border rounded text-right bg-white text-slate-800" 
+                                    value={editedOrder.collectedAmount} 
+                                    onChange={e => handleInputChange('collectedAmount', e.target.value)} 
+                                    onWheel={disableScroll}
+                                    placeholder="0"
+                                />
+                            ) : (
+                                <span>- ৳{(Number(editedOrder.advanceAmount||0) + Number(editedOrder.collectedAmount||0))}</span>
+                            )}
                         </div>
+
                         <div className="flex justify-between font-bold text-emerald-600 border-t border-dashed border-slate-300 pt-2">
-                            <span>Due Amount</span>
-                            <span>৳{editedOrder.dueAmount}</span>
+                            <span>{editedOrder.dueAmount < 0 ? "Refund Due" : "Due Amount"}</span>
+                            <span className={editedOrder.dueAmount < 0 ? "text-red-600" : "text-emerald-600"}>
+                                {editedOrder.dueAmount < 0 ? `- ৳${Math.abs(editedOrder.dueAmount)}` : `৳${editedOrder.dueAmount}`}
+                            </span>
                         </div>
                     </div>
 
@@ -379,8 +495,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                         )}
                     </div>
 
-                    {/* Transaction History */}
-                    {/* Hide history while editing to save space/clutter */}
+                    {/* Transaction History (Preserved) */}
                     {!isEditing && (
                         <div className="pt-4 border-t border-slate-100">
                             <h3 className="font-semibold text-slate-700 mb-4 flex items-center gap-2">
@@ -404,9 +519,16 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                                     return (
                                         <li key={i} className="mb-6 ml-4">
                                             <div className={`absolute w-3 h-3 rounded-full mt-1.5 -left-1.5 border border-white ${h.status === 'Delivered' ? 'bg-emerald-500' : 'bg-slate-300'}`}></div>
-                                            <time className="mb-1 text-[10px] font-normal text-slate-400 block">
-                                                {new Date(h.timestamp).toLocaleString()}
-                                            </time>
+                                            
+                                            <div className="flex justify-between items-center mb-1">
+                                                <time className="text-[10px] font-normal text-slate-400">
+                                                    {new Date(h.timestamp).toLocaleString()}
+                                                </time>
+                                                <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                                                    {h.updatedBy || 'System'}
+                                                </span>
+                                            </div>
+
                                             <h3 className="text-sm font-bold text-slate-800">{title}</h3>
                                             <p className="text-xs text-slate-600 mt-1">{h.note || 'Status updated'}</p>
                                             {h.status === 'Delivered' && order.collectedAmount > 0 && (
@@ -429,14 +551,12 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                         <>
                             <button onClick={() => { setIsEditing(false); if(isReturnMode) onClose(); else setEditedOrder(JSON.parse(JSON.stringify(order))); setErrors({}); }} className="px-4 py-2 text-slate-600 font-medium hover:bg-slate-200 rounded">Cancel</button>
                             <div className="flex gap-2">
-                                {/* REORDER BUTTON */}
                                 {(order.status || '').toLowerCase().includes('return') && !isReturnMode && (
                                     <button onClick={handleReorder} className="px-4 py-2 bg-blue-600 text-white font-bold rounded shadow hover:bg-blue-700 flex items-center gap-2">
                                         <RefreshCw size={18} /> Reorder
                                     </button>
                                 )}
                                 
-                                {/* SAVE / CONFIRM RETURN BUTTON */}
                                 <button 
                                     onClick={saveChanges} 
                                     className={`px-6 py-2 text-white font-bold rounded shadow flex items-center gap-2 ${isReturnMode ? 'bg-amber-600 hover:bg-amber-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}

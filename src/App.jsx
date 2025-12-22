@@ -24,11 +24,18 @@ import SalesReports from './components/SalesReports';
 
 function App() {
     const savedRole = localStorage.getItem('bentree_role');
-    const savedTab = localStorage.getItem('bentree_tab') || 'new-order';
+    
+    // --- UPDATED: Check URL Params for Tab on Load ---
+    const getInitialTab = () => {
+        const params = new URLSearchParams(window.location.search);
+        const urlTab = params.get('tab');
+        if (urlTab) return urlTab;
+        return localStorage.getItem('bentree_tab') || 'new-order';
+    };
 
     const [user, setUser] = useState(null);
     const [userRole, setUserRole] = useState(savedRole);
-    const [activeTab, setActiveTab] = useState(savedTab);
+    const [activeTab, setActiveTab] = useState(getInitialTab); // Initialize with function
     const [isSidebarOpen, setIsSidebarOpen] = useState(false); // New Sidebar State
 
     const [isAuthChecking, setIsAuthChecking] = useState(true);
@@ -75,6 +82,10 @@ function App() {
     const handleTabChange = (tabId) => {
         setActiveTab(tabId);
         localStorage.setItem('bentree_tab', tabId);
+        
+        // Optional: Update URL without reloading when clicking normally
+        const newUrl = `${window.location.pathname}?tab=${tabId}`;
+        window.history.pushState({ path: newUrl }, '', newUrl);
     };
 
     const handleLoginSuccess = (firebaseUser, role) => {
@@ -181,6 +192,8 @@ function App() {
                 return <CancelledOrders 
                     orders={orders.filter(o => o.type === 'Online' && (o.status === 'Cancelled' || o.status === 'Returned'))} 
                     onUpdate={handleUpdateStatus} 
+                    onDelete={handleDeleteOrder} // Passed delete handler
+                    onEdit={handleEditOrderWithStock} // Passed edit handler
                 />;
             
             case 'online-sales': return <OnlineSalesTab {...orderProps} />;

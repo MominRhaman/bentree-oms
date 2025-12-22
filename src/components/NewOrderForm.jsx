@@ -392,7 +392,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                             </div>
                             {/* Row 3: Status */}
                             <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Status</label>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">Checkout Status</label>
                                 <select className="w-full p-2 border rounded-md" value={formData.checkOutStatus} onChange={(e) => setFormData({ ...formData, checkOutStatus: e.target.value })}>
                                     <option value="Pending">Pending</option>
                                     <option value="Completed">Completed</option>
@@ -532,6 +532,14 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                         </div>
                         <div className="space-y-4">
                             <div><label className="block text-sm font-medium mb-1">Customer Phone *</label><input className={`w-full p-2 border rounded ${errors.recipientPhone ? 'border-red-500 bg-red-50' : ''}`} placeholder="Enter phone number" value={formData.recipientPhone} onChange={e => { const val = e.target.value.replace(/\D/g, ''); if (val.length <= 11) setFormData({ ...formData, recipientPhone: val }); }} required />{errors.recipientPhone && <p className="text-xs text-red-500 mt-1">{errors.recipientPhone}</p>}</div>
+                            {/* Row 3: Status */}
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">Checkout Status</label>
+                                <select className="w-full p-2 border rounded-md" value={formData.checkOutStatus} onChange={(e) => setFormData({ ...formData, checkOutStatus: e.target.value })}>
+                                    <option value="Pending">Pending</option>
+                                    <option value="Completed">Completed</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
                 )}
