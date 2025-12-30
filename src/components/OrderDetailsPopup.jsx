@@ -7,18 +7,26 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
     const [editedOrder, setEditedOrder] = useState(null);
     const [errors, setErrors] = useState({});
 
-    // Sync state when order opens
+    // --- 1. INITIALIZATION ---
     useEffect(() => {
         if (order) {
-            setEditedOrder(JSON.parse(JSON.stringify(order))); // Deep copy to detach from source
+            // Deep copy to prevent mutating the original prop directly
+            const deepCopy = JSON.parse(JSON.stringify(order));
+            
+            // We do NOT clear the Order ID here anymore, preserving manually entered IDs.
+            setEditedOrder(deepCopy);
             setErrors({});
+            
+            // Auto-enable edit mode if this is a Return action
             if (isReturnMode) setIsEditing(true); 
         }
     }, [order, isReturnMode]);
 
     if (!order || !editedOrder) return null;
 
-    // --- Helper: Get Sizes for a Code (Fixed for Dropdown) ---
+    // --- 2. HELPERS ---
+    
+    // Get available sizes for a product code from inventory
     const getAvailableSizes = (code) => {
         if (!code || !inventory.length) return [];
         const item = inventory.find(i => i.code.toUpperCase() === code.toUpperCase());
@@ -29,14 +37,14 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
         return [];
     };
 
-    // --- Stock Logic ---
+    // Check if there is enough stock for a specific row
     const getStockError = (prod) => {
         if (!inventory.length) return null;
         if (!prod.code) return null;
         const item = inventory.find(i => i.code.toUpperCase() === prod.code.toUpperCase());
         if (!item) return "Product not found";
 
-        // Logic: Available = Database Stock + What this order is currently holding
+        // Logic: Available = Database Stock + What this order is currently holding (to allow re-saving same qty)
         let qtyHeldByOrder = 0;
         const originalProd = order.products.find(p => p.code === prod.code && p.size === prod.size);
         if (originalProd) qtyHeldByOrder = Number(originalProd.qty || 0);
@@ -55,7 +63,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
         return null;
     };
 
-    // --- Calculation Logic ---
+    // Recalculate Subtotal, Discount, Grand Total, Due
     const recalculateTotals = (currentOrder) => {
         const products = currentOrder.products || [];
         const subtotal = products.reduce((sum, p) => sum + (Number(p.price || 0) * Number(p.qty || 0)), 0);
@@ -70,7 +78,6 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
         const totalAfterDiscount = subtotal - discount;
         const grandTotal = totalAfterDiscount + Number(currentOrder.deliveryCharge || 0);
         
-        // Ensure collectedAmount is treated as a number
         const collected = Number(currentOrder.collectedAmount || 0);
         const advance = Number(currentOrder.advanceAmount || 0);
         const dueAmount = grandTotal - advance - collected;
@@ -78,7 +85,8 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
         return { ...currentOrder, subtotal, grandTotal, dueAmount, collectedAmount: collected };
     };
 
-    // --- Handlers ---
+    // --- 3. HANDLERS ---
+
     const handleInputChange = (field, value) => {
         setEditedOrder(prev => recalculateTotals({ ...prev, [field]: value }));
     };
@@ -87,12 +95,12 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
         const newProducts = [...editedOrder.products];
         newProducts[index][field] = value;
         
-        // FIX: Auto-fill price & size when Code changes
+        // Auto-fill Price and Size when Code is typed
         if (field === 'code' && inventory.length > 0) {
             const foundItem = inventory.find(i => i.code.toUpperCase() === value.toUpperCase());
             if (foundItem) {
                 newProducts[index].price = foundItem.mrp || 0;
-                // Auto-select first size if available
+                // Auto-select first size if variable product
                 if(foundItem.type === 'Variable' && foundItem.stock) {
                     const sizes = Object.keys(foundItem.stock);
                     if(sizes.length > 0) newProducts[index].size = sizes[0];
@@ -102,7 +110,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
 
         setEditedOrder(prev => recalculateTotals({ ...prev, products: newProducts }));
         
-        // Error Check
+        // Real-time stock validation
         const error = getStockError(newProducts[index]);
         setErrors(prev => { 
             const n = { ...prev }; 
@@ -130,12 +138,11 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
         });
     };
 
-    // --- SANITIZATION FUNCTION ---
     const sanitizeForFirebase = (obj) => {
         return JSON.parse(JSON.stringify(obj));
     };
 
-    // --- SAVE / CONFIRM RETURN HANDLER ---
+    // --- 4. MAIN ACTION: SAVE / RETURN ---
     const saveChanges = async () => {
         if (Object.keys(errors).length > 0) {
             alert("Please fix stock errors before saving.");
@@ -144,9 +151,17 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
 
         if (onEdit) {
             const statusToSave = isReturnMode ? 'Returned' : order.status;
-            const noteText = isReturnMode ? 'Returned (Partial/Edited)' : 'Order details edited manually';
+            
+            // --- HISTORY SNAPSHOT LOGIC ---
+            // Captures the state of products BEFORE the save for the history log
+            const prevProductsSnapshot = (order.products || []).map(p => 
+                `[Code: ${p.code} | Size: ${p.size} | Qty: ${p.qty} | Price: ${p.price}]`
+            ).join(', ');
 
-            // Return Logic Preservation
+            const noteBase = isReturnMode ? 'Returned (Partial/Edited)' : 'Order Details Updated';
+            const noteText = `${noteBase}. Previous Content: ${prevProductsSnapshot || 'None'}`;
+
+            // Handle Delivery Charge Logic for Returns
             let originalChargeToSave = order.originalDeliveryCharge; 
             if (isReturnMode) {
                 if (!originalChargeToSave) {
@@ -154,18 +169,19 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                 }
             }
 
-            // --- Inventory Automation ---
+            // Inventory Updates
             if (inventory.length > 0) {
-                // 1. Return Original Items to Stock
+                // 1. Return old items to stock
                 for (const p of (order.products || [])) {
                     await updateInventoryStock(p.code, p.size, Number(p.qty), inventory); 
                 }
-                // 2. Deduct New/Edited Items from Stock
+                // 2. Deduct new/edited items from stock
                 for (const p of (editedOrder.products || [])) {
                     await updateInventoryStock(p.code, p.size, -Number(p.qty), inventory);
                 }
             }
 
+            // Construct final object
             const rawUpdatedOrder = {
                 ...editedOrder,
                 status: statusToSave,
@@ -175,18 +191,14 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                     {
                         status: statusToSave,
                         timestamp: new Date().toISOString(),
-                        note: noteText,
+                        note: noteText, // <--- History Saved Here
                         updatedBy: 'Admin'
                     }
                 ]
             };
             
-            const sanitizedOrder = sanitizeForFirebase(rawUpdatedOrder);
-
-            // --- FIX: ALWAYS CALL WITH 2 ARGUMENTS (id, data) ---
-            // This ensures it works with 'handleEditOrderWithStock' in App.jsx
-            // The 'status' is already inside 'sanitizedOrder', so it will be updated correctly.
-            onEdit(order.id, sanitizedOrder);
+            // Send to Parent Component
+            onEdit(order.id, sanitizeForFirebase(rawUpdatedOrder));
             
             setIsEditing(false);
             if (isReturnMode) onClose();
@@ -201,6 +213,8 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
             ...editedOrder,
             status: 'Pending',
             trackingId: '',
+            merchantOrderId: '', 
+            storeOrderId: '',    
             collectedAmount: 0,
             returnCashReceived: 0,
             isDeliveryFeeReceived: false,
@@ -217,12 +231,12 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
             ]
         };
         
-        // FIX: Call with 2 arguments here as well
         onEdit(order.id, sanitizeForFirebase(recalculateTotals(reorderUpdate)));
         setIsEditing(false);
         onClose();
     };
 
+    // --- 5. RENDER ---
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
             <div className={`bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden ${isReturnMode ? 'border-4 border-amber-400' : ''}`}>
@@ -264,11 +278,12 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                     </div>
                 </div>
 
-                {/* Content */}
+                {/* Main Content Area */}
                 <div className="flex-1 overflow-y-auto p-6 space-y-6">
                     
-                    {/* Customer Info */}
+                    {/* Top Grid: Customer & Order Info */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {/* Left: Customer */}
                         <div className="space-y-3">
                             <h3 className="font-semibold text-slate-700 flex items-center gap-2 border-b pb-2">
                                 <User size={16} /> Customer Details
@@ -288,25 +303,21 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                             )}
                         </div>
 
+                        {/* Right: Order Info */}
                         <div className="space-y-3">
                             <h3 className="font-semibold text-slate-700 flex items-center gap-2 border-b pb-2">
                                 <Package size={16} /> Order Info
                             </h3>
                             <div className="grid grid-cols-2 gap-4 text-sm">
-                                <div>
-                                    <p className="text-slate-500 text-xs">Source</p>
-                                    <p className="font-medium">{order.orderSource}</p>
-                                </div>
-                                <div>
-                                    <p className="text-slate-500 text-xs">Type</p>
-                                    <p className="font-medium">{order.type}</p>
-                                </div>
+                                <div><p className="text-slate-500 text-xs">Source</p><p className="font-medium">{order.orderSource}</p></div>
+                                <div><p className="text-slate-500 text-xs">Type</p><p className="font-medium">{order.type}</p></div>
                                 
                                 <div className="col-span-2">
                                     <p className="text-slate-500 text-xs">Order ID</p>
                                     {isEditing ? (
                                         <input 
-                                            className="border rounded px-2 py-1 w-full text-sm" 
+                                            className="border rounded px-2 py-1 w-full text-sm bg-yellow-50 focus:bg-white transition-colors" 
+                                            placeholder="Scan/Enter ID (Blank for Pending)"
                                             value={editedOrder.merchantOrderId || editedOrder.storeOrderId || ''} 
                                             onChange={e => {
                                                 handleInputChange('merchantOrderId', e.target.value);
@@ -344,12 +355,26 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                                         <p className="font-mono bg-slate-100 px-2 py-0.5 rounded inline-block">{order.trackingId || 'N/A'}</p>
                                     )}
                                 </div>
-                                <div>
-                                    <p className="text-slate-500 text-xs">Payment</p>
-                                    <p className="font-medium">{order.paymentType}</p>
-                                </div>
+                                <div><p className="text-slate-500 text-xs">Payment</p><p className="font-medium">{order.paymentType}</p></div>
                             </div>
                         </div>
+                    </div>
+
+                    {/* --- CALL LOG DISPLAY (NEWLY ADDED) --- */}
+                    <div className="bg-slate-50 p-4 rounded-lg border border-slate-100">
+                        <h3 className="font-semibold text-slate-700 mb-2 flex items-center gap-2">
+                            <Phone size={16} /> Call Attempts
+                        </h3>
+                        <div className="flex gap-2">
+                            {[1, 2, 3].map(num => (
+                                <div key={num} className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold border ${order.callAttempts?.[`attempt${num}`] ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-white text-slate-400 border-slate-300'}`}>
+                                    {num}
+                                </div>
+                            ))}
+                        </div>
+                        {order.callNote && (
+                            <p className="text-sm text-slate-600 mt-2 italic">Note: "{order.callNote}"</p>
+                        )}
                     </div>
 
                     {/* Products Section */}
@@ -408,13 +433,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                                                     </div>
                                                 </div>
                                                 <div className="flex items-end sm:w-auto w-full mt-2 sm:mt-0">
-                                                    <button 
-                                                        onClick={() => removeProduct(i)} 
-                                                        className="p-2 bg-white text-red-500 border border-red-100 hover:bg-red-50 rounded sm:w-auto w-full flex justify-center items-center shadow-sm"
-                                                        title="Remove (Kept by customer?)"
-                                                    >
-                                                        <Trash2 size={18} />
-                                                    </button>
+                                                    <button onClick={() => removeProduct(i)} className="p-2 bg-white text-red-500 border border-red-100 hover:bg-red-50 rounded sm:w-auto w-full flex justify-center items-center shadow-sm" title="Remove"><Trash2 size={18} /></button>
                                                 </div>
                                             </>
                                         ) : (
@@ -494,7 +513,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                         )}
                     </div>
 
-                    {/* Transaction History (Preserved) */}
+                    {/* Transaction History */}
                     {!isEditing && (
                         <div className="pt-4 border-t border-slate-100">
                             <h3 className="font-semibold text-slate-700 mb-4 flex items-center gap-2">
