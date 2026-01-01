@@ -45,17 +45,17 @@ const SalesReports = ({ orders, inventory }) => {
 
         const safeNum = (v) => Number(v) || 0;
 
-        // 4. Identify Orders (Using case-insensitive check for robustness)
+        // 4. Identify Orders (Using String() wrapper to prevent crashes)
         const onlineDelivered = filteredOrders.filter(o => 
-            o.type === 'Online' && (o.status || '').toLowerCase() === 'delivered'
+            o.type === 'Online' && String(o.status || '').toLowerCase() === 'delivered'
         );
         const returns = filteredOrders.filter(o => 
-            o.type === 'Online' && (o.status || '').toLowerCase() === 'returned'
+            o.type === 'Online' && String(o.status || '').toLowerCase() === 'returned'
         );
 
         // 5. Generate Table Rows & Calculate Totals
         const realizedOrders = filteredOrders.filter(o => {
-            const status = (o.status || '').toLowerCase();
+            const status = String(o.status || '').toLowerCase(); // FIX APPLIED HERE
             const isOnlineDelivered = o.type === 'Online' && status === 'delivered';
             const isStoreValid = o.type === 'Store' && status !== 'cancelled' && status !== 'returned';
             
@@ -78,9 +78,12 @@ const SalesReports = ({ orders, inventory }) => {
                 orderDiscount = orderSubtotal * (orderDiscount / 100);
             }
             
-            totalDiscount += orderDiscount;
-
+            // --- UPDATED: Include Deductions in Total Discount ---
             const revenueAdjustment = Math.abs(safeNum(order.revenueAdjustment)); 
+            
+            // Add both standard discount AND manual deduction to the total stat
+            totalDiscount += (orderDiscount + revenueAdjustment);
+
             const totalDeductions = orderDiscount + revenueAdjustment;
 
             (order.products || []).forEach(prod => {
@@ -151,7 +154,6 @@ const SalesReports = ({ orders, inventory }) => {
                 deliveryIncome += currentCharge;
             } else {
                 // If delivery charge is 0, we take the ORIGINAL charge and add to Loss.
-                // NOTE: This requires 'originalDeliveryCharge' to exist in your database object.
                 const originalCharge = safeNum(o.originalDeliveryCharge);
                 returnDeliveryLoss += originalCharge;
             }

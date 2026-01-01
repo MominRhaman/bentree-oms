@@ -3,13 +3,12 @@ import { Calendar, Download, Trash2, RefreshCw, Ban } from 'lucide-react';
 import { doc, deleteDoc } from "firebase/firestore"; 
 import { getStatusColor, downloadCSV } from '../utils';
 
-// ⚠️ IMPORTANT: Check this path matches your project structure!
-// It usually points to where you initialized 'db'
+// ⚠️ IMPORTANT: Using db from your firebase configuration
 import { db } from "../firebase"; 
 import OrderDetailsPopup from './OrderDetailsPopup';
 import SearchBar from './SearchBar';
 
-const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit }) => {
+const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, inventory }) => {
     // --- States ---
     const [filterDate, setFilterDate] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
@@ -72,17 +71,14 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit }) => {
         if (!confirmed) return;
 
         try {
-            // 2. Delete from Firebase
-            await deleteDoc(doc(db, "orders", orderId));
-
-            // 3. Update UI immediately (Hide the row)
+            // 2. Update UI immediately (Hide the row)
             setDeletedIds(prev => {
                 const newSet = new Set(prev);
                 newSet.add(orderId);
                 return newSet;
             });
 
-            // 4. Notify parent if prop exists (optional cleanup)
+            // 3. Notify parent if prop exists
             if (onDelete) onDelete(orderId);
 
         } catch (error) {
@@ -131,8 +127,8 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit }) => {
                             <th className="p-3">Order ID</th>
                             <th className="p-3">Customer</th>
                             <th className="p-3">Items (Product)</th>
-                            <th className="p-3">Status</th>
-                            <th className="p-3 text-right">Amount</th>
+                            <th className="p-3 text-center">Status</th>
+                            <th className="p-3 text-right">Amount / Refund</th>
                             <th className="p-3 text-center">Action</th>
                         </tr>
                     </thead>
@@ -143,10 +139,10 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit }) => {
                                 className="border-b hover:bg-slate-50 cursor-pointer"
                                 onClick={() => setSelectedOrder(order)}
                             >
-                                <td className="p-3">{order.date}</td>
-                                <td className="p-3 font-mono text-xs">{order.merchantOrderId || order.storeOrderId}</td>
+                                <td className="p-3 text-slate-500">{order.date}</td>
+                                <td className="p-3 font-mono text-xs font-bold">{order.merchantOrderId || order.storeOrderId}</td>
                                 <td className="p-3">
-                                    <div className="font-medium">{order.recipientName}</div>
+                                    <div className="font-bold text-slate-700">{order.recipientName}</div>
                                     <div className="text-xs text-slate-500">{order.recipientPhone}</div>
                                 </td>
                                 <td className="p-3 text-xs text-slate-700">
@@ -156,13 +152,18 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit }) => {
                                         </div>
                                     ))}
                                 </td>
-                                <td className="p-3">
+                                <td className="p-3 text-center">
                                     <span className={`px-2 py-1 rounded text-xs font-bold ${getBadgeColor(order.status)}`}>
                                         {order.status}
                                     </span>
                                 </td>
-                                <td className="p-3 text-right font-medium">
-                                    ৳{order.grandTotal}
+                                <td className="p-3 text-right">
+                                    <div className="text-xs text-slate-400 line-through">৳{order.grandTotal}</div>
+                                    {order.dueAmount < 0 ? (
+                                        <div className="text-red-600 font-black text-sm">Refund: ৳{Math.abs(order.dueAmount)}</div>
+                                    ) : (
+                                        <div className="text-slate-700 font-bold">৳{order.grandTotal}</div>
+                                    )}
                                 </td>
                                 <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
                                     <div className="flex justify-center gap-2">
@@ -209,7 +210,7 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit }) => {
                         ))}
                         {filteredOrders.length === 0 && (
                             <tr>
-                                <td colSpan="7" className="p-8 text-center text-slate-400">
+                                <td colSpan="7" className="p-8 text-center text-slate-400 font-medium">
                                     No cancelled or returned orders found.
                                 </td>
                             </tr>
@@ -224,6 +225,7 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit }) => {
                     onClose={() => setSelectedOrder(null)} 
                     getStatusColor={getBadgeColor} 
                     onEdit={onEdit} 
+                    inventory={inventory}
                 />
             )}
         </div>

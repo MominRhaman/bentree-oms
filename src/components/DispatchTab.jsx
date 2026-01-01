@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Download, CheckCircle, Calendar } from 'lucide-react';
+import { Download, CheckCircle, Calendar, Zap } from 'lucide-react'; // Added Zap
 import SearchBar from './SearchBar';
 import { downloadCSV } from '../utils';
 
@@ -66,16 +66,32 @@ const DispatchTab = ({ orders, onUpdate }) => {
                 <table className="w-full text-sm text-left min-w-[800px]">
                     <thead className="bg-slate-50 border-b">
                         <tr>
+                            <th className="p-3 w-16 text-center">Alerts</th> {/* Added Header */}
                             <th className="p-3">Order Info</th>
                             <th className="p-3">Product Details (Code/Size/Qty)</th>
                             <th className="p-3">Instructions</th>
-                            <th className="p-3">Remarks</th> {/* Added Header */}
+                            <th className="p-3">Remarks</th> 
                             <th className="p-3">Action</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {filtered.map(order => (
-                            <tr key={order.id} className={`border-b ${order.status === 'Dispatched' ? 'text-blue-600 bg-blue-50' : ''} ${order.status === 'Exchanged' ? 'bg-yellow-50' : ''}`}>
+                        {filtered.map(order => {
+                            const isExpress = order.isExpress === true;
+                            return (
+                            <tr key={order.id} className={`border-b ${order.status === 'Dispatched' ? 'text-blue-600 bg-blue-50' : ''} ${order.status === 'Exchanged' ? 'bg-yellow-50' : ''} ${isExpress ? 'bg-amber-50/30' : ''}`}>
+                                
+                                {/* --- EXPRESS BADGE COLUMN --- */}
+                                <td className="p-3 text-center align-middle">
+                                    {isExpress && (
+                                        <div title="Express Delivery" className="flex justify-center">
+                                            <div className="w-8 h-8 rounded-full bg-amber-100 border border-amber-300 flex items-center justify-center shadow-sm text-amber-700 font-bold text-[10px] flex-col leading-none">
+                                                <Zap size={10} className="fill-current mb-[1px]" />
+                                                ED
+                                            </div>
+                                        </div>
+                                    )}
+                                </td>
+
                                 <td className="p-3">
                                     <div className="font-bold">{order.recipientPhone}</div>
                                     <div className="text-xs text-slate-500">{order.date}</div>
@@ -84,7 +100,7 @@ const DispatchTab = ({ orders, onUpdate }) => {
                                 <td className="p-3">{(order.products || []).map((p, i) => (<div key={i} className="font-mono bg-slate-100 inline-block px-2 py-1 rounded mr-2 mb-1">{p.code} / {p.size} / Qty: {p.qty}</div>))}</td>
                                 <td className="p-3 text-xs italic max-w-xs">{order.specialInstructions || 'None'}</td>
                                 
-                                {/* Added Remarks Column */}
+                                {/* Remarks Column */}
                                 <td className="p-3">
                                     <input
                                         type="text"
@@ -105,7 +121,7 @@ const DispatchTab = ({ orders, onUpdate }) => {
                                     )}
                                 </td>
                             </tr>
-                        ))}
+                        )})}
                     </tbody>
                 </table>
             </div>

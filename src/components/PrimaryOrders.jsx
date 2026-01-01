@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Calendar, AlertTriangle, CheckCircle, Edit2 } from 'lucide-react'; 
+import { Calendar, AlertTriangle, CheckCircle, Edit2, Zap } from 'lucide-react'; 
 import OrderDetailsPopup from './OrderDetailsPopup';
 import SearchBar from './SearchBar'; 
 import { getStatusColor } from '../utils'; 
@@ -72,7 +72,6 @@ const PrimaryOrders = ({ orders, onUpdate, onEdit }) => {
             historyNote = `Call Attempt ${attemptNum} removed`;
         }
 
-        // --- FIX: Add to History Log ---
         const newHistoryItem = {
             status: order.status,
             timestamp: new Date().toISOString(),
@@ -84,19 +83,16 @@ const PrimaryOrders = ({ orders, onUpdate, onEdit }) => {
         onUpdate(order.id, order.status, updates);
     };
 
-    // Handle typing in the Order ID box
     const handleIdChange = (orderId, value) => {
         setTempIds(prev => ({ ...prev, [orderId]: value }));
     };
 
-    // Save ID when blurring (clicking away)
     const handleIdBlur = (order, value) => {
         if (value && value !== order.merchantOrderId) {
             onUpdate(order.id, order.status, { merchantOrderId: value });
         }
     };
 
-    // One-Click Confirm (Check Out Column)
     const handleQuickComplete = (e, order, currentId) => {
         e.stopPropagation();
         onUpdate(order.id, order.status, { 
@@ -126,7 +122,7 @@ const PrimaryOrders = ({ orders, onUpdate, onEdit }) => {
                 <table className="w-full text-sm text-left min-w-[900px]">
                     <thead className="bg-slate-50 text-slate-600 font-medium border-b">
                         <tr>
-                            <th className="p-3 w-10"></th>
+                            <th className="p-3 w-16 text-center">Alerts</th>
                             <th className="p-3">Date</th>
                             <th className="p-3">Products</th>
                             <th className="p-3">Recipient</th>
@@ -142,27 +138,38 @@ const PrimaryOrders = ({ orders, onUpdate, onEdit }) => {
                         {filteredOrders.map(order => {
                             const isDuplicate = duplicateIds.has(order.id);
                             
-                            // Input Logic: Defaults to '' so it appears blank until typed
+                            // Input Logic
                             const currentId = tempIds[order.id] !== undefined ? tempIds[order.id] : '';
-                            
-                            // Button Logic: Appears immediately when currentId has content
                             const hasEnteredId = currentId && currentId.trim().length > 0;
-                            
-                            // Done Logic: Checks database status
                             const isCheckedOut = order.checkOutStatus === 'Completed';
-                            // Helper to check if Order ID exists in DB (for Actions column)
-                            const hasOrderId = order.merchantOrderId && order.merchantOrderId.trim().length > 0;
+
+                            // Express Check
+                            const isExpress = order.isExpress === true;
 
                             return (
-                                <tr key={order.id} className={`border-b hover:bg-slate-50 cursor-pointer ${order.status === 'Cancelled' ? 'bg-red-50' : ''} ${isDuplicate ? 'bg-amber-50' : ''}`} onClick={() => setSelectedOrder(order)}>
-                                    <td className="p-3 text-center">
-                                        {isDuplicate && (
-                                            <div className="group relative">
-                                                <AlertTriangle size={18} className="text-amber-500 animate-pulse" />
-                                                <div className="absolute left-6 top-0 bg-slate-800 text-white text-[10px] p-2 rounded w-28 hidden group-hover:block z-20 shadow-lg pointer-events-none">Duplicate Phone Number Found</div>
-                                            </div>
-                                        )}
+                                <tr key={order.id} className={`border-b hover:bg-slate-50 cursor-pointer ${order.status === 'Cancelled' ? 'bg-red-50' : ''} ${isDuplicate ? 'bg-amber-50' : ''} ${isExpress ? 'bg-amber-50/30' : ''}`} onClick={() => setSelectedOrder(order)}>
+                                    
+                                    {/* --- ALERTS COLUMN (Duplicate & Express) --- */}
+                                    <td className="p-3 text-center align-middle">
+                                        <div className="flex flex-col items-center gap-2">
+                                            {isDuplicate && (
+                                                <div className="group relative">
+                                                    <AlertTriangle size={18} className="text-amber-500 animate-pulse" />
+                                                    <div className="absolute left-6 top-0 bg-slate-800 text-white text-[10px] p-2 rounded w-28 hidden group-hover:block z-20 shadow-lg pointer-events-none">Duplicate Phone Number Found</div>
+                                                </div>
+                                            )}
+                                            {/* --- EXPRESS BADGE --- */}
+                                            {isExpress && (
+                                                <div title="Express Delivery">
+                                                    <div className="w-8 h-8 rounded-full bg-amber-100 border border-amber-300 flex items-center justify-center shadow-sm text-amber-700 font-bold text-[10px] flex-col leading-none">
+                                                        <Zap size={10} className="fill-current mb-[1px]" />
+                                                        ED
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
                                     </td>
+
                                     <td className="p-3">{order.date}</td>
                                     <td className="p-3">
                                         {(order.products || []).map((p, i) => (
@@ -191,7 +198,6 @@ const PrimaryOrders = ({ orders, onUpdate, onEdit }) => {
                                     <td className="p-3" onClick={(e) => e.stopPropagation()}>
                                         <div className="flex flex-col gap-2 w-32">
                                             {isCheckedOut ? (
-                                                // --- STATE 1: DONE (Green) ---
                                                 <div className="flex flex-col gap-1 bg-green-50 p-2 rounded border border-green-100">
                                                     <div className="text-green-700 font-bold text-xs flex items-center gap-1">
                                                         <CheckCircle size={14} /> Done
@@ -207,13 +213,12 @@ const PrimaryOrders = ({ orders, onUpdate, onEdit }) => {
                                                     </button>
                                                 </div>
                                             ) : (
-                                                // --- STATE 2: PENDING (Show Input + Instant Button) ---
                                                 <>
                                                     <input 
                                                         type="text" 
                                                         placeholder="Enter Order ID" 
                                                         className="border rounded px-2 py-1 text-xs w-full focus:ring-1 focus:ring-emerald-500 outline-none" 
-                                                        value={currentId} // Controlled Input (Defaults to '')
+                                                        value={currentId} 
                                                         onChange={(e) => handleIdChange(order.id, e.target.value)}
                                                         onBlur={(e) => handleIdBlur(order, e.target.value)}
                                                         onKeyDown={(e) => {
@@ -223,7 +228,6 @@ const PrimaryOrders = ({ orders, onUpdate, onEdit }) => {
                                                         }}
                                                     />
                                                     
-                                                    {/* Confirm Button - Appears INSTANTLY when typing starts */}
                                                     {hasEnteredId ? (
                                                         <button 
                                                             onClick={(e) => handleQuickComplete(e, order, currentId)} 
@@ -248,8 +252,7 @@ const PrimaryOrders = ({ orders, onUpdate, onEdit }) => {
                                         <div className="flex justify-center gap-2">
                                             {order.status !== 'Cancelled' && (
                                                 <>
-                                                    {/* MAIN CONFIRM BUTTON: No Popup, Instant Status Change */}
-                                                    {hasOrderId ? (
+                                                    {isCheckedOut ? (
                                                         <button 
                                                             onClick={(e) => { e.stopPropagation(); onUpdate(order.id, 'Confirmed'); }} 
                                                             className="bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded text-xs font-bold hover:bg-emerald-200 transition-colors shadow-sm"
@@ -260,7 +263,7 @@ const PrimaryOrders = ({ orders, onUpdate, onEdit }) => {
                                                         <button 
                                                             disabled 
                                                             className="bg-slate-100 text-slate-400 px-3 py-1.5 rounded text-xs font-bold cursor-not-allowed border border-slate-200"
-                                                            title="Enter Order ID first"
+                                                            title="Complete Check Out First"
                                                         >
                                                             Confirm
                                                         </button>

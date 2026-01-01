@@ -78,23 +78,33 @@ const MonthlyProfitTab = ({ orders, inventory, expenses }) => {
         // 2. Identify Groups for Calculation
         // Group A: Revenue Generators (Delivered Online + Valid Store)
         const revenueOrders = monthlyOrders.filter(o => {
-            if (o.type === 'Online') return o.status === 'Delivered';
-            if (o.type === 'Store') return o.status !== 'Cancelled' && o.status !== 'Returned';
+            const status = String(o.status || '').toLowerCase();
+            if (o.type === 'Online') return status === 'delivered';
+            if (o.type === 'Store') return status !== 'cancelled' && status !== 'returned';
             return false;
         });
 
         // Group B: Loss Generators (Returned Online orders)
-        const returnOrders = monthlyOrders.filter(o => o.type === 'Online' && o.status === 'Returned');
+        const returnOrders = monthlyOrders.filter(o => o.type === 'Online' && String(o.status || '').toLowerCase() === 'returned');
 
         // 3. Calculate Online Net Sales (EXCLUDING Delivery Income)
-        // This matches "Net Product Sales" from Sales Reports
+        // --- FIXED: Updated to match Sales Reports Logic strictly (Subtotal - Discount - Adjustment) ---
         const onlineNetSales = revenueOrders
             .filter(o => o.type === 'Online')
             .reduce((acc, o) => {
-                const grandTotal = Number(o.grandTotal) || 0;
-                const delivery = Number(o.deliveryCharge) || 0;
-                // Subtract delivery to get pure product revenue (Net Sales)
-                return acc + (grandTotal - delivery);
+                const subtotal = Number(o.subtotal) || 0;
+                
+                // Handle Discount logic exactly like Sales Reports
+                let discount = Number(o.discountValue) || 0;
+                if (o.discountType === 'Percent') {
+                    discount = subtotal * (discount / 100);
+                }
+
+                // Handle Revenue Adjustment (if any)
+                const adj = Math.abs(Number(o.revenueAdjustment) || 0);
+
+                // Net = Subtotal - Discount - Adjustment (Pure Product Value)
+                return acc + (subtotal - discount - adj);
             }, 0);
 
         // 4. Calculate Store Sales

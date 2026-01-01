@@ -1,11 +1,10 @@
 import React, { useState, useMemo } from 'react';
-import { Calendar, Download, AlertTriangle, CheckCircle, ArrowRightLeft, PauseCircle, Ban, X, RotateCcw, Trash2 } from 'lucide-react';
+import { Calendar, Download, AlertTriangle, CheckCircle, ArrowRightLeft, PauseCircle, Ban, X, RotateCcw, Trash2, Zap } from 'lucide-react'; // Added Zap
 import OrderDetailsPopup from './OrderDetailsPopup';
 import SearchBar from './SearchBar';
 import ExchangeModal from './ExchangeModal';
 import { getStatusColor, downloadCSV } from '../utils';
 
-// ADDED: onDelete prop
 const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, inventory }) => {
     // --- States ---
     const [filterDate, setFilterDate] = useState('');
@@ -17,8 +16,6 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, invent
     // New Modals for Custom Logic
     const [deliveryModal, setDeliveryModal] = useState(null); 
     const [returnPopupOrder, setReturnPopupOrder] = useState(null);
-    
-    // ADDED: Hold Modal State
     const [holdModal, setHoldModal] = useState(null);
 
     // --- 1. Duplicate Logic ---
@@ -72,7 +69,9 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, invent
             res = res.filter(o =>
                 (o.recipientPhone && o.recipientPhone.toLowerCase().includes(term)) ||
                 (o.recipientName && o.recipientName.toLowerCase().includes(term)) ||
-                (o.merchantOrderId && o.merchantOrderId.toLowerCase().includes(term))
+                (o.merchantOrderId && o.merchantOrderId.toLowerCase().includes(term)) ||
+                // Search by remark/note as well
+                (o.remarks && o.remarks.toLowerCase().includes(term))
             );
         }
         return res;
@@ -88,7 +87,8 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, invent
             'Phone Number': o.recipientPhone ? `'${o.recipientPhone}` : '',
             'Recipient Address': o.recipientAddress || '',
             'Amount To Collect': o.dueAmount || 0,
-            'Status': o.status
+            'Status': o.status,
+            'Remarks': o.remarks || ''
         }));
         downloadCSV(data, 'confirmed_orders_export.csv');
     };
@@ -122,7 +122,6 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, invent
         setDeliveryModal(null);
     };
 
-    // ADDED: Process Hold Handler
     const processHold = (e) => {
         e.preventDefault();
         const remark = e.target.holdRemark.value.trim();
@@ -133,7 +132,8 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, invent
         }
 
         onUpdate(holdModal.id, 'Hold', {
-            note: `Order put on Hold. Remarks: ${remark}`
+            note: `Order put on Hold. Remarks: ${remark}`,
+            remarks: remark // Save to main remarks field for visibility
         });
         setHoldModal(null);
     };
@@ -169,29 +169,43 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, invent
             {/* Table Section */}
             <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
                 <div className="overflow-x-auto max-h-[600px] relative">
-                    <table className="w-full text-sm text-left min-w-[800px]">
+                    <table className="w-full text-sm text-left min-w-[900px]">
                         <thead className="bg-slate-50 text-slate-600 font-medium border-b sticky top-0 z-10 shadow-sm">
                             <tr>
-                                <th className="p-3 w-8"></th>
+                                <th className="p-3 w-16 text-center">Alerts</th>
                                 <th className="p-3">Date</th>
                                 <th className="p-3">Recipient</th>
                                 <th className="p-3">Items</th>
                                 <th className="p-3">Status</th>
                                 <th className="p-3">Tracking ID</th>
+                                <th className="p-3">Refund / Remarks</th>
                                 <th className="p-3 text-center">Outcome</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {filteredOrders.map(order => (
+                            {filteredOrders.map(order => {
+                                const isExpress = order.isExpress === true;
+                                return (
                                 <tr
                                     key={order.id}
-                                    className={`border-b hover:bg-slate-50 ${getStatusColor(order.status)} bg-opacity-20 cursor-pointer`}
+                                    className={`border-b hover:bg-slate-50 ${getStatusColor(order.status)} bg-opacity-20 cursor-pointer ${isExpress ? 'bg-amber-50/30' : ''}`}
                                     onClick={() => setSelectedOrder(order)}
                                 >
-                                    <td className="p-3">
-                                        {duplicateIds.has(order.id) && (
-                                            <div title="Duplicate Alert" className="text-amber-500 animate-pulse"><AlertTriangle size={16} /></div>
-                                        )}
+                                    <td className="p-3 text-center align-middle">
+                                        <div className="flex flex-col items-center gap-1">
+                                            {duplicateIds.has(order.id) && (
+                                                <div title="Duplicate Alert" className="text-amber-500 animate-pulse"><AlertTriangle size={16} /></div>
+                                            )}
+                                            {/* --- EXPRESS BADGE --- */}
+                                            {isExpress && (
+                                                <div title="Express Delivery">
+                                                    <div className="w-7 h-7 rounded-full bg-amber-100 border border-amber-300 flex items-center justify-center shadow-sm text-amber-700 font-bold text-[9px] flex-col leading-none">
+                                                        <Zap size={9} className="fill-current mb-[1px]" />
+                                                        ED
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
                                     </td>
                                     <td className="p-3">{order.date}</td>
                                     <td className="p-3">
@@ -213,6 +227,16 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, invent
                                             onClick={(e) => e.stopPropagation()}
                                             onBlur={(e) => onUpdate(order.id, order.status, { trackingId: e.target.value })}
                                             onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                                        />
+                                    </td>
+                                    {/* --- Refund / Remarks --- */}
+                                    <td className="p-3">
+                                        <input
+                                            className="border rounded px-2 py-1 text-xs w-full focus:ring-1 focus:ring-emerald-500 outline-none"
+                                            defaultValue={order.remarks || ''}
+                                            onClick={(e) => e.stopPropagation()}
+                                            onBlur={(e) => onUpdate(order.id, order.status, { remarks: e.target.value })}
+                                            placeholder="Remark..."
                                         />
                                     </td>
                                     <td className="p-3">
@@ -238,7 +262,6 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, invent
                                             
                                             <button title="Exchanged" onClick={() => setExchangeModal(order)} className="p-1.5 bg-yellow-100 text-yellow-700 rounded hover:bg-yellow-200"><ArrowRightLeft size={16} /></button>
                                             
-                                            {/* CHANGED: Hold Button Triggers Modal */}
                                             <button 
                                                 title="Hold" 
                                                 onClick={() => setHoldModal(order)} 
@@ -247,7 +270,6 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, invent
                                                 <PauseCircle size={16} />
                                             </button>
                                             
-                                            {/* CHANGED: Block Cancel if Delivered */}
                                             <button 
                                                 title="Cancel Order" 
                                                 onClick={() => { 
@@ -262,7 +284,6 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, invent
                                                 <Ban size={16} />
                                             </button>
 
-                                            {/* ADDED: DELETE BUTTON */}
                                             <button 
                                                 title="Delete Permanently" 
                                                 onClick={() => { 
@@ -281,7 +302,7 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, invent
                                         </div>
                                     </td>
                                 </tr>
-                            ))}
+                            )})}
                         </tbody>
                     </table>
                 </div>
@@ -331,7 +352,7 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, invent
                 </div>
             )}
 
-            {/* --- ADDED: Hold Confirmation Modal --- */}
+            {/* --- Hold Confirmation Modal --- */}
             {holdModal && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
                     <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm">

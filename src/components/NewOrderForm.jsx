@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Save, AlertTriangle, Plus, Trash2, XCircle } from 'lucide-react';
+import { Save, AlertTriangle, Plus, Trash2, XCircle, Zap } from 'lucide-react';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db, appId } from '../firebase';
 import { updateInventoryStock, disableScroll } from '../utils';
@@ -17,6 +17,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         discountType: 'Fixed',
         discountValue: '',
         deliveryCharge: '',
+        isExpress: false, 
         advanceAmount: '',
         receiver: '', 
         recipientName: '',
@@ -51,7 +52,8 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
             recipientPhone: '',
             recipientAddress: '',
             specialInstructions: '',
-            remarks: ''
+            remarks: '',
+            isExpress: false 
         }));
     };
 
@@ -251,6 +253,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                 orderProfile: formData.orderProfile,
                 paymentType: formData.paymentType,
                 deliveryCharge: Number(formData.deliveryCharge || 0),
+                isExpress: formData.isExpress, // --- SAVE EXPRESS STATUS ---
                 advanceAmount: Number(formData.advanceAmount || 0),
                 dueAmount: totals.due,
                 itemQuantity: totals.totalQty,
@@ -309,7 +312,6 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         setFormData({ ...formData, products: newProducts });
 
         // --- REAL-TIME ERROR CHECKING ---
-        // Calculate stock error for this specific row immediately
         const stockError = getStockError(newProducts[index]);
         
         setErrors(prev => {
@@ -322,7 +324,6 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                 delete currentRowErrors.stock;
             }
 
-            // Clean up empty error objects
             if (Object.keys(currentRowErrors).length === 0) {
                 delete currentProductsErrors[index];
             } else {
@@ -370,7 +371,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                                 <div><label className="block text-sm font-medium text-slate-700 mb-1">Source</label><select className="w-full p-2 border rounded-md" value={formData.orderSource} onChange={(e) => setFormData({ ...formData, orderSource: e.target.value })}><option>Facebook</option><option>Instagram</option><option>Whatsapp</option><option>Website</option><option>Other</option></select></div>
                                 <div><label className="block text-sm font-medium text-slate-700 mb-1">Profile</label><input className="w-full p-2 border rounded-md" value={formData.orderProfile} onChange={(e) => setFormData({ ...formData, orderProfile: e.target.value })} /></div>
                             </div>
-                            {/* Row 2: Receiver (NEW), Shift */}
+                            {/* Row 2: Receiver, Shift */}
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-1">Order Receiver Name</label>
@@ -470,10 +471,37 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
 
                 {orderType === 'Online' && (
                     <>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-                            <div><label className="block text-sm font-medium mb-1">Delivery Charge</label><input type="number" className="w-full p-2 border rounded" value={formData.deliveryCharge} onChange={e => setFormData({ ...formData, deliveryCharge: e.target.value })} onWheel={disableScroll} /></div>
-                            <div><label className="block text-sm font-medium mb-1">Advance Amount</label><input type="number" className="w-full p-2 border rounded" value={formData.advanceAmount} onChange={e => setFormData({ ...formData, advanceAmount: e.target.value })} onWheel={disableScroll} /></div>
-                            <div><label className="block text-sm font-medium mb-1">Due Bill (Collect)</label><input type="text" readOnly className="w-full p-2 border rounded bg-slate-100 text-slate-500 font-bold" value={totals.due.toFixed(2)} /></div>
+                        {/* --- PAYMENT & DELIVERY SECTION (Modified Layout) --- */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium mb-1">Delivery Charge</label>
+                                <input type="number" className="w-full p-2 border rounded" value={formData.deliveryCharge} onChange={e => setFormData({ ...formData, deliveryCharge: e.target.value })} onWheel={disableScroll} />
+                            </div>
+                            
+                            {/* --- NEW: EXPRESS DELIVERY CHECKBOX (Placed Between) --- */}
+                            <div className="flex flex-col justify-end">
+                                 <label className={`flex items-center gap-2 p-2 border rounded cursor-pointer transition-all h-[42px] ${formData.isExpress ? 'bg-amber-50 border-amber-300 shadow-sm' : 'bg-white hover:bg-slate-50'}`}>
+                                    <input
+                                        type="checkbox"
+                                        className="w-4 h-4 text-emerald-600 rounded focus:ring-emerald-500"
+                                        checked={formData.isExpress}
+                                        onChange={(e) => setFormData({ ...formData, isExpress: e.target.checked })}
+                                    />
+                                    <span className={`text-sm font-bold flex-1 ${formData.isExpress ? 'text-amber-700' : 'text-slate-600'}`}>
+                                        Express Delivery
+                                    </span>
+                                    {formData.isExpress && <Zap size={16} className="text-amber-500 fill-current" />}
+                                </label>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium mb-1">Advance Amount</label>
+                                <input type="number" className="w-full p-2 border rounded" value={formData.advanceAmount} onChange={e => setFormData({ ...formData, advanceAmount: e.target.value })} onWheel={disableScroll} />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium mb-1">Due Bill (Collect)</label>
+                                <input type="text" readOnly className="w-full p-2 border rounded bg-slate-100 text-slate-500 font-bold" value={totals.due.toFixed(2)} />
+                            </div>
                         </div>
 
                         {/* ORDER DETAILS SECTION */}

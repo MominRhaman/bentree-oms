@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { collection, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, arrayUnion } from 'firebase/firestore';
+import { collection, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, arrayUnion, addDoc } from 'firebase/firestore';
 import { auth, db, appId } from './firebase';
 import { updateInventoryStock } from './utils';
 import { Menu } from 'lucide-react'; 
@@ -141,64 +141,92 @@ function App() {
         return () => { unsubOrders(); unsubInv(); unsubLoc(); unsubExp(); };
     }, [user]);
 
+    // --- UPDATED HANDLER: Simple Status Updates (Cancellation/Return Logic) ---
     const handleUpdateStatus = async (orderId, newStatus, extraData = {}) => {
         const order = orders.find(o => o.id === orderId);
         if (!order) return;
         
-        if (newStatus === 'Cancelled' && order.status !== 'Cancelled') for (const p of order.products) await updateInventoryStock(p.code, p.size, Number(p.qty), inventory);
-        if (newStatus === 'Confirmed' && order.status === 'Cancelled') for (const p of order.products) await updateInventoryStock(p.code, p.size, -Number(p.qty), inventory);
-        if (newStatus === 'Returned' && order.status !== 'Returned') for (const p of order.products) await updateInventoryStock(p.code, p.size, Number(p.qty), inventory);
-        if (order.status === 'Returned' && newStatus !== 'Returned') for (const p of order.products) await updateInventoryStock(p.code, p.size, -Number(p.qty), inventory);
+        // ⚠️ INVENTORY RECONCILIATION
+        const isInactive = ['Cancelled', 'Returned'].includes(newStatus);
+        const wasActive = !['Cancelled', 'Returned'].includes(order.status);
+        const isRestoring = !isInactive && !wasActive;
+
+        // If becoming Cancelled/Returned -> Add back to inventory
+        if (isInactive && wasActive) {
+            for (const p of order.products) await updateInventoryStock(p.code, p.size, Number(p.qty), inventory);
+        }
+        // If moving back to active status (Confirmed/Pending) -> Deduct from inventory
+        if (isRestoring) {
+            for (const p of order.products) await updateInventoryStock(p.code, p.size, -Number(p.qty), inventory);
+        }
         
         try {
             const orderRef = doc(db, 'artifacts', appId, 'public', 'data', 'orders', orderId);
-            
             if (newStatus === 'Confirmed' && extraData.isUnhold) {
                 extraData.createdAt = serverTimestamp();
                 delete extraData.isUnhold;
             }
-
-            const cleanExtraData = Object.fromEntries(
-                Object.entries(extraData).filter(([_, v]) => v !== undefined)
-            );
-
+            const cleanExtraData = Object.fromEntries(Object.entries(extraData).filter(([_, v]) => v !== undefined));
             const historyEntry = { 
                 status: newStatus, 
                 timestamp: new Date().toISOString(), 
-                note: cleanExtraData.note || '', 
+                note: cleanExtraData.note || `Status: ${newStatus}`, 
                 updatedBy: user?.displayName || 'System' 
             };
-
-            await updateDoc(orderRef, { 
-                status: newStatus, 
-                ...cleanExtraData, 
-                history: arrayUnion(historyEntry) 
-            });
+            await updateDoc(orderRef, { status: newStatus, ...cleanExtraData, history: arrayUnion(historyEntry) });
         } catch (err) { console.error(err); }
     };
 
-    const handleEditOrderWithStock = async (orderId, updatedData) => {
+    // --- UPDATED HANDLER: Exchange & Return Confirm (Document Swap Logic) ---
+    const handleEditOrderWithStock = async (orderId, newStatus, updatedData) => {
         const oldOrder = orders.find(o => o.id === orderId);
         if (!oldOrder) return;
-        const productsChanged = JSON.stringify(oldOrder.products) !== JSON.stringify(updatedData.products);
-        if (productsChanged) {
-            for (const p of (oldOrder.products || [])) await updateInventoryStock(p.code, p.size, Number(p.qty), inventory);
-            for (const p of (updatedData.products || [])) await updateInventoryStock(p.code, p.size, -Number(p.qty), inventory);
-        }
-        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', orderId), updatedData);
+
+        try {
+            // ⚠️ ATOMIC SWAP: Add old back, deduct new
+            for (const p of (oldOrder.products || [])) {
+                await updateInventoryStock(p.code, p.size, Number(p.qty), inventory);
+            }
+            for (const p of (updatedData.products || [])) {
+                await updateInventoryStock(p.code, p.size, -Number(p.qty), inventory);
+            }
+
+            if (newStatus === 'Exchanged') {
+                // STEP A: Create the NEW order based on updated details
+                const ordersRef = collection(db, 'artifacts', appId, 'public', 'data', 'orders');
+                await addDoc(ordersRef, {
+                    ...updatedData,
+                    createdAt: serverTimestamp() 
+                });
+
+                // STEP B: Delete the OLD order document
+                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', orderId));
+                alert("Exchange Completed: Old record removed, new record created.");
+            } else {
+                // Handle regular Edits or Confirm Returns
+                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', orderId), {
+                    ...updatedData,
+                    status: newStatus,
+                    lastEditedBy: user?.displayName || 'Admin'
+                });
+            }
+        } catch (err) { console.error("Order Update Failed:", err); }
     };
 
     const handleEditInventory = async (id, updatedData) => { try { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventory', id), updatedData); } catch (e) { alert("Update failed"); } };
     const handleDeleteInventory = async (id) => { try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventory', id)); } catch (e) { alert("Delete failed"); } };
+    
     const handleDeleteOrder = async (orderId) => {
         const order = orders.find(o => o.id === orderId);
-        if (order && order.status !== 'Cancelled' && order.status !== 'Returned') for (const p of order.products) await updateInventoryStock(p.code, p.size, Number(p.qty), inventory);
+        // Only return items if order was in active state
+        if (order && !['Cancelled', 'Returned'].includes(order.status)) {
+            for (const p of order.products) await updateInventoryStock(p.code, p.size, Number(p.qty), inventory);
+        }
         await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', orderId));
     };
 
     const renderContent = () => {
         if (loading && orders.length === 0 && inventory.length === 0) return <div className="flex justify-center items-center h-64 text-slate-400 font-medium animate-pulse">Loading Data...</div>;
-
         const props = { inventory, locations, orders, user, onEdit: handleEditInventory, onDelete: handleDeleteInventory };
         const orderProps = { orders, onUpdate: handleUpdateStatus, onEdit: handleEditOrderWithStock, onDelete: handleDeleteOrder, inventory };
 
@@ -213,15 +241,7 @@ function App() {
             case 'dispatch': return <DispatchTab orders={orders.filter(o => o.type === 'Online' && ['Confirmed', 'Dispatched', 'Exchanged'].includes(o.status))} onUpdate={handleUpdateStatus} />;
             case 'store-sales': return <StoreSales orders={orders.filter(o => o.type === 'Store')} {...orderProps} />;
             case 'exchange': return <ExchangeTab orders={orders.filter(o => o.type === 'Online' && (o.status === 'Exchanged' || o.exchangeDetails))} />;
-            
-            case 'cancelled': 
-                return <CancelledOrders 
-                    orders={orders.filter(o => o.type === 'Online' && (o.status === 'Cancelled' || o.status === 'Returned'))} 
-                    onUpdate={handleUpdateStatus} 
-                    onDelete={handleDeleteOrder} 
-                    onEdit={handleEditOrderWithStock} 
-                />;
-            
+            case 'cancelled': return <CancelledOrders orders={orders.filter(o => o.type === 'Online' && (o.status === 'Cancelled' || o.status === 'Returned'))} onUpdate={handleUpdateStatus} onDelete={handleDeleteOrder} onEdit={handleEditOrderWithStock} inventory={inventory} />;
             case 'online-sales': return <OnlineSalesTab {...orderProps} />;
             case 'reports': return userRole === 'master' ? <SalesReports {...orderProps} /> : <div className="p-10 text-center text-slate-400">Restricted Access</div>;
             default: return <div>Select a tab</div>;
@@ -233,28 +253,13 @@ function App() {
 
     return (
         <div className="flex h-screen bg-slate-50 font-sans text-slate-900">
-            {/* Sidebar with mobile toggle logic */}
-            <Sidebar 
-                activeTab={activeTab} 
-                setActiveTab={handleTabChange} 
-                userRole={userRole} 
-                onLogout={handleLogout} 
-                user={user} 
-                setUser={setUser} 
-                isOpen={isSidebarOpen}
-                onClose={() => setIsSidebarOpen(false)}
-            />
-
+            <Sidebar activeTab={activeTab} setActiveTab={handleTabChange} userRole={userRole} onLogout={handleLogout} user={user} setUser={setUser} isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
             <main className="flex-1 overflow-auto w-full lg:ml-64 transition-all duration-300">
-                {/* Mobile Header with Hamburger */}
                 <div className="lg:hidden bg-white p-4 border-b flex items-center justify-between sticky top-0 z-10">
-                    <button onClick={() => setIsSidebarOpen(true)} className="text-slate-600">
-                        <Menu size={24} />
-                    </button>
+                    <button onClick={() => setIsSidebarOpen(true)} className="text-slate-600"><Menu size={24} /></button>
                     <span className="font-bold text-slate-700">Bentree OMS</span>
-                    <div className="w-6"></div> {/* Spacer for center alignment */}
+                    <div className="w-6"></div>
                 </div>
-
                 <div className="p-4 lg:p-8 min-w-[350px] lg:min-w-[1000px] overflow-x-auto">
                     {renderContent()}
                 </div>
