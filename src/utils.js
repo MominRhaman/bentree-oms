@@ -75,40 +75,45 @@ export const downloadCSV = (data, filename) => {
 
 export const disableScroll = (e) => e.target.blur();
 
-// --- Stock Logic ---
+// --- ATOMIC STOCK LOGIC ---
+/**
+ * qtyChange should be negative for deductions (New Order)
+ * qtyChange should be positive for additions (Returns/Cancellations)
+ */
 export const updateInventoryStock = async (productCode, size, qtyChange, inventoryList) => {
-    if (!productCode) return false;
-    // Case Insensitive Match
+    if (!productCode || qtyChange === 0) return false;
+    
+    // 1. Find Product (Case Insensitive)
     const targetCode = productCode.trim().toUpperCase();
     const product = inventoryList.find(p => p.code.toUpperCase() === targetCode);
 
     if (!product) {
-        console.error(`Product ${productCode} not found in inventory.`);
+        console.error(`Calculation Error: Product ${productCode} not found.`);
         return false;
     }
 
     const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventory', product.id);
 
-    // Logic for Variable vs Single Product
-    if (product.type === 'Variable') {
-        const sizeKey = size ? size.trim().toUpperCase() : null;
-        if (!sizeKey) return false;
+    try {
+        if (product.type === 'Variable') {
+            const sizeKey = size ? size.trim().toUpperCase() : null;
+            if (!sizeKey) return false;
 
-        let actualKey = sizeKey;
-        if (product.stock && product.stock[sizeKey] === undefined) {
-            const foundKey = Object.keys(product.stock).find(k => k.toUpperCase() === sizeKey);
-            if (foundKey) actualKey = foundKey;
-            else actualKey = sizeKey;
+            // Match exact key from database object to avoid creating new keys (e.g., lowercase vs uppercase)
+            const actualKey = Object.keys(product.stock || {}).find(k => k.toUpperCase() === sizeKey) || sizeKey;
+
+            await updateDoc(docRef, {
+                [`stock.${actualKey}`]: increment(qtyChange)
+            });
+        } else {
+            // Impact for Simple/Single Products
+            await updateDoc(docRef, {
+                totalStock: increment(qtyChange)
+            });
         }
-
-        await updateDoc(docRef, {
-            [`stock.${actualKey}`]: increment(qtyChange)
-        });
-
-    } else {
-        await updateDoc(docRef, {
-            totalStock: increment(qtyChange)
-        });
+        return true;
+    } catch (err) {
+        console.error("Critical Inventory Calculation Failure:", err);
+        return false;
     }
-    return true;
 };

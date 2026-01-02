@@ -4,7 +4,7 @@ import SearchBar from './SearchBar';
 import OrderDetailsPopup from './OrderDetailsPopup';
 import { INVENTORY_CATEGORIES, downloadCSV } from '../utils';
 
-const StoreSalesTab = ({ orders, inventory, onUpdate, onDelete }) => {
+const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onDelete }) => {
     // --- States ---
     const [isCheckoutMode, setIsCheckoutMode] = useState(false);
     const [checkoutSearch, setCheckoutSearch] = useState('');
@@ -445,7 +445,7 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onDelete }) => {
                     order={selectedOrder} 
                     onClose={() => setSelectedOrder(null)} 
                     getStatusColor={() => 'text-purple-600 bg-purple-50'}
-                    onEdit={onUpdate} 
+                    onEdit={onEdit} 
                     inventory={inventory} 
                 />
             )}

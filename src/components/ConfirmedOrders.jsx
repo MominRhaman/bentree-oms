@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Calendar, Download, AlertTriangle, CheckCircle, ArrowRightLeft, PauseCircle, Ban, X, RotateCcw, Trash2, Zap } from 'lucide-react'; // Added Zap
+import { Calendar, Download, AlertTriangle, CheckCircle, ArrowRightLeft, PauseCircle, Ban, X, RotateCcw, Trash2, Zap, Eye } from 'lucide-react'; 
 import OrderDetailsPopup from './OrderDetailsPopup';
 import SearchBar from './SearchBar';
 import ExchangeModal from './ExchangeModal';
@@ -70,7 +70,6 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, invent
                 (o.recipientPhone && o.recipientPhone.toLowerCase().includes(term)) ||
                 (o.recipientName && o.recipientName.toLowerCase().includes(term)) ||
                 (o.merchantOrderId && o.merchantOrderId.toLowerCase().includes(term)) ||
-                // Search by remark/note as well
                 (o.remarks && o.remarks.toLowerCase().includes(term))
             );
         }
@@ -103,10 +102,8 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, invent
         const oldDue = Number(deliveryModal.dueAmount || 0);
         const oldGrandTotal = Number(deliveryModal.grandTotal || 0);
 
-        // Recalculate based on new delivery charge
         const newDue = oldDue - oldDeliveryCharge + newDeliveryCharge;
         const newGrandTotal = oldGrandTotal - oldDeliveryCharge + newDeliveryCharge;
-
         const adjustment = received - newDue; 
         
         onUpdate(deliveryModal.id, 'Delivered', {
@@ -133,7 +130,7 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, invent
 
         onUpdate(holdModal.id, 'Hold', {
             note: `Order put on Hold. Remarks: ${remark}`,
-            remarks: remark // Save to main remarks field for visibility
+            remarks: remark 
         });
         setHoldModal(null);
     };
@@ -196,7 +193,6 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, invent
                                             {duplicateIds.has(order.id) && (
                                                 <div title="Duplicate Alert" className="text-amber-500 animate-pulse"><AlertTriangle size={16} /></div>
                                             )}
-                                            {/* --- EXPRESS BADGE --- */}
                                             {isExpress && (
                                                 <div title="Express Delivery">
                                                     <div className="w-7 h-7 rounded-full bg-amber-100 border border-amber-300 flex items-center justify-center shadow-sm text-amber-700 font-bold text-[9px] flex-col leading-none">
@@ -211,10 +207,14 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, invent
                                     <td className="p-3">
                                         <div className="font-medium">{order.recipientName}</div>
                                         <div className="text-xs opacity-75">{order.recipientPhone}</div>
-                                        <div className="text-[10px] font-bold text-slate-500 mt-1">Due: ৳{order.dueAmount}</div>
+                                        
+                                        {/* --- UPDATED REFUND COLOR LOGIC --- */}
+                                        <div className={`text-[10px] font-bold mt-1 ${order.dueAmount < 0 ? 'text-red-600 animate-pulse' : 'text-slate-500'}`}>
+                                            {order.dueAmount < 0 ? `REFUND: ৳${Math.abs(order.dueAmount)}` : `Due: ৳${order.dueAmount}`}
+                                        </div>
                                     </td>
                                     <td className="p-3 text-xs">
-                                        {(order.products || []).map((p, i) => <div key={i}>{p.code} ({p.size})</div>)}
+                                        {(order.products || []).map((p, i) => <div key={i}>{p.qty}x {p.code} ({p.size})</div>)}
                                     </td>
                                     <td className="p-3 font-bold">
                                         <span className={`px-2 py-1 rounded ${getStatusColor(order.status)}`}>{order.status}</span>
@@ -229,7 +229,6 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, invent
                                             onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
                                         />
                                     </td>
-                                    {/* --- Refund / Remarks --- */}
                                     <td className="p-3">
                                         <input
                                             className="border rounded px-2 py-1 text-xs w-full focus:ring-1 focus:ring-emerald-500 outline-none"
@@ -251,7 +250,6 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, invent
                                             >
                                                 <CheckCircle size={16} />
                                             </button>
-                                            
                                             <button 
                                                 title="Mark as Returned" 
                                                 onClick={() => setReturnPopupOrder(order)} 
@@ -259,9 +257,7 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, invent
                                             >
                                                 <RotateCcw size={16} />
                                             </button>
-                                            
                                             <button title="Exchanged" onClick={() => setExchangeModal(order)} className="p-1.5 bg-yellow-100 text-yellow-700 rounded hover:bg-yellow-200"><ArrowRightLeft size={16} /></button>
-                                            
                                             <button 
                                                 title="Hold" 
                                                 onClick={() => setHoldModal(order)} 
@@ -269,7 +265,6 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, invent
                                             >
                                                 <PauseCircle size={16} />
                                             </button>
-                                            
                                             <button 
                                                 title="Cancel Order" 
                                                 onClick={() => { 
@@ -283,16 +278,11 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, invent
                                             >
                                                 <Ban size={16} />
                                             </button>
-
                                             <button 
                                                 title="Delete Permanently" 
                                                 onClick={() => { 
                                                     if (confirm('⚠️ Are you sure you want to PERMANENTLY DELETE this order? This cannot be undone.')) {
-                                                        if (onDelete) {
-                                                            onDelete(order.id);
-                                                        } else {
-                                                            alert("Delete function not connected!");
-                                                        }
+                                                        onDelete(order.id);
                                                     }
                                                 }} 
                                                 className="p-1.5 bg-slate-200 text-slate-700 rounded hover:bg-slate-300"
@@ -308,7 +298,7 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, invent
                 </div>
             </div>
 
-            {/* --- Delivery Confirmation Modal --- */}
+            {/* --- Modals and Popups --- */}
             {deliveryModal && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
                     <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm">
@@ -321,69 +311,39 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, invent
                                 <label className="block text-xs font-bold text-emerald-800 uppercase">System Due Amount</label>
                                 <p className="text-2xl font-bold text-emerald-700">৳{deliveryModal.dueAmount || 0}</p>
                             </div>
-                            
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-1">Total Received Amount</label>
-                                <input 
-                                    name="received" 
-                                    type="number" 
-                                    defaultValue={deliveryModal.dueAmount || 0} 
-                                    className="w-full p-2 border rounded font-bold"
-                                    autoFocus
-                                    required
-                                />
+                                <input name="received" type="number" defaultValue={deliveryModal.dueAmount || 0} className="w-full p-2 border rounded font-bold" autoFocus required />
                             </div>
-
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-1">Delivery Charge (Included)</label>
-                                <input 
-                                    name="deliveryCharge" 
-                                    type="number" 
-                                    defaultValue={deliveryModal.deliveryCharge || 0} 
-                                    className="w-full p-2 border rounded"
-                                    required
-                                />
-                                <p className="text-xs text-slate-500 mt-1">Change if needed.</p>
+                                <input name="deliveryCharge" type="number" defaultValue={deliveryModal.deliveryCharge || 0} className="w-full p-2 border rounded" required />
                             </div>
-
                             <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded shadow-sm">Confirm Delivered</button>
                         </form>
                     </div>
                 </div>
             )}
 
-            {/* --- Hold Confirmation Modal --- */}
             {holdModal && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
                     <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm">
                         <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-bold text-purple-800 flex items-center gap-2">
-                                <PauseCircle size={20} /> Hold Order
-                            </h3>
+                            <h3 className="text-lg font-bold text-purple-800 flex items-center gap-2"><PauseCircle size={20} /> Hold Order</h3>
                             <button onClick={() => setHoldModal(null)}><X size={20} className="text-slate-400" /></button>
                         </div>
                         <form onSubmit={processHold} className="space-y-4">
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-1">Reason / Remarks</label>
-                                <textarea 
-                                    name="holdRemark" 
-                                    rows="3" 
-                                    placeholder="Why is this order on hold?" 
-                                    className="w-full p-2 border rounded text-sm focus:ring-1 focus:ring-purple-500 outline-none"
-                                    required
-                                    autoFocus
-                                />
+                                <textarea name="holdRemark" rows="3" placeholder="Why is this order on hold?" className="w-full p-2 border rounded text-sm focus:ring-1 focus:ring-purple-500 outline-none" required autoFocus />
                             </div>
-                            <button type="submit" className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 rounded shadow-sm">
-                                Confirm Hold
-                            </button>
+                            <button type="submit" className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 rounded shadow-sm">Confirm Hold</button>
                         </form>
                     </div>
                 </div>
             )}
 
-            {/* --- Modals and Popups --- */}
-            {exchangeModal && <ExchangeModal order={exchangeModal} onClose={() => setExchangeModal(null)} onConfirm={(orderId, data) => onUpdate(orderId, 'Exchanged', data)} inventory={inventory} />}
+            {exchangeModal && <ExchangeModal order={exchangeModal} onClose={() => setExchangeModal(null)} onConfirm={onEdit} inventory={inventory} />}
             
             {selectedOrder && (
                 <OrderDetailsPopup 
@@ -391,6 +351,7 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, invent
                     onClose={() => setSelectedOrder(null)} 
                     getStatusColor={getStatusColor} 
                     onEdit={onEdit} 
+                    inventory={inventory}
                 />
             )}
 
