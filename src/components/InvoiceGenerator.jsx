@@ -58,7 +58,8 @@ const InvoiceGenerator = ({ orders }) => {
                                     <h1 className="text-3xl font-extrabold text-slate-800 tracking-tight">BENTREE</h1>
                                     <p className="text-sm text-slate-500 mt-1">Fashion & Lifestyle</p>
                                     <p className="text-xs text-slate-400 mt-1">Dhaka, Bangladesh</p>
-                                    <p className="text-xs text-slate-400">Phone: +880 1XXXXXXXXX</p>
+                                    <p className="text-xs text-slate-400">Phone: +880 1870630402</p>
+                                    <p className="text-xs text-slate-400">Email: bentreebd@gmail.com</p>
                                 </div>
                                 <div className="text-right">
                                     <h2 className="text-xl font-bold text-slate-700">INVOICE</h2>
