@@ -13,9 +13,9 @@ export const GOOGLE_ACCOUNTS = {
 
 export const CREDENTIAL_ACCOUNTS = {
     'bentree': { pass: 'bentree12321', role: 'master', name: 'Bentree Master' },
-    'bentree team1': { pass: 'bentree12345', role: 'employee', name: 'Internal Member 01' },
-    'bentree team2': { pass: 'bentree12345', role: 'employee', name: 'Internal Member 02' },
-    'bentree team3': { pass: 'bentree12345', role: 'employee', name: 'Internal Member 03' },
+    'bentreeteam1': { pass: 'bentree12345', role: 'employee', name: 'Internal Member 01' },
+    'bentreeteam2': { pass: 'bentree12345', role: 'employee', name: 'Internal Member 02' },
+    'bentreeteam3': { pass: 'bentree12345', role: 'employee', name: 'Internal Member 03' },
     'team1': { pass: 'bentree12345', role: 'qmt', name: 'Team Member 01' },
     'team2': { pass: 'bentree12345', role: 'qmt', name: 'Team Member 02' },
     'team3': { pass: 'bentree12345', role: 'qmt', name: 'Team Member 03' },
@@ -76,20 +76,18 @@ export const downloadCSV = (data, filename) => {
 export const disableScroll = (e) => e.target.blur();
 
 // --- ATOMIC STOCK LOGIC ---
-/**
- * qtyChange should be negative for deductions (New Order)
- * qtyChange should be positive for additions (Returns/Cancellations)
- */
 export const updateInventoryStock = async (productCode, size, qtyChange, inventoryList) => {
     if (!productCode || qtyChange === 0) return false;
     
-    // 1. Find Product (Case Insensitive)
+    // Normalize code
     const targetCode = productCode.trim().toUpperCase();
-    const product = inventoryList.find(p => p.code.toUpperCase() === targetCode);
+    
+    // Find Product
+    const product = (inventoryList || []).find(p => p.code && p.code.toUpperCase() === targetCode);
 
     if (!product) {
-        console.error(`Calculation Error: Product ${productCode} not found.`);
-        return false;
+        console.warn(`Stock Sync: Product ${productCode} not found in current inventory state.`);
+        return false; 
     }
 
     const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventory', product.id);
@@ -99,21 +97,21 @@ export const updateInventoryStock = async (productCode, size, qtyChange, invento
             const sizeKey = size ? size.trim().toUpperCase() : null;
             if (!sizeKey) return false;
 
-            // Match exact key from database object to avoid creating new keys (e.g., lowercase vs uppercase)
+            // Ensure we use the exact case-sensitive key stored in Firestore to prevent field duplication
             const actualKey = Object.keys(product.stock || {}).find(k => k.toUpperCase() === sizeKey) || sizeKey;
 
             await updateDoc(docRef, {
                 [`stock.${actualKey}`]: increment(qtyChange)
             });
         } else {
-            // Impact for Simple/Single Products
             await updateDoc(docRef, {
                 totalStock: increment(qtyChange)
             });
         }
         return true;
     } catch (err) {
-        console.error("Critical Inventory Calculation Failure:", err);
-        return false;
+        console.error("CRITICAL: updateInventoryStock failed:", err);
+        // We throw the error so the calling function (App.jsx) knows to stop the DB swap
+        throw err; 
     }
 };

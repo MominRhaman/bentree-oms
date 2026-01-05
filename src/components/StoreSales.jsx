@@ -207,9 +207,9 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onDelete }) => {
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
                                         {checkoutResult.map(order => {
-                                            // Ensure input is blank by default
-                                            const currentId = tempIds[order.id] !== undefined ? tempIds[order.id] : '';
-                                            const hasEnteredId = currentId && currentId.trim().length > 0;
+                                            // --- FIX: Force blank start by only using tempIds state ---
+                                            const currentId = tempIds[order.id] || '';
+                                            const hasEnteredId = currentId.trim().length > 0;
 
                                             return (
                                                 <tr key={order.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => setSelectedOrder(order)}>
@@ -219,6 +219,7 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onDelete }) => {
                                                             placeholder="Scan / Type ID" 
                                                             className="border-2 border-slate-300 rounded-lg px-3 py-2 text-sm w-full focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 outline-none font-mono font-bold"
                                                             value={currentId}
+                                                            required
                                                             onChange={(e) => handleIdChange(order.id, e.target.value)}
                                                             onKeyDown={(e) => {
                                                                 if (e.key === 'Enter' && hasEnteredId) {
@@ -255,17 +256,14 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onDelete }) => {
                                                     </td>
                                                     <td className="p-4 text-center" onClick={(e) => e.stopPropagation()}>
                                                         <div className="flex justify-center gap-2">
-                                                            {hasEnteredId ? (
+                                                            {/* Only show button if user has typed something */}
+                                                            {hasEnteredId && (
                                                                 <button 
                                                                     onClick={(e) => handleCheckoutComplete(e, order, currentId)}
                                                                     className="bg-emerald-600 text-white px-6 py-2 rounded-lg text-sm font-bold hover:bg-emerald-700 shadow-md transition-all flex items-center gap-2 animate-in fade-in"
                                                                 >
-                                                                    <CheckCircle size={16} /> Confirm
+                                                                    <CheckCircle size={16} /> Complete
                                                                 </button>
-                                                            ) : (
-                                                                <div className="px-4 py-2 bg-slate-100 text-slate-400 rounded-lg text-xs font-bold border border-slate-200 cursor-not-allowed">
-                                                                    Enter ID First
-                                                                </div>
                                                             )}
                                                             
                                                             <button 
@@ -351,9 +349,9 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onDelete }) => {
                         <tbody className="divide-y divide-slate-100">
                             {salesData.map((row) => {
                                 // --- HISTORY VIEW INPUT LOGIC ---
-                                // Ensure input is blank by default, just like Primary Orders & Queue
-                                const currentIdHistory = tempIds[row.id] !== undefined ? tempIds[row.id] : '';
-                                const hasEnteredIdHistory = currentIdHistory && currentIdHistory.trim().length > 0;
+                                // Ensures field starts blank and only shows session typing
+                                const currentIdHistory = tempIds[row.id] || '';
+                                const hasEnteredIdHistory = currentIdHistory.trim().length > 0;
 
                                 return (
                                 <tr key={row.uniqueKey} className="hover:bg-slate-50 transition-colors cursor-pointer" onClick={() => setSelectedOrder(row.originalOrder)}>
@@ -371,8 +369,9 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onDelete }) => {
                                                 <input
                                                     type="text"
                                                     placeholder="Order ID"
-                                                    className="border rounded px-2 py-1 text-[10px] w-full focus:ring-1 focus:ring-emerald-500 outline-none"
-                                                    value={currentIdHistory} // Blank by default
+                                                    className="border rounded px-2 py-1 text-[10px] w-full focus:ring-1 focus:ring-emerald-500 outline-none font-bold"
+                                                    value={currentIdHistory} //孤立した状態
+                                                    required
                                                     onChange={(e) => handleIdChange(row.id, e.target.value)}
                                                     onKeyDown={(e) => {
                                                         if (e.key === 'Enter' && hasEnteredIdHistory) {
@@ -384,9 +383,11 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onDelete }) => {
                                                 />
                                             )}
                                             
-                                            {row.originalOrder.storeOrderId ? (
+                                            {/* Button only appears if input is filled or ID exists in DB */}
+                                            {row.originalOrder.storeOrderId || hasEnteredIdHistory ? (
                                                 <button 
                                                     onClick={() => onUpdate(row.id, row.originalOrder.status, { 
+                                                        storeOrderId: row.originalOrder.storeOrderId || currentIdHistory,
                                                         checkOutStatus: row.checkOutStatus === 'Completed' ? 'Pending' : 'Completed',
                                                         collectedAmount: row.checkOutStatus !== 'Completed' ? Number(row.originalOrder.grandTotal) : 0
                                                     })}
@@ -399,7 +400,7 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onDelete }) => {
                                                     {row.checkOutStatus === 'Completed' ? <><CheckCircle size={10} /> Done</> : 'Complete'}
                                                 </button>
                                             ) : (
-                                                <div className="text-[9px] text-red-500 italic text-center bg-red-50 rounded border border-red-100">* ID Req</div>
+                                                <div className="text-[9px] text-red-500 italic text-center bg-red-50 rounded border border-red-100 uppercase font-bold p-1">ID Required</div>
                                             )}
                                         </div>
                                     </td>

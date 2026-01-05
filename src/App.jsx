@@ -128,21 +128,26 @@ function App() {
 
     // --- 5. INVENTORY IMPACT LOGIC: Status Changes (Cancel/Return/Restore) ---
     const handleUpdateStatus = async (orderId, newStatus, extraData = {}) => {
-        const order = orders.find(o => o.id === orderId);
+        // Find order by ID or fallback to Merchant ID if ID changed during exchange
+        let order = orders.find(o => o.id === orderId);
+        if (!order && (extraData.merchantOrderId || extraData.storeOrderId)) {
+            const mId = extraData.merchantOrderId || extraData.storeOrderId;
+            order = orders.find(o => o.merchantOrderId === mId || o.storeOrderId === mId);
+        }
+
         if (!order) return;
         
+        const activeId = order.id;
         const inactiveStatuses = ['Cancelled', 'Returned'];
         const becomingInactive = inactiveStatuses.includes(newStatus);
         const wasActive = !inactiveStatuses.includes(order.status);
         const isRestoring = !becomingInactive && !wasActive;
 
-        // IMPACT: Cancel/Return -> Stock = Stock + ReturnedQuantity
         if (becomingInactive && wasActive) {
             for (const p of order.products) {
                 await updateInventoryStock(p.code, p.size, Number(p.qty), inventory);
             }
         }
-        // IMPACT: Restoring to Pending/Confirmed -> Stock = Stock - OrderedQuantity
         if (isRestoring) {
             for (const p of order.products) {
                 await updateInventoryStock(p.code, p.size, -Number(p.qty), inventory);
@@ -150,63 +155,68 @@ function App() {
         }
         
         try {
-            const orderRef = doc(db, 'artifacts', appId, 'public', 'data', 'orders', orderId);
+            const orderRef = doc(db, 'artifacts', appId, 'public', 'data', 'orders', activeId);
             const historyEntry = { 
                 status: newStatus, 
                 timestamp: new Date().toISOString(), 
                 note: extraData.note || `Status updated to ${newStatus}`, 
                 updatedBy: user?.displayName || 'Admin' 
             };
+            
+            const { id, createdAt, ...cleanExtraData } = extraData;
+
             await updateDoc(orderRef, { 
-                ...extraData, 
+                ...cleanExtraData, 
                 status: newStatus, 
                 history: arrayUnion(historyEntry) 
             });
-        } catch (err) { console.error(err); }
+        } catch (err) { console.error("Update Status Error:", err); }
     };
 
-    // --- 6. INVENTORY IMPACT LOGIC: Edits & Exchanges (The Atomic Swap) ---
+    // --- 6. INVENTORY IMPACT LOGIC: Edits & Exchanges ---
     const handleEditOrderWithStock = async (orderId, newStatus, updatedData) => {
+        // Find the order in the current local state
         const oldOrder = orders.find(o => o.id === orderId);
-        if (!oldOrder) return;
+        
+        // SAFETY: If the order isn't found, stop execution to prevent the 'products' undefined error
+        if (!oldOrder) {
+            console.error("Critical Sync Error: Order not found in state.");
+            return;
+        }
 
         try {
-            // STEP 1: IMPACT: Stock = Stock + OldProductQuantity (Restore previous state)
+            // STEP 1: Restore old stock (Restore if the order was active)
             if (!['Cancelled', 'Returned'].includes(oldOrder.status)) {
-                for (const p of (oldOrder.products || [])) {
+                const oldProducts = oldOrder.products || [];
+                for (const p of oldProducts) {
                     await updateInventoryStock(p.code, p.size, Number(p.qty), inventory);
                 }
             }
 
-            // STEP 2: IMPACT: Stock = Stock - NewProductQuantity (Deduct current state)
+            // STEP 2: Deduct new stock (Deduct if the new status is active)
             if (!['Cancelled', 'Returned'].includes(newStatus)) {
-                for (const p of (updatedData.products || [])) {
+                const newProducts = updatedData.products || [];
+                for (const p of newProducts) {
                     await updateInventoryStock(p.code, p.size, -Number(p.qty), inventory);
                 }
             }
 
-            // Database Operations
-            if (newStatus === 'Exchanged') {
-                const ordersRef = collection(db, 'artifacts', appId, 'public', 'data', 'orders');
-                const exchangePayload = {
-                    ...updatedData,
-                    status: 'Exchanged',
-                    createdAt: serverTimestamp(),
-                    lastEditedBy: user?.displayName || 'Admin'
-                };
-                await addDoc(ordersRef, exchangePayload);
-                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', orderId));
-                alert("Exchange Completed Successfully.");
-            } else {
-                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', orderId), {
-                    ...updatedData,
-                    status: newStatus,
-                    lastEditedBy: user?.displayName || 'Admin'
-                });
-            }
+            // STEP 3: Database Operation
+            // We use updateDoc to keep the ID stable so other buttons don't break
+            const orderRef = doc(db, 'artifacts', appId, 'public', 'data', 'orders', orderId);
+            const { id, ...dataToSave } = updatedData;
+
+            await updateDoc(orderRef, {
+                ...dataToSave,
+                status: newStatus,
+                lastEditedBy: user?.displayName || 'Admin'
+            });
+
+            if (newStatus === 'Exchanged') alert("Exchange Successful!");
+
         } catch (err) { 
             console.error("Inventory Sync Failure:", err); 
-            alert("Error syncing inventory. Please verify stock levels.");
+            alert("Error syncing inventory. Check console for details.");
         }
     };
 

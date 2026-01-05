@@ -239,14 +239,19 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
             const rows = text.split(/\r?\n/).filter(row => row.trim() !== '');
             if (rows.length < 2) return alert("Invalid CSV: Not enough data.");
 
+            // Standardize headers (cleaning quotes and spaces)
             const headers = rows[0].split(',').map(h => h.trim().toLowerCase().replace(/['"]+/g, ''));
             
-            const getIdx = (key) => headers.findIndex(h => h.includes(key));
+            const getIdx = (key) => headers.findIndex(h => h === key); // Exact match for standard sequence
+
+            const idxDate = getIdx('date');
             const idxCode = getIdx('code');
             const idxCat = getIdx('category');
+            const idxType = getIdx('type');
             const idxCost = getIdx('cost');
             const idxMrp = getIdx('mrp');
             const idxStock = getIdx('total stock');
+            const idxBreakdown = getIdx('stock breakdown');
 
             if (idxCode === -1) return alert("CSV Error: Column 'Code' is required.");
 
@@ -254,10 +259,11 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
             let skippedCount = 0;
 
             for (let i = 1; i < rows.length; i++) {
-                const row = rows[i].match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g);
+                // Regex to handle quoted strings containing commas
+                const row = rows[i].match(/(".*?"|[^",]+)(?=\s*,|\s*$)/g);
                 if (!row) continue;
 
-                const clean = (val) => val ? val.replace(/,|"/g, '').trim() : '';
+                const clean = (val) => val ? val.replace(/^"|"$/g, '').trim() : '';
 
                 const code = clean(row[idxCode]);
                 if (!code) continue;
@@ -268,15 +274,31 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
                     continue;
                 }
 
+                const itemType = idxType > -1 ? clean(row[idxType]) : 'Single';
+                let parsedStock = {};
+                let totalStockNum = 0;
+
+                if (itemType === 'Variable' && idxBreakdown > -1) {
+                    const breakdown = clean(row[idxBreakdown]); // e.g., "M:95 | XL:116"
+                    if (breakdown) {
+                        breakdown.split('|').forEach(pair => {
+                            const [sz, val] = pair.split(':');
+                            if (sz && val) parsedStock[sz.trim()] = Number(val.trim()) || 0;
+                        });
+                    }
+                } else {
+                    totalStockNum = idxStock > -1 ? Number(clean(row[idxStock])) || 0 : 0;
+                }
+
                 const newItem = {
+                    date: idxDate > -1 ? clean(row[idxDate]) : new Date().toISOString().split('T')[0],
                     code: code.toUpperCase(),
                     category: idxCat > -1 ? clean(row[idxCat]) : 'Uncategorized',
-                    type: 'Single',
-                    totalStock: idxStock > -1 ? Number(clean(row[idxStock])) || 0 : 0,
-                    stock: {},
+                    type: itemType,
+                    totalStock: itemType === 'Single' ? totalStockNum : 0,
+                    stock: itemType === 'Variable' ? parsedStock : {},
                     unitCost: idxCost > -1 ? Number(clean(row[idxCost])) || 0 : 0,
                     mrp: idxMrp > -1 ? Number(clean(row[idxMrp])) || 0 : 0,
-                    date: new Date().toISOString().split('T')[0],
                     locationId: '',
                     shelfRow: '',
                     addedBy: user?.displayName || 'Import',

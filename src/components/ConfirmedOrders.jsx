@@ -78,17 +78,32 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, invent
 
     // --- Handlers ---
     const handleExport = () => {
-        const data = filteredOrders.map(o => ({
-            'Item Type': 'Parcel',
-            'Store Name': 'Bentree',
-            'Merchant Order ID': o.merchantOrderId || '',
-            'Recipient Name': o.recipientName || '',
-            'Phone Number': o.recipientPhone ? `'${o.recipientPhone}` : '',
-            'Recipient Address': o.recipientAddress || '',
-            'Amount To Collect': o.dueAmount || 0,
-            'Status': o.status,
-            'Remarks': o.remarks || ''
-        }));
+        const data = filteredOrders.map(o => {
+            // Calculate Total Item Quantity
+            const totalQty = (o.products || []).reduce((sum, p) => sum + Number(p.qty || 0), 0);
+
+            // Calculate Dynamic Weight (Quantity * Weight per item)
+            // It tries to find 'weight' from DB, defaults to 0.20 if not found
+            const unitWeight = Number(o.weight || o.itemWeight) || 0.20;
+            const calculatedTotalWeight = (totalQty * unitWeight).toFixed(2);
+
+            return {
+                'Item Type': 'Parcel',
+                'Store Name': 'Bentree',
+                'Merchant Order ID': o.merchantOrderId || '',
+                'Recipient Name': o.recipientName || '',
+                'Phone Number': o.recipientPhone || '',
+                'Recipient Address': o.recipientAddress || '',
+                'Recipient City': o.city || o.recipientCity || '', 
+                'Recipient Zone': o.zone || o.recipientZone || '',
+                'Recipient Area': o.area || o.recipientArea || '',
+                'Amount To Collect': o.dueAmount || 0,
+                'Item Quantity': totalQty,
+                'Item Weight': calculatedTotalWeight,
+                'Item Description': o.itemDescription || '', 
+                'Special Instructions': o.specialInstructions || o.remarks || ''
+            };
+        });
         downloadCSV(data, 'confirmed_orders_export.csv');
     };
 
@@ -208,13 +223,12 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, invent
                                         <div className="font-medium">{order.recipientName}</div>
                                         <div className="text-xs opacity-75">{order.recipientPhone}</div>
                                         
-                                        {/* --- UPDATED REFUND COLOR LOGIC --- */}
                                         <div className={`text-[10px] font-bold mt-1 ${order.dueAmount < 0 ? 'text-red-600 animate-pulse' : 'text-slate-500'}`}>
                                             {order.dueAmount < 0 ? `REFUND: ৳${Math.abs(order.dueAmount)}` : `Due: ৳${order.dueAmount}`}
                                         </div>
                                     </td>
                                     <td className="p-3 text-xs">
-                                        {(order.products || []).map((p, i) => <div key={i}>{p.qty}x {p.code} ({p.size})</div>)}
+                                        {(order.products || []).map((p, i) => <div key={`${order.id}-product-${i}-${p.code}`}>{p.qty}x {p.code} ({p.size})</div>)}
                                     </td>
                                     <td className="p-3 font-bold">
                                         <span className={`px-2 py-1 rounded ${getStatusColor(order.status)}`}>{order.status}</span>
