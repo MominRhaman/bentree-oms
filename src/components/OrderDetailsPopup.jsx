@@ -7,7 +7,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
     const [isEditing, setIsEditing] = useState(isReturnMode);
     const [editedOrder, setEditedOrder] = useState(null);
     const [errors, setErrors] = useState({});
-    
+
     // --- State for History Detail Popup & Invoice ---
     const [historyModalData, setHistoryModalData] = useState(null);
     const [showInvoice, setShowInvoice] = useState(false);
@@ -18,7 +18,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
             const deepCopy = JSON.parse(JSON.stringify(order));
             setEditedOrder(deepCopy);
             setErrors({});
-            if (isReturnMode) setIsEditing(true); 
+            if (isReturnMode) setIsEditing(true);
         }
     }, [order, isReturnMode]);
 
@@ -64,7 +64,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
     const recalculateTotals = (currentOrder) => {
         const products = currentOrder.products || [];
         const subtotal = products.reduce((sum, p) => sum + (Number(p.price || 0) * Number(p.qty || 0)), 0);
-        
+
         let discount = 0;
         if (currentOrder.discountType === 'Percent') {
             discount = subtotal * (Number(currentOrder.discountValue || 0) / 100);
@@ -74,7 +74,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
 
         const totalAfterDiscount = subtotal - discount;
         const grandTotal = totalAfterDiscount + Number(currentOrder.deliveryCharge || 0);
-        
+
         const collected = Number(currentOrder.collectedAmount || 0);
         const advance = Number(currentOrder.advanceAmount || 0);
         const dueAmount = grandTotal - advance - collected;
@@ -90,26 +90,26 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
     const handleProductChange = (index, field, value) => {
         const newProducts = [...editedOrder.products];
         newProducts[index][field] = value;
-        
+
         if (field === 'code' && inventory.length > 0) {
             const foundItem = inventory.find(i => i.code.toUpperCase() === value.toUpperCase());
             if (foundItem) {
                 newProducts[index].price = foundItem.mrp || 0;
-                if(foundItem.type === 'Variable' && foundItem.stock) {
+                if (foundItem.type === 'Variable' && foundItem.stock) {
                     const sizes = Object.keys(foundItem.stock);
-                    if(sizes.length > 0) newProducts[index].size = sizes[0];
+                    if (sizes.length > 0) newProducts[index].size = sizes[0];
                 }
             }
         }
 
         setEditedOrder(prev => recalculateTotals({ ...prev, products: newProducts }));
-        
+
         const error = getStockError(newProducts[index]);
-        setErrors(prev => { 
-            const n = { ...prev }; 
-            if (error) n[index] = error; 
-            else delete n[index]; 
-            return n; 
+        setErrors(prev => {
+            const n = { ...prev };
+            if (error) n[index] = error;
+            else delete n[index];
+            return n;
         });
     };
 
@@ -123,10 +123,10 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
     const removeProduct = (index) => {
         const newProducts = editedOrder.products.filter((_, i) => i !== index);
         setEditedOrder(prev => recalculateTotals({ ...prev, products: newProducts }));
-        setErrors(prev => { 
-            const n = { ...prev }; 
-            delete n[index]; 
-            return n; 
+        setErrors(prev => {
+            const n = { ...prev };
+            delete n[index];
+            return n;
         });
     };
 
@@ -144,15 +144,23 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
         if (onEdit) {
             const safeStatus = typeof order.status === 'string' ? order.status : (editedOrder.status || 'Pending');
             const statusToSave = isReturnMode ? 'Returned' : safeStatus;
-            
-            const prevProductsSnapshot = (order.products || []).map(p => 
-                `[Code: ${p.code || '-'} | Size: ${p.size || '-'} | Qty: ${p.qty || 0} | Price: ${p.price || 0}]`
-            ).join('  ,  ');
 
+            // 1. Capture original products
+            const prevProductsSnapshot = (order.products || []).map(p =>
+                `[Code: ${p.code || '-'} | Size: ${p.size || '-'} | Qty: ${p.qty || 0}]`
+            ).join(' , ');
+
+            // 2. Capture original financial values
+            const prevAdvance = order.advanceAmount || 0;
+            const prevCollected = order.collectedAmount || 0;
+
+            // 3. Create the Note Text
             const noteBase = isReturnMode ? 'Returned (Partial/Edited)' : 'Order Details Updated';
-            const noteText = `${noteBase}. Previous Content: { ${prevProductsSnapshot || 'None'} }`;
 
-            let originalChargeToSave = order.originalDeliveryCharge; 
+            // This combines everything into the history note
+            const noteText = `${noteBase}. Advance: ৳${prevAdvance}, Collected: ৳${prevCollected}. Products: { ${prevProductsSnapshot} }`;
+
+            let originalChargeToSave = order.originalDeliveryCharge;
             if (isReturnMode) {
                 if (!originalChargeToSave) {
                     originalChargeToSave = Number(order.deliveryCharge || 0);
@@ -162,7 +170,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
             const rawUpdatedOrder = {
                 ...editedOrder,
                 status: statusToSave,
-                originalDeliveryCharge: originalChargeToSave, 
+                originalDeliveryCharge: originalChargeToSave,
                 history: [
                     ...(order.history || []),
                     {
@@ -173,15 +181,12 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                     }
                 ]
             };
-            
+
             const sanitizedOrder = sanitizeForFirebase(rawUpdatedOrder);
-            // TRIGGER ATOMIC INVENTORY UPDATE via handleEditOrderWithStock in App.jsx
             onEdit(order.id, statusToSave, sanitizedOrder);
-            
+
             setIsEditing(false);
             if (isReturnMode) onClose();
-        } else {
-            console.error("onEdit function is missing!");
         }
     };
 
@@ -191,13 +196,13 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
             ...editedOrder,
             status: 'Pending',
             trackingId: '',
-            merchantOrderId: '', 
-            storeOrderId: '',    
+            merchantOrderId: '',
+            storeOrderId: '',
             collectedAmount: 0,
             returnCashReceived: 0,
             isDeliveryFeeReceived: false,
             revenueAdjustment: 0,
-            originalDeliveryCharge: 0, 
+            originalDeliveryCharge: 0,
             history: [
                 ...(order.history || []),
                 {
@@ -208,7 +213,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                 }
             ]
         };
-        
+
         onEdit(order.id, 'Pending', sanitizeForFirebase(recalculateTotals(reorderUpdate)));
         setIsEditing(false);
         onClose();
@@ -236,24 +241,26 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
     }
 
     const safeStatus = (typeof order.status === 'string') ? order.status : 'Unknown';
+    // Helper to detect partial return state
+    const isPartialReturn = (order.history || []).some(h => h.note?.includes('Returned (Partial/Edited)'));
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
             <div className={`bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden ${isReturnMode ? 'border-4 border-amber-400' : ''}`}>
-                
+
                 {/* --- Header --- */}
                 <div className={`p-4 border-b flex justify-between items-center ${isReturnMode ? 'bg-amber-50' : 'bg-slate-50'}`}>
                     <div>
                         <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
                             {isReturnMode ? (
                                 <span className="flex items-center text-amber-700">
-                                    <RotateCcw size={20} className="mr-2"/> Process Return
+                                    <RotateCcw size={20} className="mr-2" /> Process Return
                                 </span>
                             ) : (
                                 <>
                                     Order #{order.merchantOrderId || order.storeOrderId}
-                                    <span className={`text-xs px-2 py-1 rounded-full ${getStatusColor(safeStatus)}`}>
-                                        {safeStatus}
+                                    <span className={`text-xs px-2 py-1 rounded-full ${getStatusColor(isPartialReturn && safeStatus === 'Returned' ? 'Dispatched' : safeStatus)}`}>
+                                        {isPartialReturn && safeStatus === 'Returned' ? 'Dispatched' : safeStatus}
                                     </span>
                                     {order.isExpress && (
                                         <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-1 rounded-full border border-amber-200 flex items-center gap-1">
@@ -273,8 +280,8 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                     </div>
                     <div className="flex gap-2">
                         {/* Always visible print button */}
-                        <button 
-                            onClick={() => setShowInvoice(true)} 
+                        <button
+                            onClick={() => setShowInvoice(true)}
                             className="p-2 hover:bg-white rounded-full border border-transparent hover:border-slate-200 transition-all text-slate-600"
                             title="Print Invoice"
                         >
@@ -294,7 +301,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
 
                 {/* Content */}
                 <div className="flex-1 overflow-y-auto p-6 space-y-6">
-                    
+
                     {/* Customer Info */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div className="space-y-3">
@@ -354,13 +361,13 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                         </div>
                     </div>
 
-                    {/* Products Section */}
+                    {/* Items Section */}
                     <div>
                         <h3 className="font-semibold text-slate-700 mb-3 flex justify-between items-center">
                             <span>Items ({editedOrder.products?.length})</span>
                             {isEditing && (
                                 <button onClick={addProduct} className="text-xs bg-emerald-50 text-emerald-600 px-2 py-1 rounded border border-emerald-200 flex items-center hover:bg-emerald-100">
-                                    <Plus size={12} className="mr-1"/> Add Item
+                                    <Plus size={12} className="mr-1" /> Add Item
                                 </button>
                             )}
                         </h3>
@@ -373,8 +380,8 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                                         {isEditing ? (
                                             <>
                                                 <div className="flex-1">
-                                                    <input className={`w-full p-2 border rounded text-sm bg-white ${hasError ? 'border-red-500 bg-red-50' : ''}`} value={p.code} onChange={e => handleProductChange(i, 'code', e.target.value)} placeholder="Code"/>
-                                                    {hasError && <div className="text-xs text-red-600 font-bold mt-1 flex items-center"><AlertTriangle size={12} className="mr-1"/> {hasError}</div>}
+                                                    <input className={`w-full p-2 border rounded text-sm bg-white ${hasError ? 'border-red-500 bg-red-50' : ''}`} value={p.code} onChange={e => handleProductChange(i, 'code', e.target.value)} placeholder="Code" />
+                                                    {hasError && <div className="text-xs text-red-600 font-bold mt-1 flex items-center"><AlertTriangle size={12} className="mr-1" /> {hasError}</div>}
                                                 </div>
                                                 <div className="flex gap-2">
                                                     <div className="w-20">
@@ -384,7 +391,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                                                                 {availableSizes.map(sz => <option key={sz} value={sz}>{sz}</option>)}
                                                             </select>
                                                         ) : (
-                                                            <input className="w-full p-2 border rounded text-sm bg-white" value={p.size} onChange={e => handleProductChange(i, 'size', e.target.value)} placeholder="Size"/>
+                                                            <input className="w-full p-2 border rounded text-sm bg-white" value={p.size} onChange={e => handleProductChange(i, 'size', e.target.value)} placeholder="Size" />
                                                         )}
                                                     </div>
                                                     <div className="w-20"><input type="number" className="w-full p-2 border rounded text-sm bg-white" value={p.qty} onChange={e => handleProductChange(i, 'qty', e.target.value)} onWheel={disableScroll} /></div>
@@ -409,16 +416,22 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                         <div className="flex justify-between text-sm"><span className="text-slate-500">Subtotal</span><span className="font-medium">৳{editedOrder.subtotal}</span></div>
                         <div className="flex justify-between text-sm items-center">
                             <span className="text-slate-500">Discount</span>
-                            {isEditing ? <input className="w-24 p-1 border rounded text-right" value={editedOrder.discountValue} onChange={e => handleInputChange('discountValue', e.target.value)} onWheel={disableScroll} /> : <span className="text-red-500">- ৳{order.discountType === 'Percent' ? (order.subtotal * (order.discountValue/100)) : order.discountValue}</span>}
+                            {isEditing ? <input className="w-24 p-1 border rounded text-right" value={editedOrder.discountValue} onChange={e => handleInputChange('discountValue', e.target.value)} onWheel={disableScroll} /> : <span className="text-red-500">- ৳{order.discountType === 'Percent' ? (order.subtotal * (order.discountValue / 100)) : order.discountValue}</span>}
                         </div>
                         <div className="flex justify-between text-sm items-center">
                             <span className="text-slate-500">Delivery Charge</span>
                             {isEditing ? <input className="w-24 p-1 border rounded text-right" value={editedOrder.deliveryCharge} onChange={e => handleInputChange('deliveryCharge', e.target.value)} onWheel={disableScroll} /> : <span>৳{order.deliveryCharge}</span>}
                         </div>
                         <div className="border-t pt-2 mt-2 flex justify-between font-bold text-lg"><span>Grand Total</span><span>৳{editedOrder.grandTotal}</span></div>
+
+                        {/* Explicitly showing Advance Amount */}
+                        <div className="flex justify-between text-sm font-bold text-blue-600 bg-blue-50 p-1 rounded">
+                            <span>Paid Advance Money</span>
+                            <span>- ৳{editedOrder.advanceAmount || 0}</span>
+                        </div>
                         <div className="flex justify-between text-sm text-slate-500 pt-1 items-center">
                             <span>Advance / Collected</span>
-                            {isEditing ? <input className="w-32 p-1 border rounded text-right bg-white" value={editedOrder.collectedAmount} onChange={e => handleInputChange('collectedAmount', e.target.value)} onWheel={disableScroll} /> : <span>- ৳{(Number(editedOrder.advanceAmount||0) + Number(editedOrder.collectedAmount||0))}</span>}
+                            {isEditing ? <input className="w-32 p-1 border rounded text-right bg-white" value={editedOrder.collectedAmount} onChange={e => handleInputChange('collectedAmount', e.target.value)} onWheel={disableScroll} /> : <span>- ৳{(Number(editedOrder.advanceAmount || 0) + Number(editedOrder.collectedAmount || 0))}</span>}
                         </div>
                         <div className="flex justify-between font-bold text-emerald-600 border-t border-dashed border-slate-300 pt-2">
                             <span>{editedOrder.dueAmount < 0 ? "Refund Due" : "Due Amount"}</span>
@@ -446,10 +459,10 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                                         <div className="absolute w-3 h-3 bg-slate-300 rounded-full mt-1.5 -left-1.5 border border-white"></div>
                                         <time className="text-[10px] text-slate-400">{new Date(h.timestamp).toLocaleString()}</time>
                                         <div className="flex items-center gap-2">
-                                            <h3 className="text-sm font-bold text-slate-800">{h.status}</h3>
-                                            {h.note?.includes('Previous Content:') && (
-                                                <button onClick={() => setHistoryModalData(h.note)} className="text-blue-500 hover:text-blue-700 bg-blue-50 p-1 rounded-full"><Eye size={14} /></button>
-                                            )}
+                                            <h3 className="text-sm font-bold text-slate-800">
+                                                {h.note?.includes('Returned (Partial/Edited)') ? 'Dispatched' : h.status}
+                                            </h3>
+                                            <button onClick={() => setHistoryModalData(h.note || 'No additional details available.')} className="text-blue-500 hover:text-blue-700 bg-blue-50 p-1 rounded-full" title="View History Details"><Eye size={14} /></button>
                                         </div>
                                         <p className="text-xs text-slate-600">{h.note || 'Status updated'}</p>
                                     </li>
@@ -463,7 +476,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                 <div className="p-4 border-t bg-slate-50 flex justify-between items-center">
                     {isEditing ? (
                         <>
-                            <button onClick={() => { setIsEditing(false); if(isReturnMode) onClose(); else setEditedOrder(JSON.parse(JSON.stringify(order))); setErrors({}); }} className="px-4 py-2 text-slate-600 font-medium hover:bg-slate-200 rounded">Cancel</button>
+                            <button onClick={() => { setIsEditing(false); if (isReturnMode) onClose(); else setEditedOrder(JSON.parse(JSON.stringify(order))); setErrors({}); }} className="px-4 py-2 text-slate-600 font-medium hover:bg-slate-200 rounded">Cancel</button>
                             <div className="flex gap-2">
                                 {(safeStatus || '').toLowerCase().includes('return') && !isReturnMode && (
                                     <button onClick={handleReorder} className="px-4 py-2 bg-blue-600 text-white font-bold rounded shadow hover:bg-blue-700 flex items-center gap-2">
@@ -478,6 +491,38 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                     ) : (
                         <div className="w-full flex gap-3">
                             <button className="flex-1 py-2 text-slate-600 font-bold border border-slate-300 rounded hover:bg-slate-100" onClick={onClose}>Close</button>
+                            {isPartialReturn && (
+                                /* --- THIS IS THE MARK DISPATCHED BUTTON IN THE FOOTER --- */
+                                <button
+                                    className={`px-6 py-2 text-white font-bold rounded shadow flex items-center gap-2 transition-all ${safeStatus === 'Dispatched' ? 'bg-slate-300 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-700'
+                                        }`}
+                                    disabled={safeStatus === 'Dispatched'}
+                                    onClick={() => {
+                                        const dispatchHistory = [
+                                            ...(order.history || []),
+                                            {
+                                                status: 'Dispatched',
+                                                timestamp: new Date().toISOString(),
+                                                note: 'Manually marked as Dispatched after Partial Return',
+                                                updatedBy: 'Admin'
+                                            }
+                                        ];
+
+                                        // 1. Send update to database
+                                        onEdit(order.id, 'Dispatched', {
+                                            ...order,
+                                            status: 'Dispatched',
+                                            history: dispatchHistory
+                                        });
+
+                                        // 2. THE CHANGE: Close the popup immediately after clicking
+                                        onClose();
+                                    }}
+                                >
+                                    <CheckCircle size={18} />
+                                    {safeStatus === 'Dispatched' ? 'Dispatched' : 'Mark Dispatched'}
+                                </button>
+                            )}
                             <button className="flex-1 py-2 bg-slate-800 text-white font-bold rounded flex justify-center items-center gap-2 hover:bg-slate-900" onClick={() => setShowInvoice(true)}>
                                 <Printer size={18} /> Print Invoice
                             </button>
@@ -490,9 +535,9 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
             {historyModalData && (
                 <div className="fixed inset-0 bg-black bg-opacity-60 z-[60] flex items-center justify-center p-4">
                     <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 relative">
-                        <button onClick={() => setHistoryModalData(null)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"><X size={20} /></button>
+                        <button onClick={() => setHistoryModalData(null)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors"><X size={20} /></button>
                         <h3 className="font-bold text-lg text-slate-800 mb-4 border-b pb-2">History Details</h3>
-                        <div className="bg-slate-50 p-4 rounded border border-slate-100 text-sm text-slate-700 font-mono whitespace-pre-wrap">{historyModalData}</div>
+                        <div className="bg-slate-50 p-4 rounded border border-slate-100 text-sm text-slate-700 font-mono whitespace-pre-wrap max-h-[60vh] overflow-y-auto">{historyModalData}</div>
                     </div>
                 </div>
             )}

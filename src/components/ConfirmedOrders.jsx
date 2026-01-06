@@ -82,10 +82,8 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, invent
             // Calculate Total Item Quantity
             const totalQty = (o.products || []).reduce((sum, p) => sum + Number(p.qty || 0), 0);
 
-            // Calculate Dynamic Weight (Quantity * Weight per item)
-            // It tries to find 'weight' from DB, defaults to 0.20 if not found
-            const unitWeight = Number(o.weight || o.itemWeight) || 0.20;
-            const calculatedTotalWeight = (totalQty * unitWeight).toFixed(2);
+            // FIX: Only change this line to show exactly 0.20
+            const calculatedTotalWeight = "0.20 kg";
 
             return {
                 'Item Type': 'Parcel',
@@ -327,11 +325,11 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, invent
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-1">Total Received Amount</label>
-                                <input name="received" type="number" defaultValue={deliveryModal.dueAmount || 0} className="w-full p-2 border rounded font-bold" autoFocus required />
+                                <input name="received" type="number" defaultValue={deliveryModal.dueAmount || 0} onWheel={(e) => e.target.blur()} className="w-full p-2 border rounded font-bold" autoFocus required />
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-1">Delivery Charge (Included)</label>
-                                <input name="deliveryCharge" type="number" defaultValue={deliveryModal.deliveryCharge || 0} className="w-full p-2 border rounded" required />
+                                <input name="deliveryCharge" type="number" defaultValue={deliveryModal.deliveryCharge || 0} onWheel={(e) => e.target.blur()} className="w-full p-2 border rounded" required />
                             </div>
                             <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded shadow-sm">Confirm Delivered</button>
                         </form>

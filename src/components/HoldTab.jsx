@@ -35,6 +35,8 @@ const HoldTab = ({ orders, onUpdate }) => {
                             <th className="p-3">Recipient</th>
                             <th className="p-3">Items</th>
                             <th className="p-3">Total</th>
+                            {/* Added Remarks Header */}
+                            <th className="p-3">Remarks</th>
                             <th className="p-3">Action</th>
                         </tr>
                     </thead>
@@ -48,6 +50,12 @@ const HoldTab = ({ orders, onUpdate }) => {
                                 </td>
                                 <td className="p-3 text-xs">{(order.products || []).map((p, i) => <span key={i} className="mr-1">{p.code}({p.qty})</span>)}</td>
                                 <td className="p-3 font-medium">৳{order.grandTotal}</td>
+                                {/* Displaying the Remarks entered during Hold popup */}
+                                <td className="p-3">
+                                    <div className="text-xs text-purple-700 bg-purple-100/50 p-2 rounded border border-purple-200 italic">
+                                        {order.remarks || order.note || 'No remarks'}
+                                    </div>
+                                </td>
                                 <td className="p-3">
                                     <button
                                         onClick={() => onUpdate(order.id, 'Confirmed', { isUnhold: true })}
@@ -58,7 +66,7 @@ const HoldTab = ({ orders, onUpdate }) => {
                                 </td>
                             </tr>
                         ))}
-                        {filtered.length === 0 && <tr><td colSpan="5" className="p-8 text-center text-slate-400">No orders found</td></tr>}
+                        {filtered.length === 0 && <tr><td colSpan="6" className="p-8 text-center text-slate-400">No orders found</td></tr>}
                     </tbody>
                 </table>
             </div>

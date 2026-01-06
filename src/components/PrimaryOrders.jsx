@@ -129,9 +129,9 @@ const PrimaryOrders = ({ orders, onUpdate, onEdit }) => {
                             <th className="p-3">Call Log</th>
                             <th className="p-3">Total</th>
                             <th className="p-3">Check Out</th>
-                            <th className="p-3">Status</th>
-                            <th className="p-3 text-center">Actions</th>
-                            <th className="p-3">Remarks</th>
+                            {/* <th className="p-3">Status</th> */}
+                            <th className="p-3">Order Status</th>
+                            <th className="p-3">Customer Remarks</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -190,7 +190,7 @@ const PrimaryOrders = ({ orders, onUpdate, onEdit }) => {
                                                 </button>
                                             ))}
                                         </div>
-                                        <input placeholder="Note..." className="text-xs border rounded p-1 w-full focus:ring-1 focus:ring-emerald-500 outline-none" defaultValue={order.callNote || ''} onClick={(e) => e.stopPropagation()} onBlur={(e) => onUpdate(order.id, order.status, { callNote: e.target.value })} />
+                                        <input placeholder="Caller Note" className="text-xs border rounded p-1 w-full focus:ring-1 focus:ring-emerald-500 outline-none" defaultValue={order.callNote || ''} onClick={(e) => e.stopPropagation()} onBlur={(e) => onUpdate(order.id, order.status, { callNote: e.target.value })} />
                                     </td>
                                     <td className="p-3 font-medium">৳{order.grandTotal}</td>
                                     
@@ -245,7 +245,7 @@ const PrimaryOrders = ({ orders, onUpdate, onEdit }) => {
                                         </div>
                                     </td>
 
-                                    <td className={`p-3 font-bold text-xs uppercase ${order.status === 'Cancelled' ? 'text-red-600' : 'text-slate-600'}`}>{order.status}</td>
+                                    {/* <td className={`p-3 font-bold text-xs uppercase ${order.status === 'Cancelled' ? 'text-red-600' : 'text-slate-600'}`}>{order.status}</td> */}
                                     
                                     {/* --- ACTIONS COLUMN --- */}
                                     <td className="p-3">

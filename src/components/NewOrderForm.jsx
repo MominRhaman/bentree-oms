@@ -105,7 +105,8 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         const due = grandTotal - Number(formData.advanceAmount || 0);
 
         const productDesc = `${totalQty} item cost ${subtotal} tk`;
-        const weight = (totalQty * 0.2).toFixed(2) + ' kg';
+        // FIX: Only change this line to show exactly 0.20
+        const weight = "0.20 kg";
 
         return { subtotal, discount, totalAfterDiscount, grandTotal, due, totalQty, productDesc, weight };
     }, [formData]);

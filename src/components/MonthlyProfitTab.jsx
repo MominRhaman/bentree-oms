@@ -11,7 +11,7 @@ const MonthlyProfitTab = ({ orders, inventory, expenses }) => {
     // Default empty expenses
     const [newExpense, setNewExpense] = useState({
         media: '', salary: '', rent: '', utility: '', vat: '',
-        returnCharge: '', food: '', transport: '', accessories: '', others: ''
+        codCharge: '', food: '', transport: '', accessories: '', others: '', others: '', others: ''
     });
 
     // --- Load Data ---
@@ -23,7 +23,7 @@ const MonthlyProfitTab = ({ orders, inventory, expenses }) => {
             // Reset if no data found for selected month
             setNewExpense({
                 media: '', salary: '', rent: '', utility: '', vat: '',
-                returnCharge: '', food: '', transport: '', accessories: '', others: ''
+                codCharge: '', food: '', transport: '', accessories: '', others: ''
             });
         }
     }, [month, year, expenses]);

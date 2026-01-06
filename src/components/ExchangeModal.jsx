@@ -209,11 +209,11 @@ const ExchangeModal = ({ order, onClose, onConfirm, inventory }) => {
                                         </div>
                                         <div className="w-16">
                                             <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Qty</label>
-                                            <input type="number" value={p.qty} onChange={e => updateNewProduct(i, 'qty', e.target.value)} className="border p-2 w-full rounded text-sm" required />
+                                            <input type="number" value={p.qty} onChange={e => updateNewProduct(i, 'qty', e.target.value)} onWheel={(e) => e.target.blur()} className="border p-2 w-full rounded text-sm" required />
                                         </div>
                                         <div className="w-24">
                                             <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Price</label>
-                                            <input type="number" value={p.price} onChange={e => updateNewProduct(i, 'price', e.target.value)} className="border p-2 w-full rounded text-sm" required />
+                                            <input type="number" value={p.price} onChange={e => updateNewProduct(i, 'price', e.target.value)} onWheel={(e) => e.target.blur()} className="border p-2 w-full rounded text-sm" required />
                                         </div>
                                     </div>
                                     <div className="flex items-end justify-end sm:justify-start">
@@ -232,7 +232,7 @@ const ExchangeModal = ({ order, onClose, onConfirm, inventory }) => {
                             <div className="space-y-3">
                                 <div>
                                     <label className="text-xs font-bold text-slate-700 uppercase block mb-1">New Delivery Cost</label>
-                                    <input type="number" className="w-full border p-2 rounded shadow-sm" value={newDeliveryCost} onChange={e => setNewDeliveryCost(e.target.value)} placeholder="0" />
+                                    <input type="number" className="w-full border p-2 rounded shadow-sm" value={newDeliveryCost} onChange={e => setNewDeliveryCost(e.target.value)} onWheel={(e) => e.target.blur()} placeholder="0" />
                                 </div>
                                 
                                 {/* Discount Input Section */}
@@ -244,6 +244,7 @@ const ExchangeModal = ({ order, onClose, onConfirm, inventory }) => {
                                             className="w-full border p-2 rounded-l border-r-0 outline-none focus:ring-1 focus:ring-emerald-500 shadow-sm" 
                                             value={discountInput} 
                                             onChange={e => setDiscountInput(e.target.value)} 
+                                            onWheel={(e) => e.target.blur()}
                                             placeholder="0" 
                                         />
                                         <select 
