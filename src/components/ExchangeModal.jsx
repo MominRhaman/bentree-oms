@@ -64,21 +64,21 @@ const ExchangeModal = ({ order, onClose, onConfirm, inventory }) => {
                 exchangeDate: new Date().toISOString().split('T')[0],
                 originalProducts: order.products,
                 newProducts: newProducts,
-                priceDeviation: priceDeviation,
+                priceDeviation: finalAdjustment,
             },
             history: [
                 ...(order.history || []),
                 {
                     status: 'Exchanged',
                     timestamp: new Date().toISOString(),
-                    note: `Exchange Processed. Adj: ৳${priceDeviation}`,
+                    note: `Exchange Processed. Adj: ৳${finalAdjustment}`,
                     updatedBy: 'Admin'
                 }
             ]
         };
 
         // This uses the SAME ID, so buttons in Dispatch Tab stay working!
-        await onConfirm(order.id, 'Exchanged', updatedOrderData);
+        await onConfirm(order.id, 'Exchanged', updatedOrder);
         onClose();
     };
 
@@ -97,8 +97,7 @@ const ExchangeModal = ({ order, onClose, onConfirm, inventory }) => {
                 const stockVal = invItem.stock?.[Object.keys(invItem.stock).find(k => k.toUpperCase() === sizeKey)];
                 if ((stockVal || 0) < qtyNeeded) { alert(`Insufficient stock for ${p.code} (${p.size})`); return; }
             } else if (invItem.totalStock < qtyNeeded) {
-                alert(`Insufficient stock for ${p.code}`); return;
-            }
+                alert(`Insufficient stock for ${p.code}`); return; }
         }
 
         // 2. Prepare the clean payload for App.jsx
@@ -168,17 +167,6 @@ const ExchangeModal = ({ order, onClose, onConfirm, inventory }) => {
                     <button onClick={onClose}><X size={24} className="text-slate-400" /></button>
                 </div>
                 
-                {/* Visual Formula Guide */}
-                <div className="text-xs text-slate-600 mb-4 bg-blue-50 p-3 rounded border border-blue-100">
-                    <p className="font-bold mb-1">Calculation Logic:</p>
-                    <p className="font-mono text-blue-700">
-                        (New Item Value - Old Item Value) + New Delivery Cost = Net Payable
-                    </p>
-                    <p className="text-[10px] text-slate-500 mt-1">
-                        *Old Item Value = Old Grand Total - Old Delivery Charge
-                    </p>
-                </div>
-                
                 <form onSubmit={handleSubmit} className="flex-1 flex flex-col overflow-hidden">
                     <div className="overflow-y-auto pr-2 flex-1">
                         {newProducts.map((p, i) => {
@@ -235,7 +223,6 @@ const ExchangeModal = ({ order, onClose, onConfirm, inventory }) => {
                                     <input type="number" className="w-full border p-2 rounded shadow-sm" value={newDeliveryCost} onChange={e => setNewDeliveryCost(e.target.value)} onWheel={(e) => e.target.blur()} placeholder="0" />
                                 </div>
                                 
-                                {/* Discount Input Section */}
                                 <div>
                                     <label className="text-xs font-bold text-slate-700 uppercase block mb-1">New Discount</label>
                                     <div className="flex">
@@ -262,7 +249,6 @@ const ExchangeModal = ({ order, onClose, onConfirm, inventory }) => {
                             <div className="text-right space-y-1">
                                 <h4 className="font-bold text-slate-700 border-b pb-1 mb-2">Calculation Breakdown</h4>
                                 
-                                {/* 1. New Product Values */}
                                 <div className="text-xs text-slate-500 flex justify-between">
                                     <span>New Items Total:</span>
                                     <span>৳{newProductTotal}</span>
@@ -276,18 +262,23 @@ const ExchangeModal = ({ order, onClose, onConfirm, inventory }) => {
                                     <span>৳{newProductValue.toFixed(0)}</span>
                                 </div>
 
-                                {/* 2. Old Product Values */}
                                 <div className="text-xs text-blue-600 flex justify-between mt-2 font-medium">
                                     <span>- Old Item Value:</span>
                                     <span>৳{oldProductValue}</span>
                                 </div>
+
+                                {/* ADDED: Previous Advance Money Display */}
+                                <div className="text-xs text-blue-600 flex justify-between font-medium">
+                                    <span>Previous Advance:</span>
+                                    <span>৳{order.advanceAmount || 0}</span>
+                                </div>
+
                                 <div className="text-[10px] text-slate-400 italic text-right mb-1">
                                     (Old Grand Total - Old Delivery)
                                 </div>
 
                                 <div className="border-b border-dashed border-slate-300 my-1"></div>
 
-                                {/* 3. Difference + Delivery */}
                                 <div className="text-xs text-slate-500 flex justify-between">
                                     <span>Product Difference:</span>
                                     <span className={productDifference >= 0 ? 'text-slate-700' : 'text-red-500'}>
@@ -299,7 +290,6 @@ const ExchangeModal = ({ order, onClose, onConfirm, inventory }) => {
                                     <span>৳{Number(newDeliveryCost || 0)}</span>
                                 </div>
 
-                                {/* 4. Final Result */}
                                 <div className={`flex justify-between items-center mt-3 p-2 rounded ${finalAdjustment >= 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>
                                     <span className="font-bold uppercase text-xs">
                                         {finalAdjustment >= 0 ? 'Net Payable:' : 'Refund Amount:'}

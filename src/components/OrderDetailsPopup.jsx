@@ -7,6 +7,9 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
     const [isEditing, setIsEditing] = useState(isReturnMode);
     const [editedOrder, setEditedOrder] = useState(null);
     const [errors, setErrors] = useState({});
+    
+    // --- State to track marked products for Partial Return ---
+    const [partialReturnItems, setPartialReturnItems] = useState(new Set());
 
     // --- State for History Detail Popup & Invoice ---
     const [historyModalData, setHistoryModalData] = useState(null);
@@ -18,6 +21,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
             const deepCopy = JSON.parse(JSON.stringify(order));
             setEditedOrder(deepCopy);
             setErrors({});
+            setPartialReturnItems(new Set()); // Reset on open
             if (isReturnMode) setIsEditing(true);
         }
     }, [order, isReturnMode]);
@@ -128,11 +132,82 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
             delete n[index];
             return n;
         });
+        
+        // Remove from partial return list if deleted
+        setPartialReturnItems(prev => {
+            const next = new Set(prev);
+            next.delete(index);
+            return next;
+        });
+    };
+
+    const togglePartialReturn = (index) => {
+        setPartialReturnItems(prev => {
+            const next = new Set(prev);
+            if (next.has(index)) next.delete(index);
+            else next.add(index);
+            return next;
+        });
     };
 
     const sanitizeForFirebase = (obj) => {
         return JSON.parse(JSON.stringify(obj));
     };
+
+    // --- NEW: Handle Automatic Splitting for Partial Returns ---
+const handlePartialReturnProcess = async () => {
+    if (Object.keys(errors).length > 0) {
+        alert("Please fix stock errors first.");
+        return;
+    }
+
+    const returnedItems = editedOrder.products.filter((_, i) => partialReturnItems.has(i));
+    const keptItems = editedOrder.products.filter((_, i) => !partialReturnItems.has(i));
+
+    if (returnedItems.length === 0) {
+        alert("Please mark at least one item for return.");
+        return;
+    }
+
+    // 1. Create a NEW Order Record specifically for the Returned items
+    // This record will automatically show in the Cancelled & Returned tab
+    const returnOrderRecord = recalculateTotals({
+        ...order, // Inherit Customer Details (Name, Phone, Address, same Order ID)
+        id: `${order.id}_ret_${Date.now()}`, // Unique DB ID to avoid overwriting
+        products: returnedItems,
+        status: 'Returned',
+        history: [{
+            status: 'Returned',
+            timestamp: new Date().toISOString(),
+            note: `Partial Return created from original Order #${order.merchantOrderId || order.storeOrderId}`,
+            updatedBy: 'Admin'
+        }]
+    });
+
+    // 2. Update the ORIGINAL Order entry (Keep it in Dispatched tab with kept items)
+    const updatedOriginalOrder = recalculateTotals({
+        ...editedOrder,
+        products: keptItems,
+        status: keptItems.length === 0 ? 'Returned' : 'Dispatched',
+        history: [
+            ...(order.history || []),
+            {
+                status: keptItems.length === 0 ? 'Returned' : 'Dispatched',
+                timestamp: new Date().toISOString(),
+                note: `Partial Return processed. Returned items moved to a separate record.`,
+                updatedBy: 'Admin'
+            }
+        ]
+    });
+
+    // 3. Save both to the database
+    // The onEdit prop is used to send these updates back to the parent/Firebase
+    await onEdit(returnOrderRecord.id, 'Returned', sanitizeForFirebase(returnOrderRecord));
+    await onEdit(order.id, updatedOriginalOrder.status, sanitizeForFirebase(updatedOriginalOrder));
+
+    onClose();
+    alert("Partial Return processed. Returned items are now visible in the Cancel & Return tab.");
+};
 
     // --- SAVE / CONFIRM RETURN HANDLER ---
     const saveChanges = async () => {
@@ -272,7 +347,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                         </h2>
                         {isReturnMode ? (
                             <p className="text-xs text-amber-600 mt-1">
-                                1. Remove kept items. 2. Adjust Delivery Charge. 3. Confirm.
+                                1. Mark Partial Return items. 2. Remove kept items. 3. Confirm.
                             </p>
                         ) : (
                             <p className="text-xs text-slate-500">{new Date(order.createdAt?.seconds * 1000 || order.date).toLocaleString()}</p>
@@ -302,7 +377,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                 {/* Content */}
                 <div className="flex-1 overflow-y-auto p-6 space-y-6">
 
-                    {/* Customer Info */}
+                    {/* Customer Info Section */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div className="space-y-3">
                             <h3 className="font-semibold text-slate-700 flex items-center gap-2 border-b pb-2">
@@ -376,14 +451,14 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                                 const hasError = errors[i];
                                 const availableSizes = getAvailableSizes(p.code);
                                 return (
-                                    <div key={i} className={`flex flex-col sm:flex-row gap-2 ${isEditing ? 'bg-slate-50 p-3 rounded-lg border border-slate-200' : 'border-b border-slate-100 pb-2 last:border-0'}`}>
+                                    <div key={i} className={`flex flex-col sm:flex-row gap-2 ${isEditing ? 'bg-slate-50 p-3 rounded-lg border border-slate-200 shadow-sm' : 'border-b border-slate-100 pb-2 last:border-0'}`}>
                                         {isEditing ? (
                                             <>
                                                 <div className="flex-1">
                                                     <input className={`w-full p-2 border rounded text-sm bg-white ${hasError ? 'border-red-500 bg-red-50' : ''}`} value={p.code} onChange={e => handleProductChange(i, 'code', e.target.value)} placeholder="Code" />
                                                     {hasError && <div className="text-xs text-red-600 font-bold mt-1 flex items-center"><AlertTriangle size={12} className="mr-1" /> {hasError}</div>}
                                                 </div>
-                                                <div className="flex gap-2">
+                                                <div className="flex gap-2 items-center">
                                                     <div className="w-20">
                                                         {availableSizes.length > 0 ? (
                                                             <select className="w-full p-2 border rounded text-sm bg-white" value={p.size} onChange={e => handleProductChange(i, 'size', e.target.value)}>
@@ -396,7 +471,22 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                                                     </div>
                                                     <div className="w-20"><input type="number" className="w-full p-2 border rounded text-sm bg-white" value={p.qty} onChange={e => handleProductChange(i, 'qty', e.target.value)} onWheel={disableScroll} /></div>
                                                     <div className="w-24"><input type="number" className="w-full p-2 border rounded text-sm bg-white" value={p.price} onChange={e => handleProductChange(i, 'price', e.target.value)} onWheel={disableScroll} /></div>
-                                                    <button onClick={() => removeProduct(i)} className="p-2 bg-white text-red-500 border border-red-100 hover:bg-red-50 rounded shadow-sm"><Trash2 size={18} /></button>
+                                                    
+                                                    {/* PARTIAL RETURN CHECKBOX & DELETE ACTION */}
+                                                    <div className="flex items-center gap-3 ml-2 border-l pl-3 border-slate-300">
+                                                        {isReturnMode && (
+                                                            <label className="flex flex-col items-center cursor-pointer group">
+                                                                <span className="text-[9px] font-black text-amber-600 uppercase mb-0.5">Return</span>
+                                                                <input 
+                                                                    type="checkbox" 
+                                                                    className="w-5 h-5 rounded border-amber-300 text-amber-600 focus:ring-amber-500 cursor-pointer shadow-sm" 
+                                                                    checked={partialReturnItems.has(i)}
+                                                                    onChange={() => togglePartialReturn(i)}
+                                                                />
+                                                            </label>
+                                                        )}
+                                                        <button onClick={() => removeProduct(i)} className="p-2 bg-white text-red-500 border border-red-100 hover:bg-red-50 rounded shadow-sm"><Trash2 size={18} /></button>
+                                                    </div>
                                                 </div>
                                             </>
                                         ) : (
@@ -422,18 +512,18 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                             <span className="text-slate-500">Delivery Charge</span>
                             {isEditing ? <input className="w-24 p-1 border rounded text-right" value={editedOrder.deliveryCharge} onChange={e => handleInputChange('deliveryCharge', e.target.value)} onWheel={disableScroll} /> : <span>৳{order.deliveryCharge}</span>}
                         </div>
-                        <div className="border-t pt-2 mt-2 flex justify-between font-bold text-lg"><span>Grand Total</span><span>৳{editedOrder.grandTotal}</span></div>
+                        <div className="border-t pt-2 mt-2 flex justify-between font-bold text-lg text-slate-900"><span>Grand Total</span><span>৳{editedOrder.grandTotal}</span></div>
 
-                        {/* Explicitly showing Advance Amount */}
+                        {/* Advance Amount */}
                         <div className="flex justify-between text-sm font-bold text-blue-600 bg-blue-50 p-1 rounded">
                             <span>Paid Advance Money</span>
                             <span>- ৳{editedOrder.advanceAmount || 0}</span>
                         </div>
-                        <div className="flex justify-between text-sm text-slate-500 pt-1 items-center">
+                        <div className="flex justify-between text-sm text-slate-500 pt-1 items-center font-bold">
                             <span>Advance / Collected</span>
                             {isEditing ? <input className="w-32 p-1 border rounded text-right bg-white" value={editedOrder.collectedAmount} onChange={e => handleInputChange('collectedAmount', e.target.value)} onWheel={disableScroll} /> : <span>- ৳{(Number(editedOrder.advanceAmount || 0) + Number(editedOrder.collectedAmount || 0))}</span>}
                         </div>
-                        <div className="flex justify-between font-bold text-emerald-600 border-t border-dashed border-slate-300 pt-2">
+                        <div className="flex justify-between font-bold text-emerald-600 border-t border-dashed border-slate-300 pt-2 text-lg">
                             <span>{editedOrder.dueAmount < 0 ? "Refund Due" : "Due Amount"}</span>
                             <span className={editedOrder.dueAmount < 0 ? "text-red-600" : "text-emerald-600"}>{editedOrder.dueAmount < 0 ? `- ৳${Math.abs(editedOrder.dueAmount)}` : `৳${editedOrder.dueAmount}`}</span>
                         </div>
@@ -445,26 +535,26 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                         {isEditing ? (
                             <textarea className="w-full p-2 border rounded text-sm bg-yellow-50" rows="2" value={editedOrder.specialInstructions || ''} onChange={e => handleInputChange('specialInstructions', e.target.value)} />
                         ) : (
-                            <p className="text-sm bg-yellow-50 p-2 rounded text-slate-700">{order.specialInstructions || 'None'}</p>
+                            <p className="text-sm bg-yellow-50 p-2 rounded text-slate-700 leading-relaxed shadow-sm">{order.specialInstructions || 'None'}</p>
                         )}
                     </div>
 
                     {/* History */}
                     {!isEditing && (
                         <div className="pt-4 border-t border-slate-100">
-                            <h3 className="font-semibold text-slate-700 mb-4 flex items-center gap-2"><Clock size={16} /> Transaction History</h3>
+                            <h3 className="font-semibold text-slate-700 mb-4 flex items-center gap-2 tracking-tight uppercase text-xs font-bold text-slate-400"><Clock size={16} /> Transaction History</h3>
                             <ol className="relative border-l border-slate-200 ml-2">
                                 {(order.history || []).map((h, i) => (
                                     <li key={i} className="mb-6 ml-4">
                                         <div className="absolute w-3 h-3 bg-slate-300 rounded-full mt-1.5 -left-1.5 border border-white"></div>
-                                        <time className="text-[10px] text-slate-400">{new Date(h.timestamp).toLocaleString()}</time>
+                                        <time className="text-[10px] text-slate-400 font-mono">{new Date(h.timestamp).toLocaleString()}</time>
                                         <div className="flex items-center gap-2">
                                             <h3 className="text-sm font-bold text-slate-800">
                                                 {h.note?.includes('Returned (Partial/Edited)') ? 'Dispatched' : h.status}
                                             </h3>
                                             <button onClick={() => setHistoryModalData(h.note || 'No additional details available.')} className="text-blue-500 hover:text-blue-700 bg-blue-50 p-1 rounded-full" title="View History Details"><Eye size={14} /></button>
                                         </div>
-                                        <p className="text-xs text-slate-600">{h.note || 'Status updated'}</p>
+                                        <p className="text-xs text-slate-600 leading-relaxed">{h.note || 'Status updated'}</p>
                                     </li>
                                 ))}
                             </ol>
@@ -476,26 +566,31 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                 <div className="p-4 border-t bg-slate-50 flex justify-between items-center">
                     {isEditing ? (
                         <>
-                            <button onClick={() => { setIsEditing(false); if (isReturnMode) onClose(); else setEditedOrder(JSON.parse(JSON.stringify(order))); setErrors({}); }} className="px-4 py-2 text-slate-600 font-medium hover:bg-slate-200 rounded">Cancel</button>
+                            <button onClick={() => { setIsEditing(false); if (isReturnMode) onClose(); else setEditedOrder(JSON.parse(JSON.stringify(order))); setErrors({}); }} className="px-4 py-2 text-slate-600 font-bold hover:bg-slate-200 rounded text-sm uppercase transition-all">Cancel</button>
                             <div className="flex gap-2">
                                 {(safeStatus || '').toLowerCase().includes('return') && !isReturnMode && (
                                     <button onClick={handleReorder} className="px-4 py-2 bg-blue-600 text-white font-bold rounded shadow hover:bg-blue-700 flex items-center gap-2">
                                         <RefreshCw size={18} /> Reorder
                                     </button>
                                 )}
-                                <button onClick={saveChanges} className={`px-6 py-2 text-white font-bold rounded shadow flex items-center gap-2 ${isReturnMode ? 'bg-amber-600 hover:bg-amber-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
-                                    {isReturnMode ? <><RotateCcw size={18} /> Confirm Return</> : <><Save size={18} /> Save Changes</>}
-                                </button>
+                                
+                                {isReturnMode && partialReturnItems.size > 0 ? (
+                                    <button onClick={handlePartialReturnProcess} className="px-6 py-2 bg-emerald-600 text-white font-black rounded shadow-lg flex items-center gap-2 hover:bg-emerald-700 transition-all transform active:scale-95">
+                                        <RotateCcw size={18} /> Process Partial Return ({partialReturnItems.size})
+                                    </button>
+                                ) : (
+                                    <button onClick={saveChanges} className={`px-6 py-2 text-white font-black rounded shadow-lg flex items-center gap-2 ${isReturnMode ? 'bg-amber-600 hover:bg-amber-700' : 'bg-emerald-600 hover:bg-emerald-700'} transition-all transform active:scale-95`}>
+                                        {isReturnMode ? <><RotateCcw size={18} /> Confirm Return</> : <><Save size={18} /> Save Changes</>}
+                                    </button>
+                                )}
                             </div>
                         </>
                     ) : (
                         <div className="w-full flex gap-3">
-                            <button className="flex-1 py-2 text-slate-600 font-bold border border-slate-300 rounded hover:bg-slate-100" onClick={onClose}>Close</button>
+                            <button className="flex-1 py-2 text-slate-600 font-bold border border-slate-300 rounded hover:bg-slate-100 transition-colors" onClick={onClose}>Close</button>
                             {isPartialReturn && (
-                                /* --- THIS IS THE MARK DISPATCHED BUTTON IN THE FOOTER --- */
                                 <button
-                                    className={`px-6 py-2 text-white font-bold rounded shadow flex items-center gap-2 transition-all ${safeStatus === 'Dispatched' ? 'bg-slate-300 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-700'
-                                        }`}
+                                    className={`flex-1 py-2 text-white font-bold rounded shadow flex items-center justify-center gap-2 transition-all ${safeStatus === 'Dispatched' ? 'bg-slate-300 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-700'}`}
                                     disabled={safeStatus === 'Dispatched'}
                                     onClick={() => {
                                         const dispatchHistory = [
@@ -508,14 +603,12 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                                             }
                                         ];
 
-                                        // 1. Send update to database
                                         onEdit(order.id, 'Dispatched', {
                                             ...order,
                                             status: 'Dispatched',
                                             history: dispatchHistory
                                         });
 
-                                        // 2. THE CHANGE: Close the popup immediately after clicking
                                         onClose();
                                     }}
                                 >
@@ -523,7 +616,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
                                     {safeStatus === 'Dispatched' ? 'Dispatched' : 'Mark Dispatched'}
                                 </button>
                             )}
-                            <button className="flex-1 py-2 bg-slate-800 text-white font-bold rounded flex justify-center items-center gap-2 hover:bg-slate-900" onClick={() => setShowInvoice(true)}>
+                            <button className="flex-1 py-2 bg-slate-800 text-white font-bold rounded flex justify-center items-center gap-2 hover:bg-slate-900 shadow-md" onClick={() => setShowInvoice(true)}>
                                 <Printer size={18} /> Print Invoice
                             </button>
                         </div>
@@ -533,11 +626,11 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
 
             {/* History Detail Modal */}
             {historyModalData && (
-                <div className="fixed inset-0 bg-black bg-opacity-60 z-[60] flex items-center justify-center p-4">
-                    <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 relative">
-                        <button onClick={() => setHistoryModalData(null)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors"><X size={20} /></button>
-                        <h3 className="font-bold text-lg text-slate-800 mb-4 border-b pb-2">History Details</h3>
-                        <div className="bg-slate-50 p-4 rounded border border-slate-100 text-sm text-slate-700 font-mono whitespace-pre-wrap max-h-[60vh] overflow-y-auto">{historyModalData}</div>
+                <div className="fixed inset-0 bg-black bg-opacity-60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm transition-opacity">
+                    <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 relative border border-slate-200">
+                        <button onClick={() => setHistoryModalData(null)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors p-1 rounded-full hover:bg-slate-50"><X size={20} /></button>
+                        <h3 className="font-black text-sm text-slate-400 uppercase mb-4 tracking-widest border-b pb-2">Log Detail</h3>
+                        <div className="bg-slate-50 p-4 rounded border border-slate-100 text-sm text-slate-700 font-mono whitespace-pre-wrap max-h-[50vh] overflow-y-auto leading-relaxed shadow-inner">{historyModalData}</div>
                     </div>
                 </div>
             )}
