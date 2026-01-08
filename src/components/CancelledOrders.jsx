@@ -3,12 +3,12 @@ import { Calendar, Download, Trash2, RefreshCw, Ban } from 'lucide-react';
 import { doc, deleteDoc } from "firebase/firestore"; 
 import { getStatusColor, downloadCSV } from '../utils';
 
-// ⚠️ IMPORTANT: Using db from your firebase configuration
+// IMPORTANT: Using db from your firebase configuration
 import { db } from "../firebase"; 
 import OrderDetailsPopup from './OrderDetailsPopup';
 import SearchBar from './SearchBar';
 
-const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, inventory }) => {
+const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, inventory }) => {
     // --- States ---
     const [filterDate, setFilterDate] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
@@ -139,7 +139,7 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, inventory }) => {
                                 className="border-b hover:bg-slate-50 cursor-pointer"
                                 onClick={() => setSelectedOrder(order)}
                             >
-                                <td className="p-3 text-slate-500">{order.date}</td>
+                                <td className="p-3 text-slate-500">{order.date?.includes('T') ? order.date.split('T')[0] : order.date}</td>
                                 <td className="p-3 font-mono text-xs font-bold">{order.merchantOrderId || order.storeOrderId}</td>
                                 <td className="p-3">
                                     <div className="font-bold text-slate-700">{order.recipientName}</div>
@@ -224,7 +224,8 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, inventory }) => {
                     order={selectedOrder} 
                     onClose={() => setSelectedOrder(null)} 
                     getStatusColor={getBadgeColor} 
-                    onEdit={onEdit} 
+                    onEdit={onEdit}
+                    onCreate={onCreate}
                     inventory={inventory}
                 />
             )}

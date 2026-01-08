@@ -4,7 +4,7 @@ import SearchBar from './SearchBar';
 import OrderDetailsPopup from './OrderDetailsPopup';
 import { INVENTORY_CATEGORIES, downloadCSV } from '../utils';
 
-const OnlineSalesTab = ({ orders, inventory, onEdit, onDelete }) => {
+const OnlineSalesTab = ({ orders, inventory, onEdit, onCreate, onDelete }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [catFilter, setCatFilter] = useState('');
     const [startDate, setStartDate] = useState('');
@@ -256,7 +256,8 @@ const OnlineSalesTab = ({ orders, inventory, onEdit, onDelete }) => {
                     order={selectedOrder} 
                     onClose={() => setSelectedOrder(null)} 
                     getStatusColor={() => 'text-green-600 bg-green-50'} 
-                    onEdit={onEdit} 
+                    onEdit={onEdit}
+                    onCreate={onCreate}
                 />
             )}
         </div>

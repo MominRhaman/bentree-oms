@@ -3,7 +3,7 @@ import { X, Edit2, Save, Trash2, Printer, MapPin, Phone, User, Package, Plus, Cl
 import { disableScroll, updateInventoryStock } from '../utils';
 import InvoiceGenerator from './InvoiceGenerator';
 
-const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory = [], isReturnMode = false }) => {
+const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, inventory = [], isReturnMode = false }) => {
     const [isEditing, setIsEditing] = useState(isReturnMode);
     const [editedOrder, setEditedOrder] = useState(null);
     const [errors, setErrors] = useState({});
@@ -154,60 +154,96 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, inventory =
         return JSON.parse(JSON.stringify(obj));
     };
 
+    // Helper function to get clean date (YYYY-MM-DD only)
+    const getCleanDate = () => {
+        const today = new Date();
+        return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    };
+
     // --- NEW: Handle Automatic Splitting for Partial Returns ---
-const handlePartialReturnProcess = async () => {
-    if (Object.keys(errors).length > 0) {
-        alert("Please fix stock errors first.");
-        return;
-    }
+    const handlePartialReturnProcess = async () => {
+        if (Object.keys(errors).length > 0) {
+            alert("Please fix stock errors first.");
+            return;
+        }
 
-    const returnedItems = editedOrder.products.filter((_, i) => partialReturnItems.has(i));
-    const keptItems = editedOrder.products.filter((_, i) => !partialReturnItems.has(i));
+        const returnedItems = editedOrder.products.filter((_, i) => partialReturnItems.has(i));
+        const keptItems = editedOrder.products.filter((_, i) => !partialReturnItems.has(i));
 
-    if (returnedItems.length === 0) {
-        alert("Please mark at least one item for return.");
-        return;
-    }
+        if (returnedItems.length === 0) {
+            alert("Please mark at least one item for return.");
+            return;
+        }
 
-    // 1. Create a NEW Order Record specifically for the Returned items
-    // This record will automatically show in the Cancelled & Returned tab
-    const returnOrderRecord = recalculateTotals({
-        ...order, // Inherit Customer Details (Name, Phone, Address, same Order ID)
-        id: `${order.id}_ret_${Date.now()}`, // Unique DB ID to avoid overwriting
-        products: returnedItems,
-        status: 'Returned',
-        history: [{
+        // Generate a new Return Order ID
+        const originalOrderId = order.merchantOrderId || order.storeOrderId || 'N/A';
+        const returnOrderId = `${originalOrderId}-RET-${Date.now().toString().slice(-6)}`;
+
+        // 1. Create a NEW Order Record specifically for the Returned items
+        const returnOrderRecord = recalculateTotals({
+            ...order,
+            merchantOrderId: returnOrderId,
+            storeOrderId: returnOrderId,
+            products: returnedItems,
             status: 'Returned',
-            timestamp: new Date().toISOString(),
-            note: `Partial Return created from original Order #${order.merchantOrderId || order.storeOrderId}`,
-            updatedBy: 'Admin'
-        }]
-    });
-
-    // 2. Update the ORIGINAL Order entry (Keep it in Dispatched tab with kept items)
-    const updatedOriginalOrder = recalculateTotals({
-        ...editedOrder,
-        products: keptItems,
-        status: keptItems.length === 0 ? 'Returned' : 'Dispatched',
-        history: [
-            ...(order.history || []),
-            {
-                status: keptItems.length === 0 ? 'Returned' : 'Dispatched',
+            orderSource: order.orderSource,
+            type: order.type,
+            date: getCleanDate(), // Use helper function for clean date
+            createdAt: { seconds: Math.floor(Date.now() / 1000) },
+            isPartialReturn: true,
+            originalOrderId: originalOrderId,
+            history: [{
+                status: 'Returned',
                 timestamp: new Date().toISOString(),
-                note: `Partial Return processed. Returned items moved to a separate record.`,
+                note: `Partial Return from Order #${originalOrderId}. Returned ${returnedItems.length} item(s).`,
                 updatedBy: 'Admin'
+            }]
+        });
+
+        // 2. Update the ORIGINAL Order entry
+        const updatedOriginalOrder = recalculateTotals({
+            ...editedOrder,
+            products: keptItems,
+            status: keptItems.length === 0 ? 'Returned' : 'Dispatched',
+            history: [
+                ...(order.history || []),
+                {
+                    status: keptItems.length === 0 ? 'Returned' : 'Dispatched',
+                    timestamp: new Date().toISOString(),
+                    note: `Partial Return processed. ${returnedItems.length} item(s) returned. Return Order ID: ${returnOrderId}`,
+                    updatedBy: 'Admin'
+                }
+            ]
+        });
+
+        try {
+            // 3a. CREATE new return order first
+            const sanitizedReturnOrder = sanitizeForFirebase(returnOrderRecord);
+            
+            if (!onCreate) {
+                throw new Error('onCreate function not provided');
             }
-        ]
-    });
 
-    // 3. Save both to the database
-    // The onEdit prop is used to send these updates back to the parent/Firebase
-    await onEdit(returnOrderRecord.id, 'Returned', sanitizeForFirebase(returnOrderRecord));
-    await onEdit(order.id, updatedOriginalOrder.status, sanitizeForFirebase(updatedOriginalOrder));
+            console.log('📦 Creating return order...');
+            await onCreate(sanitizedReturnOrder);
+            console.log('✅ Return order created successfully');
 
-    onClose();
-    alert("Partial Return processed. Returned items are now visible in the Cancel & Return tab.");
-};
+            // Small delay to ensure Firebase sync
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            // 3b. UPDATE original order
+            console.log('📝 Updating original order...');
+            const sanitizedOriginalOrder = sanitizeForFirebase(updatedOriginalOrder);
+            await onEdit(order.id, updatedOriginalOrder.status, sanitizedOriginalOrder);
+            console.log('✅ Original order updated successfully');
+
+            onClose();
+            alert(`Partial Return processed successfully!\n\nReturn Order ID: ${returnOrderId}\n\nReturned items are now visible in the Cancel & Return tab.`);
+        } catch (error) {
+            console.error("❌ Error processing partial return:", error);
+            alert(`Failed to process partial return: ${error.message || 'Unknown error'}\n\nCheck console for details.`);
+        }
+    };
 
     // --- SAVE / CONFIRM RETURN HANDLER ---
     const saveChanges = async () => {
@@ -334,6 +370,11 @@ const handlePartialReturnProcess = async () => {
                             ) : (
                                 <>
                                     Order #{order.merchantOrderId || order.storeOrderId}
+                                    {order.isPartialReturn && (
+                                        <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-1 rounded-full border border-amber-200">
+                                            Partial Return
+                                        </span>
+                                    )}
                                     <span className={`text-xs px-2 py-1 rounded-full ${getStatusColor(isPartialReturn && safeStatus === 'Returned' ? 'Dispatched' : safeStatus)}`}>
                                         {isPartialReturn && safeStatus === 'Returned' ? 'Dispatched' : safeStatus}
                                     </span>
@@ -350,7 +391,19 @@ const handlePartialReturnProcess = async () => {
                                 1. Mark Partial Return items. 2. Remove kept items. 3. Confirm.
                             </p>
                         ) : (
-                            <p className="text-xs text-slate-500">{new Date(order.createdAt?.seconds * 1000 || order.date).toLocaleString()}</p>
+                            <>
+                                <p className="text-xs text-slate-500">
+                                    {(() => {
+                                        const dateValue = order.createdAt?.seconds ? new Date(order.createdAt.seconds * 1000) : new Date(order.date);
+                                        return dateValue.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+                                    })()}
+                                </p>
+                                {order.originalOrderId && (
+                                    <p className="text-xs text-amber-600 mt-1">
+                                        Original Order: #{order.originalOrderId}
+                                    </p>
+                                )}
+                            </>
                         )}
                     </div>
                     <div className="flex gap-2">
@@ -547,7 +600,13 @@ const handlePartialReturnProcess = async () => {
                                 {(order.history || []).map((h, i) => (
                                     <li key={i} className="mb-6 ml-4">
                                         <div className="absolute w-3 h-3 bg-slate-300 rounded-full mt-1.5 -left-1.5 border border-white"></div>
-                                        <time className="text-[10px] text-slate-400 font-mono">{new Date(h.timestamp).toLocaleString()}</time>
+                                        <time className="text-[10px] text-slate-400 font-mono">
+                                            {new Date(h.timestamp).toLocaleDateString('en-US', { 
+                                                year: 'numeric', 
+                                                month: 'short', 
+                                                day: 'numeric' 
+                                            })}
+                                        </time>
                                         <div className="flex items-center gap-2">
                                             <h3 className="text-sm font-bold text-slate-800">
                                                 {h.note?.includes('Returned (Partial/Edited)') ? 'Dispatched' : h.status}

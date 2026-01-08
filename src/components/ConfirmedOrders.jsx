@@ -5,7 +5,7 @@ import SearchBar from './SearchBar';
 import ExchangeModal from './ExchangeModal';
 import { getStatusColor, downloadCSV } from '../utils';
 
-const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, inventory }) => {
+const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDelete, inventory }) => {
     // --- States ---
     const [filterDate, setFilterDate] = useState('');
     const [filterStatus, setFilterStatus] = useState('All');
@@ -362,7 +362,8 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, invent
                     order={selectedOrder} 
                     onClose={() => setSelectedOrder(null)} 
                     getStatusColor={getStatusColor} 
-                    onEdit={onEdit} 
+                    onEdit={onEdit}
+                    onCreate={onCreate}
                     inventory={inventory}
                 />
             )}
@@ -373,6 +374,7 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onDelete, invent
                     onClose={() => setReturnPopupOrder(null)} 
                     getStatusColor={getStatusColor} 
                     onEdit={onEdit}
+                    onCreate={onCreate}
                     inventory={inventory}
                     isReturnMode={true} 
                 />

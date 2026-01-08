@@ -220,6 +220,50 @@ function App() {
         }
     };
 
+    // --- NEW: CREATE ORDER (for Partial Returns) ---
+    const handleCreateOrder = async (orderData) => {
+        try {
+            console.log(' Creating new return order...');
+            console.log('Order data:', { status: orderData.status, products: orderData.products?.length });
+            
+            // CRITICAL: For RETURNED/CANCELLED orders, we DON'T touch inventory
+            // The inventory restoration happens when we update the original order's status
+            // through handleEditOrderWithStock which is called separately
+            
+            // Only deduct inventory if creating a new ACTIVE order (not a return)
+            if (!['Cancelled', 'Returned'].includes(orderData.status)) {
+                console.log('Deducting inventory for active order...');
+                const products = orderData.products || [];
+                for (const p of products) {
+                    await updateInventoryStock(p.code, p.size, -Number(p.qty), inventory);
+                }
+            } else {
+                console.log('Skipping inventory deduction for return/cancelled order');
+            }
+
+            // Create new document in Firebase using your custom path
+            const ordersRef = collection(db, 'artifacts', appId, 'public', 'data', 'orders');
+            
+            // Remove any existing id field before creating
+            const { id, ...cleanOrderData } = orderData;
+            
+            const docRef = await addDoc(ordersRef, {
+                ...cleanOrderData,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+                createdBy: user?.displayName || 'Admin'
+            });
+            
+            console.log(' New return order created with ID:', docRef.id);
+            return docRef.id;
+        } catch (error) {
+            console.error('❌ Error creating new order:', error);
+            console.error('Error details:', error);
+            alert(`Failed to create return order: ${error.message}`);
+            throw error;
+        }
+    };
+
     // --- 7. INVENTORY IMPACT LOGIC: Permanent Deletion ---
     const handleDeleteOrder = async (orderId) => {
         const order = orders.find(o => o.id === orderId);
@@ -246,20 +290,27 @@ function App() {
         }
 
         const commonProps = { inventory, locations, orders, user, onEdit: handleEditInventory, onDelete: handleDeleteInventory };
-        const orderProps = { orders, onUpdate: handleUpdateStatus, onEdit: handleEditOrderWithStock, onDelete: handleDeleteOrder, inventory };
+        const orderProps = { 
+            orders, 
+            onUpdate: handleUpdateStatus, 
+            onEdit: handleEditOrderWithStock, 
+            onCreate: handleCreateOrder, // CRITICAL: Pass onCreate to all order components
+            onDelete: handleDeleteOrder, 
+            inventory 
+        };
 
         switch (activeTab) {
             case 'new-order': return <NewOrderForm user={user} existingOrders={orders} setActiveTab={handleTabChange} inventory={inventory} />;
             case 'inventory': return <InventoryTab {...commonProps} />;
             case 'stock-location': return <StockLocationTab locations={locations} />;
             case 'monthly-profit': return userRole === 'master' ? <MonthlyProfitTab orders={orders} inventory={inventory} expenses={expenses} /> : <div className="p-10 text-center text-slate-400">Master access required.</div>;
-            case 'primary': return <PrimaryOrders orders={orders.filter(o => o.type === 'Online' && o.status === 'Pending')} onUpdate={handleUpdateStatus} onEdit={handleEditOrderWithStock} />;
+            case 'primary': return <PrimaryOrders orders={orders.filter(o => o.type === 'Online' && o.status === 'Pending')} onUpdate={handleUpdateStatus} onEdit={handleEditOrderWithStock} onCreate={handleCreateOrder} />;
             case 'confirmed': return <ConfirmedOrders allOrders={orders} orders={orders.filter(o => o.type === 'Online' && ['Confirmed', 'Dispatched', 'Delivered', 'Returned', 'Exchanged', 'Hold'].includes(o.status))} {...orderProps} />;
-            case 'hold': return <HoldTab orders={orders.filter(o => o.type === 'Online' && o.status === 'Hold')} onUpdate={handleUpdateStatus} />;
-            case 'dispatch': return <DispatchTab orders={orders.filter(o => o.type === 'Online' && ['Confirmed', 'Dispatched', 'Exchanged'].includes(o.status))} onUpdate={handleUpdateStatus} />;
+            case 'hold': return <HoldTab orders={orders.filter(o => o.type === 'Online' && o.status === 'Hold')} onUpdate={handleUpdateStatus} onCreate={handleCreateOrder} />;
+            case 'dispatch': return <DispatchTab orders={orders.filter(o => o.type === 'Online' && ['Confirmed', 'Dispatched', 'Exchanged'].includes(o.status))} onUpdate={handleUpdateStatus} onCreate={handleCreateOrder} />;
             case 'store-sales': return <StoreSales orders={orders.filter(o => o.type === 'Store')} {...orderProps} />;
-            case 'exchange': return <ExchangeTab orders={orders.filter(o => o.type === 'Online' && (o.status === 'Exchanged' || o.exchangeDetails))} />;
-            case 'cancelled': return <CancelledOrders orders={orders.filter(o => o.type === 'Online' && (o.status === 'Cancelled' || o.status === 'Returned'))} onUpdate={handleUpdateStatus} onDelete={handleDeleteOrder} onEdit={handleEditOrderWithStock} inventory={inventory} />;
+            case 'exchange': return <ExchangeTab orders={orders.filter(o => o.type === 'Online' && (o.status === 'Exchanged' || o.exchangeDetails))} onCreate={handleCreateOrder} />;
+            case 'cancelled': return <CancelledOrders orders={orders.filter(o => o.type === 'Online' && (o.status === 'Cancelled' || o.status === 'Returned'))} onUpdate={handleUpdateStatus} onDelete={handleDeleteOrder} onEdit={handleEditOrderWithStock} onCreate={handleCreateOrder} inventory={inventory} />;
             case 'online-sales': return <OnlineSalesTab {...orderProps} />;
             case 'reports': return userRole === 'master' ? <SalesReports {...orderProps} /> : <div className="p-10 text-center text-slate-400">Master access required.</div>;
             default: return <div className="p-10 text-center">Invalid Tab Selected</div>;
