@@ -294,7 +294,7 @@ function App() {
             orders, 
             onUpdate: handleUpdateStatus, 
             onEdit: handleEditOrderWithStock, 
-            onCreate: handleCreateOrder, // CRITICAL: Pass onCreate to all order components
+            onCreate: handleCreateOrder, 
             onDelete: handleDeleteOrder, 
             inventory 
         };
@@ -304,12 +304,12 @@ function App() {
             case 'inventory': return <InventoryTab {...commonProps} />;
             case 'stock-location': return <StockLocationTab locations={locations} />;
             case 'monthly-profit': return userRole === 'master' ? <MonthlyProfitTab orders={orders} inventory={inventory} expenses={expenses} /> : <div className="p-10 text-center text-slate-400">Master access required.</div>;
-            case 'primary': return <PrimaryOrders orders={orders.filter(o => o.type === 'Online' && o.status === 'Pending')} onUpdate={handleUpdateStatus} onEdit={handleEditOrderWithStock} onCreate={handleCreateOrder} />;
+            case 'primary': return <PrimaryOrders orders={orders.filter(o => o.type === 'Online' && o.status === 'Pending')} onUpdate={handleUpdateStatus} onEdit={handleEditOrderWithStock} onCreate={handleCreateOrder} inventory={inventory} />;
             case 'confirmed': return <ConfirmedOrders allOrders={orders} orders={orders.filter(o => o.type === 'Online' && ['Confirmed', 'Dispatched', 'Delivered', 'Returned', 'Exchanged', 'Hold'].includes(o.status))} {...orderProps} />;
             case 'hold': return <HoldTab orders={orders.filter(o => o.type === 'Online' && o.status === 'Hold')} onUpdate={handleUpdateStatus} onCreate={handleCreateOrder} />;
             case 'dispatch': return <DispatchTab orders={orders.filter(o => o.type === 'Online' && ['Confirmed', 'Dispatched', 'Exchanged'].includes(o.status))} onUpdate={handleUpdateStatus} onCreate={handleCreateOrder} />;
             case 'store-sales': return <StoreSales orders={orders.filter(o => o.type === 'Store')} {...orderProps} />;
-            case 'exchange': return <ExchangeTab orders={orders.filter(o => o.type === 'Online' && (o.status === 'Exchanged' || o.exchangeDetails))} onCreate={handleCreateOrder} />;
+            case 'exchange': return <ExchangeTab orders={orders.filter(o => o.type === 'Online' && (o.status === 'Exchanged' || o.exchangeDetails || o.isPartialExchange))} onCreate={handleCreateOrder} onEdit={handleEditOrderWithStock} inventory={inventory} />;
             case 'cancelled': return <CancelledOrders orders={orders.filter(o => o.type === 'Online' && (o.status === 'Cancelled' || o.status === 'Returned'))} onUpdate={handleUpdateStatus} onDelete={handleDeleteOrder} onEdit={handleEditOrderWithStock} onCreate={handleCreateOrder} inventory={inventory} />;
             case 'online-sales': return <OnlineSalesTab {...orderProps} />;
             case 'reports': return userRole === 'master' ? <SalesReports {...orderProps} /> : <div className="p-10 text-center text-slate-400">Master access required.</div>;

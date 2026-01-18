@@ -4,7 +4,7 @@ import OrderDetailsPopup from './OrderDetailsPopup';
 import SearchBar from './SearchBar'; 
 import { getStatusColor } from '../utils'; 
 
-const PrimaryOrders = ({ orders, onUpdate, onEdit }) => {
+const PrimaryOrders = ({ orders, onUpdate, onEdit, inventory = [] }) => {
     const [filterDate, setFilterDate] = useState('');
     const [searchTerm, setSearchTerm] = useState(''); 
     const [selectedOrder, setSelectedOrder] = useState(null);
@@ -294,6 +294,7 @@ const PrimaryOrders = ({ orders, onUpdate, onEdit }) => {
                     onClose={() => setSelectedOrder(null)}
                     getStatusColor={getStatusColor}
                     onEdit={onEdit}
+                    inventory={inventory}
                 />
             )}
         </div>

@@ -10,12 +10,13 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
     const [filterDate, setFilterDate] = useState('');
     const [filterStatus, setFilterStatus] = useState('All');
     const [searchTerm, setSearchTerm] = useState('');
-    const [exchangeModal, setExchangeModal] = useState(null);
     const [selectedOrder, setSelectedOrder] = useState(null);
 
-    // New Modals for Custom Logic
+    // Custom Modals for Custom Logic
     const [deliveryModal, setDeliveryModal] = useState(null); 
     const [returnPopupOrder, setReturnPopupOrder] = useState(null);
+    const [exchangeModal, setExchangeModal] = useState(null); // For full exchange
+    const [exchangePopupOrder, setExchangePopupOrder] = useState(null); // For partial exchange via OrderDetailsPopup
     const [holdModal, setHoldModal] = useState(null);
 
     // --- 1. Duplicate Logic ---
@@ -79,10 +80,7 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
     // --- Handlers ---
     const handleExport = () => {
         const data = filteredOrders.map(o => {
-            // Calculate Total Item Quantity
             const totalQty = (o.products || []).reduce((sum, p) => sum + Number(p.qty || 0), 0);
-
-            // FIX: Only change this line to show exactly 0.20
             const calculatedTotalWeight = "0.20 kg";
 
             return {
@@ -195,6 +193,14 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                         <tbody>
                             {filteredOrders.map(order => {
                                 const isExpress = order.isExpress === true;
+                                
+                                // Check if this is a NEW partial return/exchange order (created during split)
+                                const isNewPartialReturnOrder = order.isPartialReturn === true;
+                                const isNewPartialExchangeOrder = order.isPartialExchange === true;
+                                
+                                // Only hide for NEW partial orders, not original orders
+                                const shouldHideFinancials = isNewPartialReturnOrder || isNewPartialExchangeOrder;
+                                
                                 return (
                                 <tr
                                     key={order.id}
@@ -221,9 +227,24 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                                         <div className="font-medium">{order.recipientName}</div>
                                         <div className="text-xs opacity-75">{order.recipientPhone}</div>
                                         
-                                        <div className={`text-[10px] font-bold mt-1 ${order.dueAmount < 0 ? 'text-red-600 animate-pulse' : 'text-slate-500'}`}>
-                                            {order.dueAmount < 0 ? `REFUND: ৳${Math.abs(order.dueAmount)}` : `Due: ৳${order.dueAmount}`}
-                                        </div>
+                                        {/* Show refund/due for ALL orders EXCEPT newly created partial return/exchange orders */}
+                                        {!shouldHideFinancials && (
+                                            <div className={`text-[10px] font-bold mt-1 ${order.dueAmount < 0 ? 'text-red-600 animate-pulse' : 'text-slate-500'}`}>
+                                                {order.dueAmount < 0 ? `REFUND: ৳${Math.abs(order.dueAmount)}` : `Due: ৳${order.dueAmount}`}
+                                            </div>
+                                        )}
+                                        
+                                        {/* Show label for NEW partial orders (created during split) */}
+                                        {isNewPartialReturnOrder && (
+                                            <div className="text-[10px] font-bold mt-1 text-amber-600 bg-amber-50 px-2 py-0.5 rounded inline-block">
+                                                PARTIAL RETURN
+                                            </div>
+                                        )}
+                                        {isNewPartialExchangeOrder && (
+                                            <div className="text-[10px] font-bold mt-1 text-yellow-600 bg-yellow-50 px-2 py-0.5 rounded inline-block">
+                                                PARTIAL EXCHANGE
+                                            </div>
+                                        )}
                                     </td>
                                     <td className="p-3 text-xs">
                                         {(order.products || []).map((p, i) => <div key={`${order.id}-product-${i}-${p.code}`}>{p.qty}x {p.code} ({p.size})</div>)}
@@ -269,7 +290,13 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                                             >
                                                 <RotateCcw size={16} />
                                             </button>
-                                            <button title="Exchanged" onClick={() => setExchangeModal(order)} className="p-1.5 bg-yellow-100 text-yellow-700 rounded hover:bg-yellow-200"><ArrowRightLeft size={16} /></button>
+                                            <button 
+                                                title="Exchange Items (Opens Exchange Modal)" 
+                                                onClick={() => setExchangeModal(order)} 
+                                                className="p-1.5 bg-yellow-100 text-yellow-700 rounded hover:bg-yellow-200"
+                                            >
+                                                <ArrowRightLeft size={16} />
+                                            </button>
                                             <button 
                                                 title="Hold" 
                                                 onClick={() => setHoldModal(order)} 
@@ -355,8 +382,7 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                 </div>
             )}
 
-            {exchangeModal && <ExchangeModal order={exchangeModal} onClose={() => setExchangeModal(null)} onConfirm={onEdit} inventory={inventory} />}
-            
+            {/* ORDER DETAIL POPUPS */}
             {selectedOrder && (
                 <OrderDetailsPopup 
                     order={selectedOrder} 
@@ -377,6 +403,29 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                     onCreate={onCreate}
                     inventory={inventory}
                     isReturnMode={true} 
+                />
+            )}
+
+            {/* EXCHANGE MODAL - For Full/Partial Exchange */}
+            {exchangeModal && (
+                <ExchangeModal 
+                    order={exchangeModal} 
+                    onClose={() => setExchangeModal(null)} 
+                    onConfirm={onEdit}
+                    onCreate={onCreate}
+                    inventory={inventory}
+                />
+            )}
+
+            {exchangePopupOrder && (
+                <OrderDetailsPopup 
+                    order={exchangePopupOrder} 
+                    onClose={() => setExchangePopupOrder(null)} 
+                    getStatusColor={getStatusColor} 
+                    onEdit={onEdit}
+                    onCreate={onCreate}
+                    inventory={inventory}
+                    isExchangeMode={true} 
                 />
             )}
         </div>

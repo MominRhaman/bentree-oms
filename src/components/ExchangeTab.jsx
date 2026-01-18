@@ -3,9 +3,19 @@ import { ArrowRightLeft, Eye } from 'lucide-react';
 import OrderDetailsPopup from './OrderDetailsPopup';
 import { getStatusColor } from '../utils';
 
-const ExchangeTab = ({ orders }) => {
+const ExchangeTab = ({ orders, onCreate, onEdit, inventory }) => {
     const [selectedOrder, setSelectedOrder] = useState(null);
 
+    const [exchangeModalOrder, setExchangeModalOrder] = useState(null);
+    
+    // Filter to include both full exchanges and partial exchanges
+    const exchangeOrders = orders.filter(o => 
+        o.status === 'Exchanged' || 
+        o.exchangeDetails ||
+        o.isPartialExchange === true ||
+        (o.history || []).some(h => h.note?.toLowerCase().includes('partial exchange'))
+    );
+    
     return (
         <div className="space-y-6">
             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">

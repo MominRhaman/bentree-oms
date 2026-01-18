@@ -15,6 +15,10 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
     const [historyModalData, setHistoryModalData] = useState(null);
     const [showInvoice, setShowInvoice] = useState(false);
 
+    // --- State for Partial Return Preview Modal ---
+    const [showPartialReturnModal, setShowPartialReturnModal] = useState(false);
+    const [partialReturnPreview, setPartialReturnPreview] = useState(null);
+
     // Sync state when order opens
     useEffect(() => {
         if (order) {
@@ -30,8 +34,8 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
 
     // --- Helper: Get Sizes for a Code ---
     const getAvailableSizes = (code) => {
-        if (!code || !inventory.length) return [];
-        const item = inventory.find(i => i.code.toUpperCase() === code.toUpperCase());
+        if (!code || !inventory || !inventory.length) return [];
+        const item = inventory.find(i => i.code && i.code.toUpperCase() === code.toUpperCase());
         if (!item) return [];
         if (item.type === 'Variable' && item.stock) {
             return Object.keys(item.stock);
@@ -41,9 +45,9 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
 
     // --- Stock Logic ---
     const getStockError = (prod) => {
-        if (!inventory.length) return null;
+        if (!inventory || !inventory.length) return null;
         if (!prod.code) return null;
-        const item = inventory.find(i => i.code.toUpperCase() === prod.code.toUpperCase());
+        const item = inventory.find(i => i.code && i.code.toUpperCase() === prod.code.toUpperCase());
         if (!item) return "Product not found";
 
         let qtyHeldByOrder = 0;
@@ -86,6 +90,12 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
         return { ...currentOrder, subtotal, grandTotal, dueAmount, collectedAmount: collected };
     };
 
+    // --- NEW: Calculate totals for partial return (NO delivery charge, NO discount) ---
+    const recalculatePartialReturnTotals = (products) => {
+        const subtotal = products.reduce((sum, p) => sum + (Number(p.price || 0) * Number(p.qty || 0)), 0);
+        return { subtotal, grandTotal: subtotal };
+    };
+
     // --- Handlers ---
     const handleInputChange = (field, value) => {
         setEditedOrder(prev => recalculateTotals({ ...prev, [field]: value }));
@@ -95,13 +105,15 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
         const newProducts = [...editedOrder.products];
         newProducts[index][field] = value;
 
-        if (field === 'code' && inventory.length > 0) {
-            const foundItem = inventory.find(i => i.code.toUpperCase() === value.toUpperCase());
+        if (field === 'code' && inventory && inventory.length > 0) {
+            const foundItem = inventory.find(i => i.code && i.code.toUpperCase() === value.toUpperCase());
             if (foundItem) {
                 newProducts[index].price = foundItem.mrp || 0;
                 if (foundItem.type === 'Variable' && foundItem.stock) {
                     const sizes = Object.keys(foundItem.stock);
                     if (sizes.length > 0) newProducts[index].size = sizes[0];
+                } else {
+                    newProducts[index].size = 'Free';
                 }
             }
         }
@@ -160,8 +172,8 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
         return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     };
 
-    // --- NEW: Handle Automatic Splitting for Partial Returns ---
-    const handlePartialReturnProcess = async () => {
+    // --- NEW: Show Partial Return Preview ---
+    const showPartialReturnPreview = () => {
         if (Object.keys(errors).length > 0) {
             alert("Please fix stock errors first.");
             return;
@@ -175,30 +187,51 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
             return;
         }
 
+        const returnTotals = recalculatePartialReturnTotals(returnedItems);
+        const keptTotals = recalculatePartialReturnTotals(keptItems);
+
+        setPartialReturnPreview({
+            returnedItems,
+            keptItems,
+            returnTotals,
+            keptTotals
+        });
+        setShowPartialReturnModal(true);
+    };
+
+    // --- NEW: Handle Automatic Splitting for Partial Returns ---
+    const handlePartialReturnProcess = async () => {
+        const returnedItems = partialReturnPreview.returnedItems;
+        const keptItems = partialReturnPreview.keptItems;
+
         // Generate a new Return Order ID
         const originalOrderId = order.merchantOrderId || order.storeOrderId || 'N/A';
         const returnOrderId = `${originalOrderId}-RET-${Date.now().toString().slice(-6)}`;
 
-        // 1. Create a NEW Order Record specifically for the Returned items
-        const returnOrderRecord = recalculateTotals({
+        // 1. Create a NEW Order Record specifically for the Returned items (NO delivery charge, NO discount)
+        const returnOrderRecord = {
             ...order,
             merchantOrderId: returnOrderId,
             storeOrderId: returnOrderId,
             products: returnedItems,
+            subtotal: partialReturnPreview.returnTotals.subtotal,
+            grandTotal: partialReturnPreview.returnTotals.grandTotal,
+            deliveryCharge: 0,
+            discountValue: 0,
             status: 'Returned',
             orderSource: order.orderSource,
             type: order.type,
-            date: getCleanDate(), // Use helper function for clean date
+            date: getCleanDate(),
             createdAt: { seconds: Math.floor(Date.now() / 1000) },
             isPartialReturn: true,
             originalOrderId: originalOrderId,
             history: [{
                 status: 'Returned',
                 timestamp: new Date().toISOString(),
-                note: `Partial Return from Order #${originalOrderId}. Returned ${returnedItems.length} item(s).`,
+                note: `Partial Return processed. ${returnedItems.length} item(s) returned. Return Order ID: ${returnOrderId}`,
                 updatedBy: 'Admin'
             }]
-        });
+        };
 
         // 2. Update the ORIGINAL Order entry
         const updatedOriginalOrder = recalculateTotals({
@@ -224,7 +257,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                 throw new Error('onCreate function not provided');
             }
 
-            console.log('📦 Creating return order...');
+            console.log('✅ Creating return order...');
             await onCreate(sanitizedReturnOrder);
             console.log('✅ Return order created successfully');
 
@@ -232,11 +265,12 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
             await new Promise(resolve => setTimeout(resolve, 500));
 
             // 3b. UPDATE original order
-            console.log('📝 Updating original order...');
+            console.log('✅ Updating original order...');
             const sanitizedOriginalOrder = sanitizeForFirebase(updatedOriginalOrder);
             await onEdit(order.id, updatedOriginalOrder.status, sanitizedOriginalOrder);
             console.log('✅ Original order updated successfully');
 
+            setShowPartialReturnModal(false);
             onClose();
             alert(`Partial Return processed successfully!\n\nReturn Order ID: ${returnOrderId}\n\nReturned items are now visible in the Cancel & Return tab.`);
         } catch (error) {
@@ -634,7 +668,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                                 )}
                                 
                                 {isReturnMode && partialReturnItems.size > 0 ? (
-                                    <button onClick={handlePartialReturnProcess} className="px-6 py-2 bg-emerald-600 text-white font-black rounded shadow-lg flex items-center gap-2 hover:bg-emerald-700 transition-all transform active:scale-95">
+                                    <button onClick={showPartialReturnPreview} className="px-6 py-2 bg-emerald-600 text-white font-black rounded shadow-lg flex items-center gap-2 hover:bg-emerald-700 transition-all transform active:scale-95">
                                         <RotateCcw size={18} /> Process Partial Return ({partialReturnItems.size})
                                     </button>
                                 ) : (
@@ -682,6 +716,96 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                     )}
                 </div>
             </div>
+
+            {/* Partial Return Preview Modal */}
+            {showPartialReturnModal && partialReturnPreview && (
+                <div className="fixed inset-0 bg-black bg-opacity-70 z-[60] flex items-center justify-center p-4 backdrop-blur-sm">
+                    <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                        <div className="sticky top-0 bg-amber-50 p-4 border-b flex justify-between items-center z-10">
+                            <h3 className="font-bold text-lg text-amber-700 flex items-center gap-2">
+                                <RotateCcw size={20} /> Partial Return Preview
+                            </h3>
+                            <button onClick={() => setShowPartialReturnModal(false)} className="p-1 hover:bg-amber-100 rounded-full">
+                                <X size={20} />
+                            </button>
+                        </div>
+
+                        <div className="p-6 space-y-6">
+                            {/* Returned Items */}
+                            <div className="border border-red-200 rounded-lg p-4 bg-red-50">
+                                <h4 className="font-bold text-red-700 mb-3 flex items-center gap-2">
+                                    <Package size={16} /> Items to Return ({partialReturnPreview.returnedItems.length})
+                                </h4>
+                                <div className="space-y-2 mb-4">
+                                    {partialReturnPreview.returnedItems.map((item, idx) => (
+                                        <div key={idx} className="flex justify-between items-center bg-white p-2 rounded border border-red-100">
+                                            <div>
+                                                <p className="font-bold text-sm">{item.code}</p>
+                                                <p className="text-xs text-slate-500">Size: {item.size} | Qty: {item.qty}</p>
+                                            </div>
+                                            <p className="font-medium">৳{Number(item.price) * Number(item.qty)}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="border-t border-red-200 pt-3 flex justify-between font-bold text-lg">
+                                    <span>New Order Total:</span>
+                                    <span>৳{partialReturnPreview.returnTotals.grandTotal.toFixed(2)}</span>
+                                </div>
+                            </div>
+
+                            {/* Kept Items */}
+                            {partialReturnPreview.keptItems.length > 0 && (
+                                <div className="border border-emerald-200 rounded-lg p-4 bg-emerald-50">
+                                    <h4 className="font-bold text-emerald-700 mb-3 flex items-center gap-2">
+                                        <Package size={16} /> Items to Keep ({partialReturnPreview.keptItems.length})
+                                    </h4>
+                                    <div className="space-y-2 mb-4">
+                                        {partialReturnPreview.keptItems.map((item, idx) => (
+                                            <div key={idx} className="flex justify-between items-center bg-white p-2 rounded border border-emerald-100">
+                                                <div>
+                                                    <p className="font-bold text-sm">{item.code}</p>
+                                                    <p className="text-xs text-slate-500">Size: {item.size} | Qty: {item.qty}</p>
+                                                </div>
+                                                <p className="font-medium">৳{Number(item.price) * Number(item.qty)}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="border-t border-emerald-200 pt-3 flex justify-between font-bold text-lg">
+                                        <span>Updated Order Total:</span>
+                                        <span>৳{partialReturnPreview.keptTotals.grandTotal.toFixed(2)}</span>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Confirmation */}
+                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                                <p className="text-sm text-amber-800 font-medium mb-2">
+                                    ⚠️ This will create a new Return Order and update the original order. This action cannot be undone.
+                                </p>
+                                <p className="text-xs text-amber-600">
+                                    • Return Order: Will contain {partialReturnPreview.returnedItems.length} item(s)<br />
+                                    • Original Order: Will be updated with {partialReturnPreview.keptItems.length} item(s)
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="sticky bottom-0 bg-slate-50 p-4 border-t flex gap-3">
+                            <button 
+                                onClick={() => setShowPartialReturnModal(false)} 
+                                className="flex-1 py-3 text-slate-600 font-bold border border-slate-300 rounded hover:bg-slate-100"
+                            >
+                                Cancel
+                            </button>
+                            <button 
+                                onClick={handlePartialReturnProcess} 
+                                className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded shadow-lg hover:bg-emerald-700 flex items-center justify-center gap-2"
+                            >
+                                <CheckCircle size={18} /> Confirm Partial Return
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* History Detail Modal */}
             {historyModalData && (
