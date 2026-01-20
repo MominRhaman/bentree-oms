@@ -229,9 +229,39 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                                         
                                         {/* Show refund/due for ALL orders EXCEPT newly created partial return/exchange orders */}
                                         {!shouldHideFinancials && (
-                                            <div className={`text-[10px] font-bold mt-1 ${order.dueAmount < 0 ? 'text-red-600 animate-pulse' : 'text-slate-500'}`}>
-                                                {order.dueAmount < 0 ? `REFUND: ৳${Math.abs(order.dueAmount)}` : `Due: ৳${order.dueAmount}`}
-                                            </div>
+                                            <>
+                                                {order.dueAmount < 0 ? (
+                                                    <div className="flex items-center gap-2 mt-1">
+                                                        {order.isRefunded ? (
+                                                            <div className="text-[10px] font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded">
+                                                                REFUNDED MONEY
+                                                            </div>
+                                                        ) : (
+                                                            <div className="text-[10px] font-bold text-red-600 animate-pulse">
+                                                                REFUND: ৳{Math.abs(order.dueAmount)}
+                                                            </div>
+                                                        )}
+                                                        <label className="flex items-center cursor-pointer" onClick={(e) => e.stopPropagation()}>
+                                                            <input
+                                                                type="checkbox"
+                                                                className="w-3 h-3 text-green-600 rounded focus:ring-green-500 cursor-pointer"
+                                                                checked={order.isRefunded || false}
+                                                                onChange={() => {
+                                                                    const newRefundStatus = !order.isRefunded;
+                                                                    onUpdate(order.id, order.status, {
+                                                                        isRefunded: newRefundStatus,
+                                                                        note: newRefundStatus ? 'Refund amount marked as refunded' : 'Refund status removed'
+                                                                    });
+                                                                }}
+                                                            />
+                                                        </label>
+                                                    </div>
+                                                ) : (
+                                                    <div className="text-[10px] font-bold mt-1 text-slate-500">
+                                                        Due: ৳{order.dueAmount}
+                                                    </div>
+                                                )}
+                                            </>
                                         )}
                                         
                                         {/* Show label for NEW partial orders (created during split) */}

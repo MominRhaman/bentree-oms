@@ -7,7 +7,8 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
     const [isEditing, setIsEditing] = useState(isReturnMode);
     const [editedOrder, setEditedOrder] = useState(null);
     const [errors, setErrors] = useState({});
-    
+    const [isRefunded, setIsRefunded] = useState(false);
+
     // --- State to track marked products for Partial Return ---
     const [partialReturnItems, setPartialReturnItems] = useState(new Set());
 
@@ -26,6 +27,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
             setEditedOrder(deepCopy);
             setErrors({});
             setPartialReturnItems(new Set()); // Reset on open
+            setIsRefunded(order.isRefunded || false);
             if (isReturnMode) setIsEditing(true);
         }
     }, [order, isReturnMode]);
@@ -144,7 +146,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
             delete n[index];
             return n;
         });
-        
+
         // Remove from partial return list if deleted
         setPartialReturnItems(prev => {
             const next = new Set(prev);
@@ -252,7 +254,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
         try {
             // 3a. CREATE new return order first
             const sanitizedReturnOrder = sanitizeForFirebase(returnOrderRecord);
-            
+
             if (!onCreate) {
                 throw new Error('onCreate function not provided');
             }
@@ -276,6 +278,32 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
         } catch (error) {
             console.error("❌ Error processing partial return:", error);
             alert(`Failed to process partial return: ${error.message || 'Unknown error'}\n\nCheck console for details.`);
+        }
+    };
+
+    // --- HANDLE REFUND CHECKBOX ---
+    const handleRefundToggle = async () => {
+        const newRefundStatus = !isRefunded;
+        setIsRefunded(newRefundStatus);
+
+        if (onEdit) {
+            const historyEntry = {
+                status: order.status,
+                timestamp: new Date().toISOString(),
+                note: newRefundStatus ? 'Refund amount marked as refunded' : 'Refund status removed',
+                updatedBy: 'Admin'
+            };
+
+            const updatedOrder = {
+                ...order,
+                isRefunded: newRefundStatus,
+                history: [
+                    ...(order.history || []),
+                    historyEntry
+                ]
+            };
+
+            onEdit(order.id, order.status, sanitizeForFirebase(updatedOrder));
         }
     };
 
@@ -558,15 +586,15 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                                                     </div>
                                                     <div className="w-20"><input type="number" className="w-full p-2 border rounded text-sm bg-white" value={p.qty} onChange={e => handleProductChange(i, 'qty', e.target.value)} onWheel={disableScroll} /></div>
                                                     <div className="w-24"><input type="number" className="w-full p-2 border rounded text-sm bg-white" value={p.price} onChange={e => handleProductChange(i, 'price', e.target.value)} onWheel={disableScroll} /></div>
-                                                    
+
                                                     {/* PARTIAL RETURN CHECKBOX & DELETE ACTION */}
                                                     <div className="flex items-center gap-3 ml-2 border-l pl-3 border-slate-300">
                                                         {isReturnMode && (
                                                             <label className="flex flex-col items-center cursor-pointer group">
                                                                 <span className="text-[9px] font-black text-amber-600 uppercase mb-0.5">Return</span>
-                                                                <input 
-                                                                    type="checkbox" 
-                                                                    className="w-5 h-5 rounded border-amber-300 text-amber-600 focus:ring-amber-500 cursor-pointer shadow-sm" 
+                                                                <input
+                                                                    type="checkbox"
+                                                                    className="w-5 h-5 rounded border-amber-300 text-amber-600 focus:ring-amber-500 cursor-pointer shadow-sm"
                                                                     checked={partialReturnItems.has(i)}
                                                                     onChange={() => togglePartialReturn(i)}
                                                                 />
@@ -589,32 +617,34 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                     </div>
 
                     {/* Financial Summary */}
-                    <div className="bg-slate-50 p-4 rounded-lg space-y-2 border border-slate-100">
-                        <div className="flex justify-between text-sm"><span className="text-slate-500">Subtotal</span><span className="font-medium">৳{editedOrder.subtotal}</span></div>
-                        <div className="flex justify-between text-sm items-center">
-                            <span className="text-slate-500">Discount</span>
-                            {isEditing ? <input className="w-24 p-1 border rounded text-right" value={editedOrder.discountValue} onChange={e => handleInputChange('discountValue', e.target.value)} onWheel={disableScroll} /> : <span className="text-red-500">- ৳{order.discountType === 'Percent' ? (order.subtotal * (order.discountValue / 100)) : order.discountValue}</span>}
-                        </div>
-                        <div className="flex justify-between text-sm items-center">
-                            <span className="text-slate-500">Delivery Charge</span>
-                            {isEditing ? <input className="w-24 p-1 border rounded text-right" value={editedOrder.deliveryCharge} onChange={e => handleInputChange('deliveryCharge', e.target.value)} onWheel={disableScroll} /> : <span>৳{order.deliveryCharge}</span>}
-                        </div>
-                        <div className="border-t pt-2 mt-2 flex justify-between font-bold text-lg text-slate-900"><span>Grand Total</span><span>৳{editedOrder.grandTotal}</span></div>
+                    {!order.isPartialReturn && (
+                        <div className="bg-slate-50 p-4 rounded-lg space-y-2 border border-slate-100">
+                            <div className="flex justify-between text-sm"><span className="text-slate-500">Subtotal</span><span className="font-medium">৳{editedOrder.subtotal}</span></div>
+                            <div className="flex justify-between text-sm items-center">
+                                <span className="text-slate-500">Discount</span>
+                                {isEditing ? <input className="w-24 p-1 border rounded text-right" value={editedOrder.discountValue} onChange={e => handleInputChange('discountValue', e.target.value)} onWheel={disableScroll} /> : <span className="text-red-500">- ৳{order.discountType === 'Percent' ? (order.subtotal * (order.discountValue / 100)) : order.discountValue}</span>}
+                            </div>
+                            <div className="flex justify-between text-sm items-center">
+                                <span className="text-slate-500">Delivery Charge</span>
+                                {isEditing ? <input className="w-24 p-1 border rounded text-right" value={editedOrder.deliveryCharge} onChange={e => handleInputChange('deliveryCharge', e.target.value)} onWheel={disableScroll} /> : <span>৳{order.deliveryCharge}</span>}
+                            </div>
+                            <div className="border-t pt-2 mt-2 flex justify-between font-bold text-lg text-slate-900"><span>Grand Total</span><span>৳{editedOrder.grandTotal}</span></div>
 
-                        {/* Advance Amount */}
-                        <div className="flex justify-between text-sm font-bold text-blue-600 bg-blue-50 p-1 rounded">
-                            <span>Paid Advance Money</span>
-                            <span>- ৳{editedOrder.advanceAmount || 0}</span>
+                            {/* Advance Amount */}
+                            <div className="flex justify-between text-sm font-bold text-blue-600 bg-blue-50 p-1 rounded">
+                                <span>Paid Advance Money</span>
+                                <span>- ৳{editedOrder.advanceAmount || 0}</span>
+                            </div>
+                            <div className="flex justify-between text-sm text-slate-500 pt-1 items-center font-bold">
+                                <span>Advance / Collected</span>
+                                {isEditing ? <input className="w-32 p-1 border rounded text-right bg-white" value={editedOrder.collectedAmount} onChange={e => handleInputChange('collectedAmount', e.target.value)} onWheel={disableScroll} /> : <span>- ৳{(Number(editedOrder.advanceAmount || 0) + Number(editedOrder.collectedAmount || 0))}</span>}
+                            </div>
+                            <div className="flex justify-between font-bold text-emerald-600 border-t border-dashed border-slate-300 pt-2 text-lg">
+                                <span>{editedOrder.dueAmount < 0 ? "Refund Due" : "Due Amount"}</span>
+                                <span className={editedOrder.dueAmount < 0 ? "text-red-600" : "text-emerald-600"}>{editedOrder.dueAmount < 0 ? `- ৳${Math.abs(editedOrder.dueAmount)}` : `৳${editedOrder.dueAmount}`}</span>
+                            </div>
                         </div>
-                        <div className="flex justify-between text-sm text-slate-500 pt-1 items-center font-bold">
-                            <span>Advance / Collected</span>
-                            {isEditing ? <input className="w-32 p-1 border rounded text-right bg-white" value={editedOrder.collectedAmount} onChange={e => handleInputChange('collectedAmount', e.target.value)} onWheel={disableScroll} /> : <span>- ৳{(Number(editedOrder.advanceAmount || 0) + Number(editedOrder.collectedAmount || 0))}</span>}
-                        </div>
-                        <div className="flex justify-between font-bold text-emerald-600 border-t border-dashed border-slate-300 pt-2 text-lg">
-                            <span>{editedOrder.dueAmount < 0 ? "Refund Due" : "Due Amount"}</span>
-                            <span className={editedOrder.dueAmount < 0 ? "text-red-600" : "text-emerald-600"}>{editedOrder.dueAmount < 0 ? `- ৳${Math.abs(editedOrder.dueAmount)}` : `৳${editedOrder.dueAmount}`}</span>
-                        </div>
-                    </div>
+                    )}
 
                     {/* Special Instructions */}
                     <div>
@@ -635,10 +665,10 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                                     <li key={i} className="mb-6 ml-4">
                                         <div className="absolute w-3 h-3 bg-slate-300 rounded-full mt-1.5 -left-1.5 border border-white"></div>
                                         <time className="text-[10px] text-slate-400 font-mono">
-                                            {new Date(h.timestamp).toLocaleDateString('en-US', { 
-                                                year: 'numeric', 
-                                                month: 'short', 
-                                                day: 'numeric' 
+                                            {new Date(h.timestamp).toLocaleDateString('en-US', {
+                                                year: 'numeric',
+                                                month: 'short',
+                                                day: 'numeric'
                                             })}
                                         </time>
                                         <div className="flex items-center gap-2">
@@ -666,7 +696,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                                         <RefreshCw size={18} /> Reorder
                                     </button>
                                 )}
-                                
+
                                 {isReturnMode && partialReturnItems.size > 0 ? (
                                     <button onClick={showPartialReturnPreview} className="px-6 py-2 bg-emerald-600 text-white font-black rounded shadow-lg flex items-center gap-2 hover:bg-emerald-700 transition-all transform active:scale-95">
                                         <RotateCcw size={18} /> Process Partial Return ({partialReturnItems.size})
@@ -790,14 +820,14 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                         </div>
 
                         <div className="sticky bottom-0 bg-slate-50 p-4 border-t flex gap-3">
-                            <button 
-                                onClick={() => setShowPartialReturnModal(false)} 
+                            <button
+                                onClick={() => setShowPartialReturnModal(false)}
                                 className="flex-1 py-3 text-slate-600 font-bold border border-slate-300 rounded hover:bg-slate-100"
                             >
                                 Cancel
                             </button>
-                            <button 
-                                onClick={handlePartialReturnProcess} 
+                            <button
+                                onClick={handlePartialReturnProcess}
                                 className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded shadow-lg hover:bg-emerald-700 flex items-center justify-center gap-2"
                             >
                                 <CheckCircle size={18} /> Confirm Partial Return
