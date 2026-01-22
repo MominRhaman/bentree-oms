@@ -619,29 +619,62 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                     {/* Financial Summary */}
                     {!order.isPartialReturn && (
                         <div className="bg-slate-50 p-4 rounded-lg space-y-2 border border-slate-100">
-                            <div className="flex justify-between text-sm"><span className="text-slate-500">Subtotal</span><span className="font-medium">৳{editedOrder.subtotal}</span></div>
+                            {/* Subtotal */}
+                            <div className="flex justify-between text-sm"><span className="text-slate-500">Subtotal</span><span className="font-medium">৳ {editedOrder.subtotal}</span></div>
+                            
+                            {/* Discount */}
                             <div className="flex justify-between text-sm items-center">
                                 <span className="text-slate-500">Discount</span>
-                                {isEditing ? <input className="w-24 p-1 border rounded text-right" value={editedOrder.discountValue} onChange={e => handleInputChange('discountValue', e.target.value)} onWheel={disableScroll} /> : <span className="text-red-500">- ৳{order.discountType === 'Percent' ? (order.subtotal * (order.discountValue / 100)) : order.discountValue}</span>}
+                                {isEditing ? 
+                                    <input className="w-24 p-1 border rounded text-right" value={editedOrder.discountValue} onChange={e => handleInputChange('discountValue', e.target.value)} onWheel={disableScroll} /> : 
+                                    <span className="text-red-500">- ৳ {order.discountType === 'Percent' ? (order.subtotal * (order.discountValue / 100)) : order.discountValue}</span>
+                                }
                             </div>
+
+                            {/* Delivery Charge */}
                             <div className="flex justify-between text-sm items-center">
                                 <span className="text-slate-500">Delivery Charge</span>
-                                {isEditing ? <input className="w-24 p-1 border rounded text-right" value={editedOrder.deliveryCharge} onChange={e => handleInputChange('deliveryCharge', e.target.value)} onWheel={disableScroll} /> : <span>৳{order.deliveryCharge}</span>}
+                                {isEditing ? <input className="w-24 p-1 border rounded text-right" value={editedOrder.deliveryCharge} onChange={e => handleInputChange('deliveryCharge', e.target.value)} onWheel={disableScroll} /> : <span>৳ {editedOrder.deliveryCharge}</span>}
                             </div>
-                            <div className="border-t pt-2 mt-2 flex justify-between font-bold text-lg text-slate-900"><span>Grand Total</span><span>৳{editedOrder.grandTotal}</span></div>
 
-                            {/* Advance Amount */}
-                            <div className="flex justify-between text-sm font-bold text-blue-600 bg-blue-50 p-1 rounded">
+                            {/* Grand Total */}
+                            <div className="border-t pt-2 mt-2 flex justify-between font-bold text-base text-slate-900">
+                                <span>Grand Total</span>
+                                <span>৳ {editedOrder.grandTotal}</span>
+                            </div>
+
+                            {/* Paid Advance Money */}
+                            <div className="flex justify-between text-sm font-bold text-blue-600 bg-blue-50/50 p-1 rounded">
                                 <span>Paid Advance Money</span>
-                                <span>- ৳{editedOrder.advanceAmount || 0}</span>
+                                <span>- ৳ {editedOrder.advanceAmount || 0}</span>
                             </div>
+
+                            {/* Total (Grand Total - Advance) */}
+                            <div className="flex justify-between font-bold text-slate-800 border-t border-slate-200 pt-1">
+                                <span>Total</span>
+                                <span>৳ {Number(editedOrder.grandTotal) - Number(editedOrder.advanceAmount || 0)}</span>
+                            </div>
+
+                            {/* Advance / Collected (The Amount specifically received) */}
                             <div className="flex justify-between text-sm text-slate-500 pt-1 items-center font-bold">
-                                <span>Advance / Collected</span>
-                                {isEditing ? <input className="w-32 p-1 border rounded text-right bg-white" value={editedOrder.collectedAmount} onChange={e => handleInputChange('collectedAmount', e.target.value)} onWheel={disableScroll} /> : <span>- ৳{(Number(editedOrder.advanceAmount || 0) + Number(editedOrder.collectedAmount || 0))}</span>}
+                                <div className="flex flex-col">
+                                    <span>Advance / Collected</span>
+                                    {order.status === 'Delivered' && <span className="text-[10px] text-emerald-600 italic leading-none">(Showing received amount)</span>}
+                                </div>
+                                {isEditing ? 
+                                    <input className="w-32 p-1 border rounded text-right bg-white" value={editedOrder.collectedAmount} onChange={e => handleInputChange('collectedAmount', e.target.value)} onWheel={disableScroll} /> : 
+                                    <span>- ৳ {(Number(editedOrder.advanceAmount || 0) + Number(editedOrder.collectedAmount || 0))}</span>
+                                }
                             </div>
-                            <div className="flex justify-between font-bold text-emerald-600 border-t border-dashed border-slate-300 pt-2 text-lg">
-                                <span>{editedOrder.dueAmount < 0 ? "Refund Due" : "Due Amount"}</span>
-                                <span className={editedOrder.dueAmount < 0 ? "text-red-600" : "text-emerald-600"}>{editedOrder.dueAmount < 0 ? `- ৳${Math.abs(editedOrder.dueAmount)}` : `৳${editedOrder.dueAmount}`}</span>
+
+                            {/* Final Due Amount */}
+                            <div className="flex justify-between font-bold border-t border-dashed border-slate-300 pt-2 text-lg">
+                                <span className={editedOrder.dueAmount < 0 ? "text-red-600" : "text-emerald-600"}>
+                                    {editedOrder.dueAmount < 0 ? "Refund Due" : "Due Amount"}
+                                </span>
+                                <span className={editedOrder.dueAmount < 0 ? "text-red-600" : "text-emerald-600"}>
+                                    {editedOrder.dueAmount < 0 ? `- ৳ ${Math.abs(editedOrder.dueAmount)}` : `৳ ${editedOrder.dueAmount}`}
+                                </span>
                             </div>
                         </div>
                     )}

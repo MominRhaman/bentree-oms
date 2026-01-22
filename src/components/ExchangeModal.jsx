@@ -55,6 +55,9 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory }) => {
     const oldGrandTotal = Number(order.grandTotal || 0);
     const oldProductValue = oldGrandTotal - oldDeliveryCharge; 
 
+    // Calculate the absolute amount of the old discount for display
+    const oldDiscountAbsolute = (Number(order.subtotal || 0) - oldProductValue);
+
     // C. Calculate Difference (Product Level)
     const productDifference = newProductValue - oldProductValue;
 
@@ -120,6 +123,8 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory }) => {
             grandTotal: exchangedSubtotal,
             dueAmount: 0,
             deliveryCharge: 0,
+            // Carry over advance if original order had any and was not fully paid (due > 0)
+            advanceAmount: Number(order.dueAmount || 0) > 0 ? (Number(order.advanceAmount || 0)) : 0,
             exchangeDetails: {
                 exchangeDate: getCleanDate(),
                 originalProducts: exchangedItems,
@@ -148,20 +153,30 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory }) => {
         }
         
         const keptGrandTotal = keptSubtotal - keptDiscount + Number(order.deliveryCharge || 0);
-        const keptDueAmount = keptGrandTotal - Number(order.advanceAmount || 0) - Number(order.collectedAmount || 0);
+        
+        // LOGIC: If original order had advance paid amount, set due amount to 0
+        let keptDueAmount = keptGrandTotal - Number(order.advanceAmount || 0) - Number(order.collectedAmount || 0);
+        if (Number(order.advanceAmount || 0) > 0) {
+            keptDueAmount = 0;
+        }
 
-        // 3. Update the ORIGINAL Order entry - Keep as Delivered with remaining items
+        // --- STATUS LOGIC FOR ORIGINAL ORDER ---
+        // If items are kept, keep the current status (Dispatched/Delivered).
+        // If no items kept, it becomes Exchanged.
+        const originalStatus = keptItems.length === 0 ? 'Exchanged' : order.status;
+
+        // 3. Update the ORIGINAL Order entry
         const updatedOriginalOrder = {
             ...order,
             products: keptItems,
-            status: keptItems.length === 0 ? 'Exchanged' : 'Delivered', // Keep as Delivered
+            status: originalStatus, 
             subtotal: keptSubtotal,
             grandTotal: keptGrandTotal,
             dueAmount: keptDueAmount,
             history: [
                 ...(order.history || []),
                 {
-                    status: keptItems.length === 0 ? 'Exchanged' : 'Delivered',
+                    status: originalStatus,
                     timestamp: new Date().toISOString(),
                     note: `Partial Exchange processed. ${exchangedItems.length} item(s) marked for exchange. Exchange Order ID: ${exchangeOrderId}`,
                     updatedBy: 'Admin'
@@ -482,29 +497,40 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory }) => {
                                     
                                     <div className="text-xs text-slate-500 flex justify-between">
                                         <span>New Items Total:</span>
-                                        <span>৳{newProductTotal}</span>
+                                        <span>৳ {newProductTotal}</span>
                                     </div>
                                     <div className="text-xs text-slate-500 flex justify-between">
-                                        <span>- Discount {discountType === 'percent' ? `(${discountInput}%)` : ''}:</span>
-                                        <span className="text-red-500">-৳{Number(actualDiscountAmount).toFixed(0)}</span>
+                                        <span>New Discount {discountType === 'percent' ? `(${discountInput}%)` : ''}:</span>
+                                        <span className="text-red-500">- ৳ {Number(actualDiscountAmount).toFixed(0)}</span>
                                     </div>
                                     <div className="font-bold text-slate-800 flex justify-between border-t border-slate-200 pt-1 mt-1">
                                         <span>New Product Value:</span>
-                                        <span>৳{newProductValue.toFixed(0)}</span>
+                                        <span>৳ {newProductValue.toFixed(0)}</span>
                                     </div>
 
                                     <div className="text-xs text-blue-600 flex justify-between mt-2 font-medium">
-                                        <span>- Old Item Value:</span>
-                                        <span>৳{oldProductValue}</span>
+                                        <span>Old Item Value:</span>
+                                        <span>- ৳ {oldProductValue}</span>
                                     </div>
 
-                                    <div className="text-xs text-blue-600 flex justify-between font-medium">
-                                        <span>Previous Advance:</span>
-                                        <span>৳{order.advanceAmount || 0}</span>
-                                    </div>
+                                    {Number(order.discountValue || 0) > 0 && (
+                                        <div className="text-xs text-slate-400 flex justify-between italic">
+                                            <span>Incl. Old Discount {order.discountType === 'Percent' ? `(${order.discountValue}%)` : ''}:</span>
+                                            <span>- ৳ {Number(oldDiscountAbsolute).toFixed(0)}</span>
+                                        </div>
+                                    )}
 
-                                    <div className="text-[10px] text-slate-400 italic text-right mb-1">
-                                        (Old Grand Total - Old Delivery)
+                                    {/* LOGIC: Show advance amount only if dueAmount > 0 */}
+                                    {Number(order.dueAmount || 0) > 0 && (
+                                        <div className="text-xs text-blue-600 flex justify-between font-medium">
+                                            <span>Previous Advance:</span>
+                                            <span>- ৳ {order.advanceAmount || 0}</span>
+                                        </div>
+                                    )}
+
+                                    <div className="text-xs text-slate-800 flex justify-between font-bold border-t border-slate-200 pt-1">
+                                        <span>Total:</span>
+                                        <span>৳ {Number(order.dueAmount || 0) > 0 ? (oldProductValue - (order.advanceAmount || 0)) : oldProductValue}</span>
                                     </div>
 
                                     <div className="border-b border-dashed border-slate-300 my-1"></div>
@@ -512,12 +538,12 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory }) => {
                                     <div className="text-xs text-slate-500 flex justify-between">
                                         <span>Product Difference:</span>
                                         <span className={productDifference >= 0 ? 'text-slate-700' : 'text-red-500'}>
-                                            {productDifference >= 0 ? '৳' + productDifference : '-৳' + Math.abs(productDifference)}
+                                            ৳ {productDifference.toFixed(0)}
                                         </span>
                                     </div>
                                     <div className="text-xs text-slate-500 flex justify-between mt-1">
-                                        <span>+ New Delivery:</span>
-                                        <span>৳{Number(newDeliveryCost || 0)}</span>
+                                        <span>New Delivery Charge:</span>
+                                        <span>+ ৳ {Number(newDeliveryCost || 0)}</span>
                                     </div>
 
                                     <div className={`flex justify-between items-center mt-3 p-2 rounded ${finalAdjustment >= 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>
@@ -525,7 +551,7 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory }) => {
                                             {finalAdjustment >= 0 ? 'Net Payable:' : 'Refund Amount:'}
                                         </span>
                                         <span className="font-bold text-lg">
-                                            {finalAdjustment >= 0 ? '৳' + finalAdjustment.toFixed(0) : '-৳' + Math.abs(finalAdjustment).toFixed(0)}
+                                            ৳ {Math.abs(finalAdjustment).toFixed(0)}
                                         </span>
                                     </div>
                                 </div>
