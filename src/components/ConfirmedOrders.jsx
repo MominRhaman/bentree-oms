@@ -201,6 +201,16 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                                 // Only hide for NEW partial orders, not original orders
                                 const shouldHideFinancials = isNewPartialReturnOrder || isNewPartialExchangeOrder;
                                 
+                                // Fix: Combine current products with original products (if it's an exchange/return) to show all codes
+                                const displayProducts = [...(order.products || [])];
+                                if (order.exchangeDetails?.originalProducts) {
+                                    order.exchangeDetails.originalProducts.forEach(op => {
+                                        if (!displayProducts.some(dp => dp.code === op.code)) {
+                                            displayProducts.push(op);
+                                        }
+                                    });
+                                }
+
                                 return (
                                 <tr
                                     key={order.id}
@@ -227,7 +237,6 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                                         <div className="font-medium">{order.recipientName}</div>
                                         <div className="text-xs opacity-75">{order.recipientPhone}</div>
                                         
-                                        {/* Show refund/due for ALL orders EXCEPT newly created partial return/exchange orders */}
                                         {!shouldHideFinancials && (
                                             <>
                                                 {order.dueAmount < 0 ? (
@@ -264,7 +273,6 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                                             </>
                                         )}
                                         
-                                        {/* Show label for NEW partial orders (created during split) */}
                                         {isNewPartialReturnOrder && (
                                             <div className="text-[10px] font-bold mt-1 text-amber-600 bg-amber-50 px-2 py-0.5 rounded inline-block">
                                                 PARTIAL RETURN
@@ -277,7 +285,11 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                                         )}
                                     </td>
                                     <td className="p-3 text-xs">
-                                        {(order.products || []).map((p, i) => <div key={`${order.id}-product-${i}-${p.code}`}>{p.qty}x {p.code} ({p.size})</div>)}
+                                        {displayProducts.map((p, i) => (
+                                            <div key={`${order.id}-product-${i}-${p.code}`}>
+                                                {p.qty}x {p.code} ({p.size})
+                                            </div>
+                                        ))}
                                     </td>
                                     <td className="p-3 font-bold">
                                         <span className={`px-2 py-1 rounded ${getStatusColor(order.status)}`}>{order.status}</span>

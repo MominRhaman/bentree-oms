@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Calendar, Download, Trash2, RefreshCw, Ban } from 'lucide-react';
+import { Calendar, Download, Trash2, RefreshCw, Ban, CheckCircle } from 'lucide-react';
 import { doc, deleteDoc } from "firebase/firestore"; 
 import { getStatusColor, downloadCSV } from '../utils';
 
@@ -66,21 +66,16 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
 
     // --- DELETE LOGIC ---
     const processDelete = async (orderId) => {
-        // 1. Confirmation
         const confirmed = window.confirm('⚠️ Are you sure you want to PERMANENTLY delete this order?\n\nThis cannot be undone.');
         if (!confirmed) return;
 
         try {
-            // 2. Update UI immediately (Hide the row)
             setDeletedIds(prev => {
                 const newSet = new Set(prev);
                 newSet.add(orderId);
                 return newSet;
             });
-
-            // 3. Notify parent if prop exists
             if (onDelete) onDelete(orderId);
-
         } catch (error) {
             console.error("Delete failed:", error);
             alert("Error deleting order: " + error.message);
@@ -88,11 +83,14 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
     };
 
     // Helper for badge color
-    const getBadgeColor = (statusRaw) => {
-        const s = (statusRaw || '').toLowerCase();
+    const getBadgeColor = (order) => {
+        // REQUIREMENT: Change color to green if refunded
+        if (order.isRefunded) return 'bg-green-100 text-green-800 border border-green-200';
+        
+        const s = (order.status || '').toLowerCase();
         if (s.includes('return')) return 'bg-red-100 text-red-800 border border-red-200';
         if (s.includes('cancel')) return 'bg-slate-100 text-slate-600 border border-slate-200';
-        return getStatusColor(statusRaw);
+        return getStatusColor(order.status);
     };
 
     return (
@@ -133,81 +131,110 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
                         </tr>
                     </thead>
                     <tbody>
-                        {filteredOrders.map(order => (
-                            <tr 
-                                key={order.id} 
-                                className="border-b hover:bg-slate-50 cursor-pointer"
-                                onClick={() => setSelectedOrder(order)}
-                            >
-                                <td className="p-3 text-slate-500">{order.date?.includes('T') ? order.date.split('T')[0] : order.date}</td>
-                                <td className="p-3 font-mono text-xs font-bold">{order.merchantOrderId || order.storeOrderId}</td>
-                                <td className="p-3">
-                                    <div className="font-bold text-slate-700">{order.recipientName}</div>
-                                    <div className="text-xs text-slate-500">{order.recipientPhone}</div>
-                                </td>
-                                <td className="p-3 text-xs text-slate-700">
-                                    {(order.products || []).map((p, i) => (
-                                        <div key={i} className="font-medium">
-                                            {p.qty}x <span className="text-slate-900">{p.code}</span> <span className="text-slate-500">({p.size})</span>
+                        {filteredOrders.map(order => {
+                            // FIX: Combine current products and original products to ensure codes show up
+                            const displayProducts = [...(order.products || [])];
+                            if (order.exchangeDetails?.originalProducts) {
+                                order.exchangeDetails.originalProducts.forEach(op => {
+                                    if (!displayProducts.some(dp => dp.code === op.code)) {
+                                        displayProducts.push(op);
+                                    }
+                                });
+                            }
+
+                            return (
+                                <tr 
+                                    key={order.id} 
+                                    className="border-b hover:bg-slate-50 cursor-pointer"
+                                    onClick={() => setSelectedOrder(order)}
+                                >
+                                    <td className="p-3 text-slate-500">{order.date?.includes('T') ? order.date.split('T')[0] : order.date}</td>
+                                    <td className="p-3 font-mono text-xs font-bold">{order.merchantOrderId || order.storeOrderId}</td>
+                                    <td className="p-3">
+                                        <div className="font-bold text-slate-700">{order.recipientName}</div>
+                                        <div className="text-xs text-slate-500">{order.recipientPhone}</div>
+                                    </td>
+                                    <td className="p-3 text-xs text-slate-700">
+                                        {displayProducts.map((p, i) => (
+                                            <div key={i} className="font-medium">
+                                                {p.qty}x <span className="text-slate-900">{p.code}</span> <span className="text-slate-500">({p.size})</span>
+                                            </div>
+                                        ))}
+                                    </td>
+                                    <td className="p-3 text-center">
+                                        <span className={`px-2 py-1 rounded text-xs font-bold ${getBadgeColor(order)}`}>
+                                            {order.status}
+                                        </span>
+                                    </td>
+                                    <td className="p-3 text-right" onClick={(e) => e.stopPropagation()}>
+                                        <div className="flex flex-col items-end gap-1">
+                                            <div className="text-xs text-slate-400 line-through">৳{order.grandTotal}</div>
+                                            
+                                            {/* REQUIREMENT: Show Refunded logic with Checkbox */}
+                                            <div className="flex items-center gap-2">
+                                                {order.isRefunded ? (
+                                                    <span className="text-green-600 font-black text-sm flex items-center gap-1">
+                                                        <CheckCircle size={12} /> Refunded
+                                                    </span>
+                                                ) : (
+                                                    <div className="text-red-600 font-black text-sm">
+                                                        Refund: ৳{Math.abs(order.dueAmount || 0)}
+                                                    </div>
+                                                )}
+                                                
+                                                <input 
+                                                    type="checkbox"
+                                                    checked={order.isRefunded || false}
+                                                    onChange={(e) => {
+                                                        onUpdate(order.id, order.status, { isRefunded: e.target.checked });
+                                                    }}
+                                                    className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500 cursor-pointer"
+                                                    title="Mark as Refunded"
+                                                />
+                                            </div>
                                         </div>
-                                    ))}
-                                </td>
-                                <td className="p-3 text-center">
-                                    <span className={`px-2 py-1 rounded text-xs font-bold ${getBadgeColor(order.status)}`}>
-                                        {order.status}
-                                    </span>
-                                </td>
-                                <td className="p-3 text-right">
-                                    <div className="text-xs text-slate-400 line-through">৳{order.grandTotal}</div>
-                                    {order.dueAmount < 0 ? (
-                                        <div className="text-red-600 font-black text-sm">Refund: ৳{Math.abs(order.dueAmount)}</div>
-                                    ) : (
-                                        <div className="text-slate-700 font-bold">৳{order.grandTotal}</div>
-                                    )}
-                                </td>
-                                <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
-                                    <div className="flex justify-center gap-2">
-                                        {/* RESTORE BUTTON */}
-                                        <button 
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleRestore(order);
-                                            }}
-                                            className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"
-                                            title="Restore to Pending"
-                                        >
-                                            <RefreshCw size={16} />
-                                        </button>
-                                        
-                                        {/* CANCEL BUTTON */}
-                                        {!(order.status || '').toLowerCase().includes('cancel') && (
+                                    </td>
+                                    <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
+                                        <div className="flex justify-center gap-2">
+                                            <button 
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleRestore(order);
+                                                }}
+                                                className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"
+                                                title="Restore to Pending"
+                                            >
+                                                <RefreshCw size={16} />
+                                            </button>
+                                            
+                                            {!(order.status || '').toLowerCase().includes('cancel') && (
+                                                <button 
+                                                    onClick={(e) => { 
+                                                        e.stopPropagation();
+                                                        if(window.confirm('Mark as Cancelled?')) onUpdate(order.id, 'Cancelled'); 
+                                                    }}
+                                                    className="p-1.5 text-orange-600 hover:bg-orange-50 rounded"
+                                                    title="Mark as Cancelled"
+                                                >
+                                                    <Ban size={16} />
+                                                </button>
+                                            )}
+
                                             <button 
                                                 onClick={(e) => { 
-                                                    e.stopPropagation();
-                                                    if(window.confirm('Mark as Cancelled?')) onUpdate(order.id, 'Cancelled'); 
+                                                    e.stopPropagation(); 
+                                                    processDelete(order.id); 
                                                 }}
-                                                className="p-1.5 text-orange-600 hover:bg-orange-50 rounded"
-                                                title="Mark as Cancelled"
+                                                className="p-1.5 text-red-600 hover:bg-red-50 rounded border border-red-200"
+                                                title="Delete Permanently"
                                             >
-                                                <Ban size={16} />
+                                                <Trash2 size={16} />
                                             </button>
-                                        )}
-
-                                        {/* DELETE BUTTON */}
-                                        <button 
-                                            onClick={(e) => { 
-                                                e.stopPropagation(); 
-                                                processDelete(order.id); 
-                                            }}
-                                            className="p-1.5 text-red-600 hover:bg-red-50 rounded border border-red-200"
-                                            title="Delete Permanently"
-                                        >
-                                            <Trash2 size={16} />
-                                        </button>
-                                    </div>
-                                </td>
-                            </tr>
-                        ))}
+                                        </div>
+                                    </td>
+                                </tr>
+                            );
+                        })}
                         {filteredOrders.length === 0 && (
                             <tr>
                                 <td colSpan="7" className="p-8 text-center text-slate-400 font-medium">
@@ -223,7 +250,7 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
                 <OrderDetailsPopup 
                     order={selectedOrder} 
                     onClose={() => setSelectedOrder(null)} 
-                    getStatusColor={getBadgeColor} 
+                    getStatusColor={() => getBadgeColor(selectedOrder)} 
                     onEdit={onEdit}
                     onCreate={onCreate}
                     inventory={inventory}

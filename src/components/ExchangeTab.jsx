@@ -1,12 +1,10 @@
 import React, { useState } from 'react';
-import { ArrowRightLeft, Eye } from 'lucide-react';
+import { ArrowRightLeft, Eye, CheckCircle, Clock } from 'lucide-react';
 import OrderDetailsPopup from './OrderDetailsPopup';
 import { getStatusColor } from '../utils';
 
 const ExchangeTab = ({ orders, onCreate, onEdit, inventory }) => {
     const [selectedOrder, setSelectedOrder] = useState(null);
-
-    const [exchangeModalOrder, setExchangeModalOrder] = useState(null);
 
     // Filter to include both full exchanges and partial exchanges
     const exchangeOrders = orders.filter(o =>
@@ -30,6 +28,7 @@ const ExchangeTab = ({ orders, onCreate, onEdit, inventory }) => {
                     <table className="w-full text-sm text-left">
                         <thead className="bg-slate-50 text-slate-600 font-bold border-b">
                             <tr>
+                                <th className="p-3 w-10">Return</th>
                                 <th className="p-3">Date</th>
                                 <th className="p-3">Order ID</th>
                                 <th className="p-3">Customer</th>
@@ -40,15 +39,42 @@ const ExchangeTab = ({ orders, onCreate, onEdit, inventory }) => {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                            {orders.map(order => {
+                            {exchangeOrders.map(order => {
                                 const details = order.exchangeDetails || {};
-                                // This deviation now comes from the corrected formula in ExchangeModal
                                 const deviation = details.priceDeviation || 0;
+                                // Check if product is marked as received
+                                const isReceived = order.isReturnReceived === true;
 
                                 return (
-                                    <tr key={order.id} className="hover:bg-slate-50">
+                                    <tr key={order.id} className={`hover:bg-slate-50 transition-colors ${isReceived ? 'bg-green-50/30' : ''}`}>
+                                        <td className="p-3 text-center">
+                                            <input 
+                                                type="checkbox"
+                                                checked={isReceived}
+                                                onChange={(e) => {
+                                                    onEdit(order.id, order.status, { 
+                                                        ...order, 
+                                                        isReturnReceived: e.target.checked 
+                                                    });
+                                                }}
+                                                className="w-4 h-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                                                title="Mark as Product Received"
+                                            />
+                                        </td>
                                         <td className="p-3">{details.exchangeDate || order.date}</td>
-                                        <td className="p-3 font-mono">{order.merchantOrderId}</td>
+                                        <td className="p-3 font-mono">
+                                            <div>{order.merchantOrderId}</div>
+                                            {/* REQUIREMENT: Display Received Product Status */}
+                                            {isReceived ? (
+                                                <span className="text-[10px] font-bold text-green-600 flex items-center gap-1 mt-1 uppercase">
+                                                    <CheckCircle size={10} /> Received Product
+                                                </span>
+                                            ) : (
+                                                <span className="text-[10px] font-bold text-red-600 flex items-center gap-1 mt-1 uppercase">
+                                                    <Clock size={10} /> Awaiting Return
+                                                </span>
+                                            )}
+                                        </td>
                                         <td className="p-3">
                                             <div className="font-bold">{order.recipientName}</div>
                                             <div className="text-xs text-slate-500">{order.recipientPhone}</div>
@@ -73,19 +99,22 @@ const ExchangeTab = ({ orders, onCreate, onEdit, inventory }) => {
                                             </span>
                                         </td>
                                         <td className="p-3 text-center">
-                                            <button
-                                                onClick={() => setSelectedOrder(order)}
-                                                className="text-slate-500 hover:text-emerald-600"
-                                            >
-                                                <Eye size={18} />
-                                            </button>
+                                            <div className="flex items-center justify-center gap-2">
+                                                <button
+                                                    onClick={() => setSelectedOrder(order)}
+                                                    className="p-1.5 bg-slate-100 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                                                    title="View Details"
+                                                >
+                                                    <Eye size={18} />
+                                                </button>
+                                            </div>
                                         </td>
                                     </tr>
                                 );
                             })}
-                            {orders.length === 0 && (
+                            {exchangeOrders.length === 0 && (
                                 <tr>
-                                    <td colSpan="7" className="p-8 text-center text-slate-400">
+                                    <td colSpan="8" className="p-8 text-center text-slate-400">
                                         No exchange records found.
                                     </td>
                                 </tr>
@@ -100,7 +129,9 @@ const ExchangeTab = ({ orders, onCreate, onEdit, inventory }) => {
                     order={selectedOrder}
                     onClose={() => setSelectedOrder(null)}
                     getStatusColor={getStatusColor}
-                    onEdit={() => alert("Exchange logs are read-only.")}
+                    onEdit={onEdit}
+                    onCreate={onCreate}
+                    inventory={inventory}
                 />
             )}
         </div>

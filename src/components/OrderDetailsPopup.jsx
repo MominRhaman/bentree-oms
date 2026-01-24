@@ -235,15 +235,20 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
             }]
         };
 
+        // --- REQUIREMENT FIX: RETAIN ORIGINAL STATUS ---
+        // If items are kept, retain the current order status. If all items returned, it becomes 'Returned'.
+        const currentStatus = order.status || 'Dispatched';
+        const updatedStatus = keptItems.length === 0 ? 'Returned' : currentStatus;
+
         // 2. Update the ORIGINAL Order entry
         const updatedOriginalOrder = recalculateTotals({
             ...editedOrder,
             products: keptItems,
-            status: keptItems.length === 0 ? 'Returned' : 'Dispatched',
+            status: updatedStatus,
             history: [
                 ...(order.history || []),
                 {
-                    status: keptItems.length === 0 ? 'Returned' : 'Dispatched',
+                    status: updatedStatus,
                     timestamp: new Date().toISOString(),
                     note: `Partial Return processed. ${returnedItems.length} item(s) returned. Return Order ID: ${returnOrderId}`,
                     updatedBy: 'Admin'
@@ -415,7 +420,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
 
     const safeStatus = (typeof order.status === 'string') ? order.status : 'Unknown';
     // Helper to detect partial return state
-    const isPartialReturn = (order.history || []).some(h => h.note?.includes('Returned (Partial/Edited)'));
+    const isPartialReturnNote = (order.history || []).some(h => h.note?.includes('Returned (Partial/Edited)'));
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
@@ -437,8 +442,8 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                                             Partial Return
                                         </span>
                                     )}
-                                    <span className={`text-xs px-2 py-1 rounded-full ${getStatusColor(isPartialReturn && safeStatus === 'Returned' ? 'Dispatched' : safeStatus)}`}>
-                                        {isPartialReturn && safeStatus === 'Returned' ? 'Dispatched' : safeStatus}
+                                    <span className={`text-xs px-2 py-1 rounded-full ${getStatusColor(isPartialReturnNote && safeStatus === 'Returned' ? 'Dispatched' : safeStatus)}`}>
+                                        {isPartialReturnNote && safeStatus === 'Returned' ? 'Dispatched' : safeStatus}
                                     </span>
                                     {order.isExpress && (
                                         <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-1 rounded-full border border-amber-200 flex items-center gap-1">
@@ -469,7 +474,6 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                         )}
                     </div>
                     <div className="flex gap-2">
-                        {/* Always visible print button */}
                         <button
                             onClick={() => setShowInvoice(true)}
                             className="p-2 hover:bg-white rounded-full border border-transparent hover:border-slate-200 transition-all text-slate-600"
@@ -587,7 +591,6 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                                                     <div className="w-20"><input type="number" className="w-full p-2 border rounded text-sm bg-white" value={p.qty} onChange={e => handleProductChange(i, 'qty', e.target.value)} onWheel={disableScroll} /></div>
                                                     <div className="w-24"><input type="number" className="w-full p-2 border rounded text-sm bg-white" value={p.price} onChange={e => handleProductChange(i, 'price', e.target.value)} onWheel={disableScroll} /></div>
 
-                                                    {/* PARTIAL RETURN CHECKBOX & DELETE ACTION */}
                                                     <div className="flex items-center gap-3 ml-2 border-l pl-3 border-slate-300">
                                                         {isReturnMode && (
                                                             <label className="flex flex-col items-center cursor-pointer group">
@@ -619,10 +622,8 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                     {/* Financial Summary */}
                     {!order.isPartialReturn && (
                         <div className="bg-slate-50 p-4 rounded-lg space-y-2 border border-slate-100">
-                            {/* Subtotal */}
                             <div className="flex justify-between text-sm"><span className="text-slate-500">Subtotal</span><span className="font-medium">৳ {editedOrder.subtotal}</span></div>
                             
-                            {/* Discount */}
                             <div className="flex justify-between text-sm items-center">
                                 <span className="text-slate-500">Discount</span>
                                 {isEditing ? 
@@ -631,31 +632,26 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                                 }
                             </div>
 
-                            {/* Delivery Charge */}
                             <div className="flex justify-between text-sm items-center">
                                 <span className="text-slate-500">Delivery Charge</span>
                                 {isEditing ? <input className="w-24 p-1 border rounded text-right" value={editedOrder.deliveryCharge} onChange={e => handleInputChange('deliveryCharge', e.target.value)} onWheel={disableScroll} /> : <span>৳ {editedOrder.deliveryCharge}</span>}
                             </div>
 
-                            {/* Grand Total */}
                             <div className="border-t pt-2 mt-2 flex justify-between font-bold text-base text-slate-900">
                                 <span>Grand Total</span>
                                 <span>৳ {editedOrder.grandTotal}</span>
                             </div>
 
-                            {/* Paid Advance Money */}
                             <div className="flex justify-between text-sm font-bold text-blue-600 bg-blue-50/50 p-1 rounded">
                                 <span>Paid Advance Money</span>
                                 <span>- ৳ {editedOrder.advanceAmount || 0}</span>
                             </div>
 
-                            {/* Total (Grand Total - Advance) */}
                             <div className="flex justify-between font-bold text-slate-800 border-t border-slate-200 pt-1">
                                 <span>Total</span>
                                 <span>৳ {Number(editedOrder.grandTotal) - Number(editedOrder.advanceAmount || 0)}</span>
                             </div>
 
-                            {/* Advance / Collected (The Amount specifically received) */}
                             <div className="flex justify-between text-sm text-slate-500 pt-1 items-center font-bold">
                                 <div className="flex flex-col">
                                     <span>Advance / Collected</span>
@@ -667,7 +663,6 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                                 }
                             </div>
 
-                            {/* Final Due Amount */}
                             <div className="flex justify-between font-bold border-t border-dashed border-slate-300 pt-2 text-lg">
                                 <span className={editedOrder.dueAmount < 0 ? "text-red-600" : "text-emerald-600"}>
                                     {editedOrder.dueAmount < 0 ? "Refund Due" : "Due Amount"}
@@ -706,7 +701,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                                         </time>
                                         <div className="flex items-center gap-2">
                                             <h3 className="text-sm font-bold text-slate-800">
-                                                {h.note?.includes('Returned (Partial/Edited)') ? 'Dispatched' : h.status}
+                                                {h.status}
                                             </h3>
                                             <button onClick={() => setHistoryModalData(h.note || 'No additional details available.')} className="text-blue-500 hover:text-blue-700 bg-blue-50 p-1 rounded-full" title="View History Details"><Eye size={14} /></button>
                                         </div>
@@ -744,7 +739,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                     ) : (
                         <div className="w-full flex gap-3">
                             <button className="flex-1 py-2 text-slate-600 font-bold border border-slate-300 rounded hover:bg-slate-100 transition-colors" onClick={onClose}>Close</button>
-                            {isPartialReturn && (
+                            {order.isPartialReturn && (
                                 <button
                                     className={`flex-1 py-2 text-white font-bold rounded shadow flex items-center justify-center gap-2 transition-all ${safeStatus === 'Dispatched' ? 'bg-slate-300 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-700'}`}
                                     disabled={safeStatus === 'Dispatched'}
