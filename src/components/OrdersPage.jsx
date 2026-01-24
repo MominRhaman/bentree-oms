@@ -21,12 +21,12 @@ const OrdersPage = () => {
       const ordersRef = collection(db, 'orders');
       const q = query(ordersRef, orderBy('createdAt', 'desc'));
       const snapshot = await getDocs(q);
-      
+
       const ordersData = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }));
-      
+
       setOrders(ordersData);
       // console.log(`Loaded ${ordersData.length} orders`);
     } catch (error) {
@@ -42,12 +42,12 @@ const OrdersPage = () => {
     try {
       const inventoryRef = collection(db, 'inventory');
       const snapshot = await getDocs(inventoryRef);
-      
+
       const inventoryData = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }));
-      
+
       setInventory(inventoryData);
       // console.log(`Loaded ${inventoryData.length} inventory items`);
     } catch (error) {
@@ -83,9 +83,9 @@ const OrdersPage = () => {
         status: newStatus,
         updatedAt: serverTimestamp()
       });
-      
+
       // console.log(' Order updated successfully:', orderId);
-      
+
       // Refresh orders list
       await fetchOrders();
     } catch (error) {
@@ -104,12 +104,12 @@ const OrdersPage = () => {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
-      
+
       // console.log(' New return order created with ID:', docRef.id);
-      
+
       // Refresh orders list to show the new return order
       await fetchOrders();
-      
+
       return docRef.id;
     } catch (error) {
       console.error('❌ Error creating new order:', error);
@@ -121,7 +121,7 @@ const OrdersPage = () => {
   // Filter orders based on active tab
   const filteredOrders = orders.filter(order => {
     // Search filter
-    const matchesSearch = searchTerm === '' || 
+    const matchesSearch = searchTerm === '' ||
       order.merchantOrderId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       order.storeOrderId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       order.recipientName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -187,16 +187,14 @@ const OrdersPage = () => {
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
-              className={`flex-1 py-3 px-4 rounded-lg font-semibold transition-all ${
-                activeTab === tab.key
+              className={`flex-1 py-3 px-4 rounded-lg font-semibold transition-all ${activeTab === tab.key
                   ? 'bg-blue-600 text-white shadow-md'
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
+                }`}
             >
               {tab.label}
-              <span className={`ml-2 px-2 py-1 rounded-full text-xs ${
-                activeTab === tab.key ? 'bg-blue-500' : 'bg-gray-300'
-              }`}>
+              <span className={`ml-2 px-2 py-1 rounded-full text-xs ${activeTab === tab.key ? 'bg-blue-500' : 'bg-gray-300'
+                }`}>
                 {tab.count}
               </span>
             </button>
@@ -245,7 +243,7 @@ const OrdersPage = () => {
                         </span>
                       )}
                     </div>
-                    
+
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm text-gray-600">
                       <div>
                         <p className="text-gray-400 text-xs">Customer</p>
@@ -264,7 +262,7 @@ const OrdersPage = () => {
                         <p className="font-bold text-green-600">৳{order.grandTotal || 0}</p>
                       </div>
                     </div>
-                    
+
                     <p className="text-xs text-gray-400 mt-2">
                       Created: {new Date(order.createdAt?.seconds * 1000 || order.date).toLocaleString()}
                     </p>
@@ -279,7 +277,7 @@ const OrdersPage = () => {
                       <Eye size={18} />
                       View
                     </button>
-                    
+
                     {(order.status === 'Dispatched' || order.status === 'Delivered') && (
                       <button
                         onClick={() => openOrderDetails(order, true)}

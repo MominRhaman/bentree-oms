@@ -7,15 +7,15 @@ const ExchangeTab = ({ orders, onCreate, onEdit, inventory }) => {
     const [selectedOrder, setSelectedOrder] = useState(null);
 
     const [exchangeModalOrder, setExchangeModalOrder] = useState(null);
-    
+
     // Filter to include both full exchanges and partial exchanges
-    const exchangeOrders = orders.filter(o => 
-        o.status === 'Exchanged' || 
+    const exchangeOrders = orders.filter(o =>
+        o.status === 'Exchanged' ||
         o.exchangeDetails ||
         o.isPartialExchange === true ||
         (o.history || []).some(h => h.note?.toLowerCase().includes('partial exchange'))
     );
-    
+
     return (
         <div className="space-y-6">
             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
@@ -44,7 +44,7 @@ const ExchangeTab = ({ orders, onCreate, onEdit, inventory }) => {
                                 const details = order.exchangeDetails || {};
                                 // This deviation now comes from the corrected formula in ExchangeModal
                                 const deviation = details.priceDeviation || 0;
-                                
+
                                 return (
                                     <tr key={order.id} className="hover:bg-slate-50">
                                         <td className="p-3">{details.exchangeDate || order.date}</td>
@@ -73,7 +73,7 @@ const ExchangeTab = ({ orders, onCreate, onEdit, inventory }) => {
                                             </span>
                                         </td>
                                         <td className="p-3 text-center">
-                                            <button 
+                                            <button
                                                 onClick={() => setSelectedOrder(order)}
                                                 className="text-slate-500 hover:text-emerald-600"
                                             >
@@ -96,11 +96,11 @@ const ExchangeTab = ({ orders, onCreate, onEdit, inventory }) => {
             </div>
 
             {selectedOrder && (
-                <OrderDetailsPopup 
-                    order={selectedOrder} 
-                    onClose={() => setSelectedOrder(null)} 
+                <OrderDetailsPopup
+                    order={selectedOrder}
+                    onClose={() => setSelectedOrder(null)}
                     getStatusColor={getStatusColor}
-                    onEdit={() => alert("Exchange logs are read-only.")} 
+                    onEdit={() => alert("Exchange logs are read-only.")}
                 />
             )}
         </div>
