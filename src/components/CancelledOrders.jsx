@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Calendar, Download, Trash2, RefreshCw, Ban, CheckCircle } from 'lucide-react';
+import { Calendar, Download, Trash2, RefreshCw, Ban, CheckCircle, Clock } from 'lucide-react';
 import { doc, deleteDoc } from "firebase/firestore"; 
 import { getStatusColor, downloadCSV } from '../utils';
 
@@ -84,8 +84,9 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
 
     // Helper for badge color
     const getBadgeColor = (order) => {
-        // REQUIREMENT: Change color to green if refunded
-        if (order.isRefunded) return 'bg-green-100 text-green-800 border border-green-200';
+        // REQUIREMENT: Change status color from red to green when Return (isReturnReceived) is checked
+        if (order.isReturnReceived) return 'bg-green-100 text-green-800 border border-green-200';
+        if (order.isRefunded) return 'bg-emerald-50 text-emerald-700 border border-emerald-200';
         
         const s = (order.status || '').toLowerCase();
         if (s.includes('return')) return 'bg-red-100 text-red-800 border border-red-200';
@@ -119,8 +120,9 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
             {/* Table */}
             <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto">
                 <table className="w-full text-sm text-left min-w-[800px]">
-                    <thead className="bg-slate-50 text-slate-600 font-medium border-b">
+                    <thead className="bg-slate-50 text-slate-600 font-bold border-b">
                         <tr>
+                            <th className="p-3 w-10 text-center">Return</th>
                             <th className="p-3">Date</th>
                             <th className="p-3">Order ID</th>
                             <th className="p-3">Customer</th>
@@ -132,7 +134,6 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
                     </thead>
                     <tbody>
                         {filteredOrders.map(order => {
-                            // FIX: Combine current products and original products to ensure codes show up
                             const displayProducts = [...(order.products || [])];
                             if (order.exchangeDetails?.originalProducts) {
                                 order.exchangeDetails.originalProducts.forEach(op => {
@@ -142,12 +143,25 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
                                 });
                             }
 
+                            const isReceived = order.isReturnReceived === true;
+
                             return (
                                 <tr 
                                     key={order.id} 
-                                    className="border-b hover:bg-slate-50 cursor-pointer"
+                                    className={`border-b hover:bg-slate-50 cursor-pointer transition-colors ${isReceived ? 'bg-green-50/20' : ''}`}
                                     onClick={() => setSelectedOrder(order)}
                                 >
+                                    {/* REQUIREMENT: Return Checkbox under Return Column */}
+                                    <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
+                                        <input 
+                                            type="checkbox"
+                                            checked={order.isReturnReceived || false}
+                                            onChange={(e) => {
+                                                onUpdate(order.id, order.status, { isReturnReceived: e.target.checked });
+                                            }}
+                                            className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500 cursor-pointer"
+                                        />
+                                    </td>
                                     <td className="p-3 text-slate-500">{order.date?.includes('T') ? order.date.split('T')[0] : order.date}</td>
                                     <td className="p-3 font-mono text-xs font-bold">{order.merchantOrderId || order.storeOrderId}</td>
                                     <td className="p-3">
@@ -162,7 +176,7 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
                                         ))}
                                     </td>
                                     <td className="p-3 text-center">
-                                        <span className={`px-2 py-1 rounded text-xs font-bold ${getBadgeColor(order)}`}>
+                                        <span className={`px-2 py-1 rounded text-xs font-bold transition-all duration-300 ${getBadgeColor(order)}`}>
                                             {order.status}
                                         </span>
                                     </td>
@@ -170,27 +184,39 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
                                         <div className="flex flex-col items-end gap-1">
                                             <div className="text-xs text-slate-400 line-through">৳{order.grandTotal}</div>
                                             
-                                            {/* REQUIREMENT: Show Refunded logic with Checkbox */}
-                                            <div className="flex items-center gap-2">
-                                                {order.isRefunded ? (
-                                                    <span className="text-green-600 font-black text-sm flex items-center gap-1">
-                                                        <CheckCircle size={12} /> Refunded
+                                            <div className="flex flex-col items-end min-h-[36px]">
+                                                {/* REQUIREMENT: Show "Received Product" when checked */}
+                                                {isReceived ? (
+                                                    <span className="text-green-600 font-black text-[10px] flex items-center gap-1 uppercase mb-1">
+                                                        <CheckCircle size={12} className="fill-current" /> Received Product
                                                     </span>
+                                                ) : (
+                                                    <span className="text-red-600 font-bold text-[10px] flex items-center gap-1 uppercase mb-1 opacity-50">
+                                                        <Clock size={12} /> Awaiting Return
+                                                    </span>
+                                                )}
+                                                
+                                                {order.isRefunded ? (
+                                                    <span className="text-emerald-600 font-black text-sm">Refunded</span>
                                                 ) : (
                                                     <div className="text-red-600 font-black text-sm">
                                                         Refund: ৳{Math.abs(order.dueAmount || 0)}
                                                     </div>
                                                 )}
-                                                
-                                                <input 
-                                                    type="checkbox"
-                                                    checked={order.isRefunded || false}
-                                                    onChange={(e) => {
-                                                        onUpdate(order.id, order.status, { isRefunded: e.target.checked });
-                                                    }}
-                                                    className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500 cursor-pointer"
-                                                    title="Mark as Refunded"
-                                                />
+                                            </div>
+                                            
+                                            <div className="flex items-center gap-2 mt-1">
+                                                <label className="flex items-center gap-1 cursor-pointer" title="Mark as Refunded">
+                                                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Refunded</span>
+                                                    <input 
+                                                        type="checkbox"
+                                                        checked={order.isRefunded || false}
+                                                        onChange={(e) => {
+                                                            onUpdate(order.id, order.status, { isRefunded: e.target.checked });
+                                                        }}
+                                                        className="w-4 h-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                                                    />
+                                                </label>
                                             </div>
                                         </div>
                                     </td>
@@ -235,13 +261,6 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
                                 </tr>
                             );
                         })}
-                        {filteredOrders.length === 0 && (
-                            <tr>
-                                <td colSpan="7" className="p-8 text-center text-slate-400 font-medium">
-                                    No cancelled or returned orders found.
-                                </td>
-                            </tr>
-                        )}
                     </tbody>
                 </table>
             </div>

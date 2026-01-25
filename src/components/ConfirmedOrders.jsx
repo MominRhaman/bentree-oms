@@ -105,30 +105,36 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
 
     // --- Custom Modal Handlers ---
     const processDelivery = (e) => {
-        e.preventDefault();
-        const received = Number(e.target.received.value);
-        const newDeliveryCharge = Number(e.target.deliveryCharge.value);
-        
-        const oldDeliveryCharge = Number(deliveryModal.deliveryCharge || 0);
-        const oldDue = Number(deliveryModal.dueAmount || 0);
-        const oldGrandTotal = Number(deliveryModal.grandTotal || 0);
+    e.preventDefault();
+    const received = Number(e.target.received.value);
+    const newDeliveryCharge = Number(e.target.deliveryCharge.value);
+    
+    const oldDeliveryCharge = Number(deliveryModal.deliveryCharge || 0);
+    const oldDue = Number(deliveryModal.dueAmount || 0);
+    const oldGrandTotal = Number(deliveryModal.grandTotal || 0);
 
-        const newDue = oldDue - oldDeliveryCharge + newDeliveryCharge;
-        const newGrandTotal = oldGrandTotal - oldDeliveryCharge + newDeliveryCharge;
-        const adjustment = received - newDue; 
-        
-        onUpdate(deliveryModal.id, 'Delivered', {
-            collectedAmount: received,
-            deliveryCharge: newDeliveryCharge,
-            grandTotal: newGrandTotal,
-            dueAmount: 0,
-            revenueAdjustment: adjustment,
-            paymentNote: adjustment !== 0 
-                ? `Collected ${received} (Exp: ${newDue}). Loss/Adj: ${adjustment}` 
-                : 'Full Payment Received'
-        });
-        setDeliveryModal(null);
-    };
+    const newDue = oldDue - oldDeliveryCharge + newDeliveryCharge;
+    const newGrandTotal = oldGrandTotal - oldDeliveryCharge + newDeliveryCharge;
+    const adjustment = received - newDue;
+    
+    // NEW REQUIREMENT: When marking as Delivered, add Advance Money to Collected Money and reset Advance to 0
+    const previousAdvance = Number(deliveryModal.advanceAmount || 0);
+    const previousCollected = Number(deliveryModal.collectedAmount || 0);
+    const newCollectedAmount = previousAdvance + previousCollected + received;
+    
+    onUpdate(deliveryModal.id, 'Delivered', {
+        collectedAmount: newCollectedAmount,
+        advanceAmount: 0, // Reset advance money to 0
+        deliveryCharge: newDeliveryCharge,
+        grandTotal: newGrandTotal,
+        dueAmount: 0,
+        revenueAdjustment: adjustment,
+        paymentNote: adjustment !== 0 
+            ? `Collected ${received} (Exp: ${newDue}). Loss/Adj: ${adjustment}. Advance ৳${previousAdvance} moved to Collected.` 
+            : `Full Payment Received. Advance ৳${previousAdvance} moved to Collected.`
+    });
+    setDeliveryModal(null);
+};
 
     const processHold = (e) => {
         e.preventDefault();

@@ -218,6 +218,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
             products: returnedItems,
             subtotal: partialReturnPreview.returnTotals.subtotal,
             grandTotal: partialReturnPreview.returnTotals.grandTotal,
+            dueAmount: 0, // Requirement Fix: Set dueAmount to 0 for the return record
             deliveryCharge: 0,
             discountValue: 0,
             status: 'Returned',
@@ -623,11 +624,11 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                     {!order.isPartialReturn && (
                         <div className="bg-slate-50 p-4 rounded-lg space-y-2 border border-slate-100">
                             <div className="flex justify-between text-sm"><span className="text-slate-500">Subtotal</span><span className="font-medium">৳ {editedOrder.subtotal}</span></div>
-                            
+
                             <div className="flex justify-between text-sm items-center">
                                 <span className="text-slate-500">Discount</span>
-                                {isEditing ? 
-                                    <input className="w-24 p-1 border rounded text-right" value={editedOrder.discountValue} onChange={e => handleInputChange('discountValue', e.target.value)} onWheel={disableScroll} /> : 
+                                {isEditing ?
+                                    <input className="w-24 p-1 border rounded text-right" value={editedOrder.discountValue} onChange={e => handleInputChange('discountValue', e.target.value)} onWheel={disableScroll} /> :
                                     <span className="text-red-500">- ৳ {order.discountType === 'Percent' ? (order.subtotal * (order.discountValue / 100)) : order.discountValue}</span>
                                 }
                             </div>
@@ -654,23 +655,26 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
 
                             <div className="flex justify-between text-sm text-slate-500 pt-1 items-center font-bold">
                                 <div className="flex flex-col">
-                                    <span>Advance / Collected</span>
+                                    <span>Total Received Amount</span>
                                     {order.status === 'Delivered' && <span className="text-[10px] text-emerald-600 italic leading-none">(Showing received amount)</span>}
                                 </div>
-                                {isEditing ? 
-                                    <input className="w-32 p-1 border rounded text-right bg-white" value={editedOrder.collectedAmount} onChange={e => handleInputChange('collectedAmount', e.target.value)} onWheel={disableScroll} /> : 
+                                {isEditing ?
+                                    <input className="w-32 p-1 border rounded text-right bg-white" value={editedOrder.collectedAmount} onChange={e => handleInputChange('collectedAmount', e.target.value)} onWheel={disableScroll} /> :
                                     <span>- ৳ {(Number(editedOrder.advanceAmount || 0) + Number(editedOrder.collectedAmount || 0))}</span>
                                 }
                             </div>
 
-                            <div className="flex justify-between font-bold border-t border-dashed border-slate-300 pt-2 text-lg">
-                                <span className={editedOrder.dueAmount < 0 ? "text-red-600" : "text-emerald-600"}>
-                                    {editedOrder.dueAmount < 0 ? "Refund Due" : "Due Amount"}
-                                </span>
-                                <span className={editedOrder.dueAmount < 0 ? "text-red-600" : "text-emerald-600"}>
-                                    {editedOrder.dueAmount < 0 ? `- ৳ ${Math.abs(editedOrder.dueAmount)}` : `৳ ${editedOrder.dueAmount}`}
-                                </span>
-                            </div>
+                            {/* Requirement Fix: Only show the refund/due section if this is NOT a partial return order record */}
+                            {!editedOrder.isPartialReturn && (
+                                <div className="flex justify-between font-bold border-t border-dashed border-slate-300 pt-2 text-lg">
+                                    <span className={editedOrder.dueAmount < 0 ? "text-red-600" : "text-emerald-600"}>
+                                        {editedOrder.dueAmount < 0 ? "Refund Due" : "Due Amount"}
+                                    </span>
+                                    <span className={editedOrder.dueAmount < 0 ? "text-red-600" : "text-emerald-600"}>
+                                        {editedOrder.dueAmount < 0 ? `- ৳ ${Math.abs(editedOrder.dueAmount)}` : `৳ ${editedOrder.dueAmount}`}
+                                    </span>
+                                </div>
+                            )}
                         </div>
                     )}
 

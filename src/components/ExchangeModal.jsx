@@ -7,10 +7,10 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
     // Detect if this is completing a partial exchange that was already created
     const isCompletingPartialExchange = order.isPartialExchange === true || order.exchangeDetails?.isPartial === true;
     const originalOrderId = order.originalOrderId || null;
-    
+
     // Debug: Log props to help identify the issue
-    console.log('ExchangeModal Props:', { 
-        hasOnCreate: !!onCreate, 
+    console.log('ExchangeModal Props:', {
+        hasOnCreate: !!onCreate,
         hasOnConfirm: !!onConfirm,
         orderId: order?.merchantOrderId || order?.storeOrderId,
         isCompleting: isCompletingPartialExchange
@@ -20,17 +20,17 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
     const [newProducts, setNewProducts] = useState(
         order.products.map(p => ({
             code: p.code,
-            size: p.size || '', 
+            size: p.size || '',
             qty: p.qty,
             price: p.price
         }))
     );
     const [newDeliveryCost, setNewDeliveryCost] = useState('');
-    
+
     // --- Discount States ---
-    const [discountInput, setDiscountInput] = useState(''); 
+    const [discountInput, setDiscountInput] = useState('');
     const [discountType, setDiscountType] = useState('amount');
-    
+
     // --- NEW: Partial Exchange Items Selection ---
     const [partialExchangeItems, setPartialExchangeItems] = useState(new Set());
 
@@ -38,23 +38,23 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
 
     // A. Calculate New Product Value (After Discount)
     const newProductTotal = newProducts.reduce((acc, p) => acc + (Number(p.price || 0) * Number(p.qty || 0)), 0);
-    
+
     let actualDiscountAmount = 0;
     const rawDiscount = Number(discountInput || 0);
-    
+
     if (discountType === 'percent') {
         actualDiscountAmount = (newProductTotal * rawDiscount) / 100;
     } else {
         actualDiscountAmount = rawDiscount;
     }
-    
+
     // New Product Net Value
     const newProductValue = newProductTotal - actualDiscountAmount;
 
     // B. Calculate Old Product Value
     const oldDeliveryCharge = Number(order.deliveryCharge || 0);
     const oldGrandTotal = Number(order.grandTotal || 0);
-    const oldProductValue = oldGrandTotal - oldDeliveryCharge; 
+    const oldProductValue = oldGrandTotal - oldDeliveryCharge;
 
     // Calculate the absolute amount of the old discount for display
     const oldDiscountAbsolute = (Number(order.subtotal || 0) - oldProductValue);
@@ -69,7 +69,7 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
 
     // E. Financials for Database (Sales Report)
     const totalSystemDeliveryCharge = oldDeliveryCharge + Number(newDeliveryCost || 0);
-    
+
     // 2. System Grand Total = New Product Value + Total Delivery Income
     const systemNewGrandTotal = newProductValue + totalSystemDeliveryCharge;
 
@@ -107,14 +107,14 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
         // Generate a new Exchange Order ID
         const originalOrderId = order.merchantOrderId || order.storeOrderId || 'N/A';
         const exchangeOrderId = `${originalOrderId}-EXC-${Date.now().toString().slice(-6)}`;
-        
+
         // --- NEW REQUIREMENT CALCULATIONS ---
         // Subtotal = Product Value (Raw Total)
         const partialProductValue = itemsToCreateInNewOrder.reduce((sum, p) => sum + (Number(p.price || 0) * Number(p.qty || 0)), 0);
-        
+
         // Calculate proportional discount for this partial order
         const partialDiscount = actualDiscountAmount > 0 ? (partialProductValue / newProductTotal) * actualDiscountAmount : 0;
-        
+
         // Grand Total = (Product Value - Discount) + New Delivery Charge
         const partialDeliveryCharge = Number(newDeliveryCost || 0);
         const partialGrandTotal = (partialProductValue - partialDiscount) + partialDeliveryCharge;
@@ -135,15 +135,15 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
             subtotal: partialProductValue, // Requirement: Subtotal = Product Value
             discountValue: partialDiscount,
             discountType: 'amount',
-            deliveryCharge: partialDeliveryCharge, 
+            deliveryCharge: partialDeliveryCharge,
             grandTotal: partialGrandTotal, // Requirement: (Product Value - Discount) + Delivery
-            dueAmount: partialGrandTotal, 
-            advanceAmount: 0,
-            collectedAmount: 0,
+            dueAmount: partialGrandTotal, // Requirement: full payable amount as due
+            advanceAmount: 0, // Requirement: Total Received Amount should be zero
+            collectedAmount: 0, // Requirement: Total Received Amount should be zero
             exchangeDetails: {
                 exchangeDate: getCleanDate(),
                 originalProducts: exchangedItems,
-                newProducts: itemsToCreateInNewOrder, 
+                newProducts: itemsToCreateInNewOrder,
                 priceDeviation: 0,
                 isPartial: true
             },
@@ -157,7 +157,7 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
 
         // 2. Calculate financials for kept items (Original Order)
         const keptSubtotal = keptItems.reduce((sum, p) => sum + (Number(p.price || 0) * Number(p.qty || 0)), 0);
-        
+
         let keptDiscount = 0;
         if (order.discountType === 'Percent') {
             keptDiscount = keptSubtotal * (Number(order.discountValue || 0) / 100);
@@ -165,11 +165,24 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
             const originalSubtotal = order.subtotal || 1;
             keptDiscount = (keptSubtotal / originalSubtotal) * Number(order.discountValue || 0);
         }
-        
+
         const keptGrandTotal = keptSubtotal - keptDiscount + Number(order.deliveryCharge || 0);
-        
+
+        // --- NEW REQUIREMENT LOGIC ---
+        // Deduct old product price including applied discount from original order's received amount
+        const exchangedSubtotal = exchangedItems.reduce((sum, p) => sum + (Number(p.price || 0) * Number(p.qty || 0)), 0);
+        let exchangedDiscount = 0;
+        if (order.discountType === 'Percent') {
+            exchangedDiscount = exchangedSubtotal * (Number(order.discountValue || 0) / 100);
+        } else {
+            const originalSubtotal = order.subtotal || 1;
+            exchangedDiscount = (exchangedSubtotal / originalSubtotal) * Number(order.discountValue || 0);
+        }
+        const exchangedNetValue = exchangedSubtotal - exchangedDiscount;
+        const adjustedOriginalCollected = Math.max(0, totalCollectedSoFar - exchangedNetValue);
+
         // Logic: During dispatch, original order shows due amount correctly
-        const keptDueAmount = Math.max(0, keptGrandTotal - totalCollectedSoFar);
+        const keptDueAmount = Math.max(0, keptGrandTotal - adjustedOriginalCollected);
 
         const originalStatus = keptItems.length === 0 ? 'Exchanged' : order.status;
 
@@ -177,16 +190,18 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
         const updatedOriginalOrder = {
             ...order,
             products: keptItems,
-            status: originalStatus, 
+            status: originalStatus,
             subtotal: keptSubtotal,
             grandTotal: keptGrandTotal,
+            advanceAmount: adjustedOriginalCollected, // Requirement: Adjusted received amount
+            collectedAmount: 0, // Reset collected to balance with advanceAmount
             dueAmount: keptDueAmount,
             history: [
                 ...(order.history || []),
                 {
                     status: originalStatus,
                     timestamp: new Date().toISOString(),
-                    note: `Partial Exchange processed. ${exchangedItems.length} item(s) marked for exchange. Exchange Order ID: ${exchangeOrderId}`,
+                    note: `Partial Exchange processed. ${exchangedItems.length} item(s) exchanged. Original Received adjusted by -৳${exchangedNetValue.toFixed(0)}. Delivery charge ৳${order.deliveryCharge} remains. Exchange Order ID: ${exchangeOrderId}`,
                     updatedBy: user?.displayName || 'Admin'
                 }
             ]
@@ -194,7 +209,7 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
 
         try {
             const sanitizedExchangeOrder = sanitizeForFirebase(exchangeOrderRecord);
-            
+
             if (!onCreate) {
                 console.error('❌ CRITICAL: onCreate function not provided');
                 throw new Error('onCreate function not provided.');
@@ -219,24 +234,45 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        
+
         if (partialExchangeItems.size > 0 && !isCompletingPartialExchange) {
             await handlePartialExchangeProcess();
             return;
         }
-        
+
         for (const p of newProducts) {
             if (!p.code) continue;
             const invItem = inventory.find(i => i.code.toUpperCase() === p.code.trim().toUpperCase());
             if (!invItem) { alert(`Product ${p.code} not found.`); return; }
-            
+
             const qtyNeeded = Number(p.qty);
             if (invItem.type === 'Variable') {
                 const sizeKey = p.size?.trim().toUpperCase();
                 const stockVal = invItem.stock?.[Object.keys(invItem.stock).find(k => k.toUpperCase() === sizeKey)];
                 if ((stockVal || 0) < qtyNeeded) { alert(`Insufficient stock for ${p.code} (${p.size})`); return; }
             } else if (invItem.totalStock < qtyNeeded) {
-                alert(`Insufficient stock for ${p.code}`); return; }
+                alert(`Insufficient stock for ${p.code}`); return;
+            }
+        }
+
+        // Build exchangeDetails object, excluding undefined fields
+        const exchangeDetails = {
+            originalProducts: order.exchangeDetails?.originalProducts || order.products,
+            newProducts: newProducts.map(p => ({
+                ...p,
+                code: p.code.toUpperCase(),
+                size: p.size?.toUpperCase() || '',
+                price: Number(p.price),
+                qty: Number(p.qty)
+            })),
+            priceDeviation: finalAdjustment,
+            exchangeDate: new Date().toISOString().split('T')[0],
+            isPartial: isCompletingPartialExchange
+        };
+
+        // Only add originalOrderId if it exists
+        if (originalOrderId) {
+            exchangeDetails.originalOrderId = originalOrderId;
         }
 
         const updatedPayload = {
@@ -257,26 +293,13 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
             refundAmount: finalAdjustment < 0 ? Math.abs(finalAdjustment) : 0,
             advanceAmount: totalCollectedSoFar,
             status: 'Exchanged',
-            exchangeDetails: {
-                originalProducts: order.exchangeDetails?.originalProducts || order.products,
-                newProducts: newProducts.map(p => ({
-                    ...p,
-                    code: p.code.toUpperCase(),
-                    size: p.size?.toUpperCase() || '',
-                    price: Number(p.price),
-                    qty: Number(p.qty)
-                })),
-                priceDeviation: finalAdjustment,
-                exchangeDate: new Date().toISOString().split('T')[0],
-                isPartial: isCompletingPartialExchange,
-                originalOrderId: originalOrderId || undefined
-            },
+            exchangeDetails: exchangeDetails,
             history: [
                 ...(order.history || []),
                 {
                     status: 'Exchanged',
                     timestamp: new Date().toISOString(),
-                    note: isCompletingPartialExchange 
+                    note: isCompletingPartialExchange
                         ? `Partial Exchange completed. Adj: ৳${finalAdjustment}`
                         : `Full Exchange completed. Adj: ৳${finalAdjustment}`,
                     updatedBy: user?.displayName || 'Admin'
@@ -309,7 +332,7 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
     };
 
     const addProduct = () => setNewProducts([...newProducts, { code: '', size: '', qty: 1, price: '' }]);
-    const removeProduct = (idx) => { 
+    const removeProduct = (idx) => {
         if (newProducts.length > 0) setNewProducts(newProducts.filter((_, i) => i !== idx));
         setPartialExchangeItems(prev => {
             const next = new Set(prev);
@@ -323,14 +346,14 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
             <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
                 <div className="flex justify-between items-center mb-4">
                     <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
-                        <RefreshCw size={20} /> 
+                        <RefreshCw size={20} />
                         {isCompletingPartialExchange ? 'Complete Partial Exchange' : 'Process Exchange'}
                     </h3>
                     <button onClick={onClose}><X size={24} className="text-slate-400" /></button>
                 </div>
-                
+
                 <form onSubmit={handleSubmit} className="flex-1 flex flex-col overflow-hidden">
-                    <div className="overflow-y-auto pr-2 flex-1">
+                    <div className="overflow-y-auto pr-2 flex-1 max-h-[500px]">
                         <h4 className="text-sm font-bold text-slate-700 mb-3 uppercase tracking-wide">
                             {isCompletingPartialExchange ? 'New Items to Give:' : 'Product Items:'}
                         </h4>
@@ -400,7 +423,7 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
                                     </div>
                                 </div>
                             </div>
-                            
+
                             {(partialExchangeItems.size === 0 || isCompletingPartialExchange) && (
                                 <div className="text-right space-y-1">
                                     <h4 className="font-bold text-slate-700 border-b pb-1 mb-2">Calculation Breakdown</h4>
@@ -429,7 +452,7 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
                             )}
                             {partialExchangeItems.size > 0 && !isCompletingPartialExchange && (
                                 <div className="flex items-center justify-center">
-                                    <p className="text-sm text-slate-500 italic text-center">Financial calculations will be completed<br/>when you process the partial exchange.</p>
+                                    <p className="text-sm text-slate-500 italic text-center">Financial calculations will be completed<br />when you process the partial exchange.</p>
                                 </div>
                             )}
                         </div>
