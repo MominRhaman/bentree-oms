@@ -2,8 +2,6 @@
 
 A comprehensive, mobile-responsive Order Management System built with **React** and **Firebase**. This application is designed to streamline order processing, inventory tracking, and sales reporting for retail businesses with both Online and In-Store operations.
 
-## 🚀 Features
-
 ### 📦 Order Management
 * **New Order Entry**: Unified interface for creating Online and Store orders with real-time stock validation.
 * **Duplicate Detection**: Automatic warning system for duplicate phone numbers across pending orders.
@@ -54,8 +52,3 @@ src/
 ├── firebase.js          # DB Configuration
 ├── App.js               # Main Router & Layout
 └── index.css            # Tailwind Imports
-
-### 1. Clone the Repository
-```bash
-git clone [https://github.com/MominRhaman/bentree-oms.git](https://github.com/MominRhaman/bentree-oms.git)
-cd bentree-oms

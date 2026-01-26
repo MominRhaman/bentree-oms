@@ -1,19 +1,19 @@
 import React, { useState, useMemo } from 'react';
 import { Calendar, Download, Trash2, RefreshCw, Ban, CheckCircle, Clock } from 'lucide-react';
-import { doc, deleteDoc } from "firebase/firestore"; 
+import { doc, deleteDoc } from "firebase/firestore";
 import { getStatusColor, downloadCSV } from '../utils';
 
 // IMPORTANT: Using db from your firebase configuration
-import { db } from "../firebase"; 
+import { db } from "../firebase";
 import OrderDetailsPopup from './OrderDetailsPopup';
 import SearchBar from './SearchBar';
 
-const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, inventory }) => {
+const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, inventory, userRole }) => {
     // --- States ---
     const [filterDate, setFilterDate] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedOrder, setSelectedOrder] = useState(null);
-    
+
     // Local state to hide rows immediately after deletion
     const [deletedIds, setDeletedIds] = useState(new Set());
 
@@ -28,9 +28,9 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
             // Match 'returned', 'return', 'cancelled', 'cancel'
             return s.includes('return') || s.includes('cancel');
         });
-        
+
         if (filterDate) res = res.filter(o => o.date === filterDate);
-        
+
         if (searchTerm) {
             const term = searchTerm.toLowerCase();
             res = res.filter(o =>
@@ -87,12 +87,15 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
         // REQUIREMENT: Change status color from red to green when Return (isReturnReceived) is checked
         if (order.isReturnReceived) return 'bg-green-100 text-green-800 border border-green-200';
         if (order.isRefunded) return 'bg-emerald-50 text-emerald-700 border border-emerald-200';
-        
+
         const s = (order.status || '').toLowerCase();
         if (s.includes('return')) return 'bg-red-100 text-red-800 border border-red-200';
         if (s.includes('cancel')) return 'bg-slate-100 text-slate-600 border border-slate-200';
         return getStatusColor(order.status);
     };
+
+    // --- Access Control Robust Check ---
+    const isMasterUser = String(userRole || '').trim().toLowerCase() === 'master';
 
     return (
         <div className="space-y-4">
@@ -102,7 +105,7 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
                     <h2 className="text-xl font-bold text-slate-800">Cancelled & Returned</h2>
                     <p className="text-xs text-slate-500">Manage failed deliveries and returns</p>
                 </div>
-                
+
                 <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
                     <div className="w-full md:w-64">
                         <SearchBar searchTerm={searchTerm} setSearchTerm={setSearchTerm} placeholder="Search Orders..." />
@@ -134,8 +137,26 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
                     </thead>
                     <tbody>
                         {filteredOrders.map(order => {
-                            const displayProducts = [...(order.products || [])];
-                            if (order.exchangeDetails?.originalProducts) {
+                            // Fix: Show original products if current products list is empty (Full Return)
+                            let displayProducts = [...(order.products || [])];
+
+                            if (displayProducts.length === 0) {
+                                if (order.exchangeDetails?.originalProducts) {
+                                    displayProducts = [...order.exchangeDetails.originalProducts];
+                                } else if (order.history) {
+                                    // Extract products from the history note snippet we saved during 'Confirm Return'
+                                    const lastProductNote = [...order.history].reverse().find(h => h.note && h.note.includes('Products: {'));
+                                    if (lastProductNote) {
+                                        const match = lastProductNote.note.match(/\[Code: (.*?) \| Size: (.*?) \| Qty: (.*?)\]/g);
+                                        if (match) {
+                                            displayProducts = match.map(m => {
+                                                const parts = m.match(/\[Code: (.*?) \| Size: (.*?) \| Qty: (.*?)\]/);
+                                                return { code: parts[1], size: parts[2], qty: parts[3] };
+                                            });
+                                        }
+                                    }
+                                }
+                            } else if (order.exchangeDetails?.originalProducts) {
                                 order.exchangeDetails.originalProducts.forEach(op => {
                                     if (!displayProducts.some(dp => dp.code === op.code)) {
                                         displayProducts.push(op);
@@ -146,14 +167,14 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
                             const isReceived = order.isReturnReceived === true;
 
                             return (
-                                <tr 
-                                    key={order.id} 
+                                <tr
+                                    key={order.id}
                                     className={`border-b hover:bg-slate-50 cursor-pointer transition-colors ${isReceived ? 'bg-green-50/20' : ''}`}
                                     onClick={() => setSelectedOrder(order)}
                                 >
                                     {/* REQUIREMENT: Return Checkbox under Return Column */}
                                     <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
-                                        <input 
+                                        <input
                                             type="checkbox"
                                             checked={order.isReturnReceived || false}
                                             onChange={(e) => {
@@ -183,7 +204,7 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
                                     <td className="p-3 text-right" onClick={(e) => e.stopPropagation()}>
                                         <div className="flex flex-col items-end gap-1">
                                             <div className="text-xs text-slate-400 line-through">৳{order.grandTotal}</div>
-                                            
+
                                             <div className="flex flex-col items-end min-h-[36px]">
                                                 {/* REQUIREMENT: Show "Received Product" when checked */}
                                                 {isReceived ? (
@@ -195,7 +216,7 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
                                                         <Clock size={12} /> Awaiting Return
                                                     </span>
                                                 )}
-                                                
+
                                                 {order.isRefunded ? (
                                                     <span className="text-emerald-600 font-black text-sm">Refunded</span>
                                                 ) : (
@@ -204,11 +225,11 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
                                                     </div>
                                                 )}
                                             </div>
-                                            
+
                                             <div className="flex items-center gap-2 mt-1">
                                                 <label className="flex items-center gap-1 cursor-pointer" title="Mark as Refunded">
                                                     <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Refunded</span>
-                                                    <input 
+                                                    <input
                                                         type="checkbox"
                                                         checked={order.isRefunded || false}
                                                         onChange={(e) => {
@@ -222,7 +243,7 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
                                     </td>
                                     <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
                                         <div className="flex justify-center gap-2">
-                                            <button 
+                                            <button
                                                 onClick={(e) => {
                                                     e.stopPropagation();
                                                     handleRestore(order);
@@ -232,12 +253,12 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
                                             >
                                                 <RefreshCw size={16} />
                                             </button>
-                                            
+
                                             {!(order.status || '').toLowerCase().includes('cancel') && (
-                                                <button 
-                                                    onClick={(e) => { 
+                                                <button
+                                                    onClick={(e) => {
                                                         e.stopPropagation();
-                                                        if(window.confirm('Mark as Cancelled?')) onUpdate(order.id, 'Cancelled'); 
+                                                        if (window.confirm('Mark as Cancelled?')) onUpdate(order.id, 'Cancelled');
                                                     }}
                                                     className="p-1.5 text-orange-600 hover:bg-orange-50 rounded"
                                                     title="Mark as Cancelled"
@@ -246,13 +267,20 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
                                                 </button>
                                             )}
 
-                                            <button 
-                                                onClick={(e) => { 
-                                                    e.stopPropagation(); 
-                                                    processDelete(order.id); 
+                                            {/* ROLE-BASED ACCESS BUTTON */}
+                                            <button
+                                                title={isMasterUser ? "Delete Permanently" : "Restricted: Master Access Only"}
+                                                disabled={!isMasterUser}
+                                                onClick={(e) => {
+                                                    if (!isMasterUser) return;
+                                                    if (confirm('⚠️ Are you sure you want to PERMANENTLY DELETE this order? This cannot be undone.')) {
+                                                        onDelete(order.id);
+                                                    }
                                                 }}
-                                                className="p-1.5 text-red-600 hover:bg-red-50 rounded border border-red-200"
-                                                title="Delete Permanently"
+                                                className={`p-1.5 rounded border border-slate-200 transition-all ${isMasterUser
+                                                    ? 'bg-slate-200 text-slate-700 hover:bg-slate-300 cursor-pointer'
+                                                    : 'bg-slate-50 text-slate-300 cursor-not-allowed opacity-40'
+                                                    }`}
                                             >
                                                 <Trash2 size={16} />
                                             </button>
@@ -266,10 +294,10 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
             </div>
 
             {selectedOrder && (
-                <OrderDetailsPopup 
-                    order={selectedOrder} 
-                    onClose={() => setSelectedOrder(null)} 
-                    getStatusColor={() => getBadgeColor(selectedOrder)} 
+                <OrderDetailsPopup
+                    order={selectedOrder}
+                    onClose={() => setSelectedOrder(null)}
+                    getStatusColor={() => getBadgeColor(selectedOrder)}
                     onEdit={onEdit}
                     onCreate={onCreate}
                     inventory={inventory}

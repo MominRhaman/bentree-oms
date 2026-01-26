@@ -3,7 +3,7 @@ import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { collection, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, arrayUnion, addDoc } from 'firebase/firestore';
 import { auth, db, appId } from './firebase';
 import { updateInventoryStock } from './utils';
-import { Menu } from 'lucide-react'; 
+import { Menu } from 'lucide-react';
 
 // Component Imports
 import LoginPage from './components/LoginPage';
@@ -24,7 +24,7 @@ import SalesReports from './components/SalesReports';
 
 function App() {
     const savedRole = localStorage.getItem('bentree_role');
-    
+
     // --- 1. Clean URL Routing Logic ---
     const getInitialTab = () => {
         const path = window.location.pathname.substring(1);
@@ -34,8 +34,8 @@ function App() {
 
     const [user, setUser] = useState(null);
     const [userRole, setUserRole] = useState(savedRole);
-    const [activeTab, setActiveTab] = useState(getInitialTab); 
-    const [isSidebarOpen, setIsSidebarOpen] = useState(false); 
+    const [activeTab, setActiveTab] = useState(getInitialTab);
+    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
     const [isAuthChecking, setIsAuthChecking] = useState(true);
     const [loading, setLoading] = useState(false);
@@ -55,7 +55,7 @@ function App() {
                 const displayName = storedName || currentUser.displayName;
                 const customPhoto = displayName ? localStorage.getItem(`bentree_photo_${displayName}`) : null;
 
-                let finalUser = { 
+                let finalUser = {
                     ...currentUser,
                     displayName: displayName || currentUser.displayName,
                     photoURL: customPhoto || currentUser.photoURL
@@ -69,13 +69,13 @@ function App() {
                 setUserRole(null);
             }
         });
-        
+
         const handlePopState = () => {
             const path = window.location.pathname.substring(1);
             if (path) setActiveTab(path);
         };
         window.addEventListener('popstate', handlePopState);
-        
+
         return () => {
             unsubscribe();
             window.removeEventListener('popstate', handlePopState);
@@ -112,7 +112,7 @@ function App() {
     useEffect(() => {
         if (!user) return;
         const handleSnapshotError = (err) => console.error("Firestore Error:", err);
-        
+
         const unsubOrders = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), (snap) => {
             const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
             data.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
@@ -136,7 +136,7 @@ function App() {
         }
 
         if (!order) return;
-        
+
         const activeId = order.id;
         const inactiveStatuses = ['Cancelled', 'Returned'];
         const becomingInactive = inactiveStatuses.includes(newStatus);
@@ -153,22 +153,22 @@ function App() {
                 await updateInventoryStock(p.code, p.size, -Number(p.qty), inventory);
             }
         }
-        
+
         try {
             const orderRef = doc(db, 'artifacts', appId, 'public', 'data', 'orders', activeId);
-            const historyEntry = { 
-                status: newStatus, 
-                timestamp: new Date().toISOString(), 
-                note: extraData.note || `Status updated to ${newStatus}`, 
-                updatedBy: user?.displayName || 'Admin' 
+            const historyEntry = {
+                status: newStatus,
+                timestamp: new Date().toISOString(),
+                note: extraData.note || `Status updated to ${newStatus}`,
+                updatedBy: user?.displayName || 'Admin'
             };
-            
+
             const { id, createdAt, ...cleanExtraData } = extraData;
 
-            await updateDoc(orderRef, { 
-                ...cleanExtraData, 
-                status: newStatus, 
-                history: arrayUnion(historyEntry) 
+            await updateDoc(orderRef, {
+                ...cleanExtraData,
+                status: newStatus,
+                history: arrayUnion(historyEntry)
             });
         } catch (err) { console.error("Update Status Error:", err); }
     };
@@ -177,7 +177,7 @@ function App() {
     const handleEditOrderWithStock = async (orderId, newStatus, updatedData) => {
         // Find the order in the current local state
         const oldOrder = orders.find(o => o.id === orderId);
-        
+
         // SAFETY: If the order isn't found, stop execution to prevent the 'products' undefined error
         if (!oldOrder) {
             console.error("Critical Sync Error: Order not found in state.");
@@ -214,8 +214,8 @@ function App() {
 
             if (newStatus === 'Exchanged') alert("Exchange Successful!");
 
-        } catch (err) { 
-            console.error("Inventory Sync Failure:", err); 
+        } catch (err) {
+            console.error("Inventory Sync Failure:", err);
             alert("Error syncing inventory. Check console for details.");
         }
     };
@@ -225,11 +225,11 @@ function App() {
         try {
             console.log(' Creating new return order...');
             console.log('Order data:', { status: orderData.status, products: orderData.products?.length });
-            
+
             // CRITICAL: For RETURNED/CANCELLED orders, we DON'T touch inventory
             // The inventory restoration happens when we update the original order's status
             // through handleEditOrderWithStock which is called separately
-            
+
             // Only deduct inventory if creating a new ACTIVE order (not a return)
             if (!['Cancelled', 'Returned'].includes(orderData.status)) {
                 console.log('Deducting inventory for active order...');
@@ -243,17 +243,17 @@ function App() {
 
             // Create new document in Firebase using your custom path
             const ordersRef = collection(db, 'artifacts', appId, 'public', 'data', 'orders');
-            
+
             // Remove any existing id field before creating
             const { id, ...cleanOrderData } = orderData;
-            
+
             const docRef = await addDoc(ordersRef, {
                 ...cleanOrderData,
                 createdAt: serverTimestamp(),
                 updatedAt: serverTimestamp(),
                 createdBy: user?.displayName || 'Admin'
             });
-            
+
             console.log(' New return order created with ID:', docRef.id);
             return docRef.id;
         } catch (error) {
@@ -276,11 +276,11 @@ function App() {
     };
 
     const handleEditInventory = async (id, updatedData) => {
-        try { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventory', id), updatedData); } 
+        try { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventory', id), updatedData); }
         catch (e) { alert("Inventory update failed"); }
     };
     const handleDeleteInventory = async (id) => {
-        try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventory', id)); } 
+        try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventory', id)); }
         catch (e) { alert("Inventory delete failed"); }
     };
 
@@ -290,13 +290,13 @@ function App() {
         }
 
         const commonProps = { inventory, locations, orders, user, onEdit: handleEditInventory, onDelete: handleDeleteInventory };
-        const orderProps = { 
-            orders, 
-            onUpdate: handleUpdateStatus, 
-            onEdit: handleEditOrderWithStock, 
-            onCreate: handleCreateOrder, 
-            onDelete: handleDeleteOrder, 
-            inventory 
+        const orderProps = {
+            orders,
+            onUpdate: handleUpdateStatus,
+            onEdit: handleEditOrderWithStock,
+            onCreate: handleCreateOrder,
+            onDelete: handleDeleteOrder,
+            inventory
         };
 
         switch (activeTab) {
@@ -305,12 +305,12 @@ function App() {
             case 'stock-location': return <StockLocationTab locations={locations} />;
             case 'monthly-profit': return userRole === 'master' ? <MonthlyProfitTab orders={orders} inventory={inventory} expenses={expenses} /> : <div className="p-10 text-center text-slate-400">Master access required.</div>;
             case 'primary': return <PrimaryOrders orders={orders.filter(o => o.type === 'Online' && o.status === 'Pending')} onUpdate={handleUpdateStatus} onEdit={handleEditOrderWithStock} onCreate={handleCreateOrder} inventory={inventory} />;
-            case 'confirmed': return <ConfirmedOrders allOrders={orders} orders={orders.filter(o => o.type === 'Online' && ['Confirmed', 'Dispatched', 'Delivered', 'Returned', 'Exchanged', 'Hold'].includes(o.status))} {...orderProps} />;
+            case 'confirmed': return <ConfirmedOrders allOrders={orders} orders={orders.filter(o => o.type === 'Online' && ['Confirmed', 'Dispatched', 'Delivered', 'Returned', 'Exchanged', 'Hold'].includes(o.status))} {...orderProps} userRole={userRole} />;
             case 'hold': return <HoldTab orders={orders.filter(o => o.type === 'Online' && o.status === 'Hold')} onUpdate={handleUpdateStatus} onCreate={handleCreateOrder} />;
             case 'dispatch': return <DispatchTab orders={orders.filter(o => o.type === 'Online' && ['Confirmed', 'Dispatched', 'Exchanged'].includes(o.status))} onUpdate={handleUpdateStatus} onCreate={handleCreateOrder} />;
             case 'store-sales': return <StoreSales orders={orders.filter(o => o.type === 'Store')} {...orderProps} />;
             case 'exchange': return <ExchangeTab orders={orders.filter(o => o.type === 'Online' && (o.status === 'Exchanged' || o.exchangeDetails || o.isPartialExchange))} onCreate={handleCreateOrder} onEdit={handleEditOrderWithStock} inventory={inventory} />;
-            case 'cancelled': return <CancelledOrders orders={orders.filter(o => o.type === 'Online' && (o.status === 'Cancelled' || o.status === 'Returned'))} onUpdate={handleUpdateStatus} onDelete={handleDeleteOrder} onEdit={handleEditOrderWithStock} onCreate={handleCreateOrder} inventory={inventory} />;
+            case 'cancelled': return <CancelledOrders orders={orders.filter(o => o.type === 'Online' && (o.status === 'Cancelled' || o.status === 'Returned'))} onUpdate={handleUpdateStatus} onDelete={handleDeleteOrder} onEdit={handleEditOrderWithStock} onCreate={handleCreateOrder} inventory={inventory} userRole={userRole} />;
             case 'online-sales': return <OnlineSalesTab {...orderProps} />;
             case 'reports': return userRole === 'master' ? <SalesReports {...orderProps} /> : <div className="p-10 text-center text-slate-400">Master access required.</div>;
             default: return <div className="p-10 text-center">Invalid Tab Selected</div>;
