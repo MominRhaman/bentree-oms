@@ -1,0 +1,116 @@
+[debug] [2026-01-27T10:33:58.612Z] ----------------------------------------------------------------------
+[debug] [2026-01-27T10:33:58.614Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\z b oo k\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js deploy
+[debug] [2026-01-27T10:33:58.614Z] CLI Version:   15.0.0
+[debug] [2026-01-27T10:33:58.614Z] Platform:      win32
+[debug] [2026-01-27T10:33:58.614Z] Node Version:  v24.12.0
+[debug] [2026-01-27T10:33:58.614Z] Time:          Tue Jan 27 2026 16:33:58 GMT+0600 (Bangladesh Standard Time)
+[debug] [2026-01-27T10:33:58.614Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-01-27T10:33:59.614Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-01-27T10:33:59.614Z] > authorizing via signed-in user (mominrhaman007@gmail.com)
+[debug] [2026-01-27T10:33:59.614Z] [iam] checking project bentree-oms for permissions ["firebase.projects.get","firebasehosting.sites.update"]
+[debug] [2026-01-27T10:33:59.615Z] Checked if tokens are valid: true, expires at: 1769513570057
+[debug] [2026-01-27T10:33:59.615Z] Checked if tokens are valid: true, expires at: 1769513570057
+[debug] [2026-01-27T10:33:59.616Z] >>> [apiv2][query] POST https://cloudresourcemanager.googleapis.com/v1/projects/bentree-oms:testIamPermissions [none]
+[debug] [2026-01-27T10:33:59.616Z] >>> [apiv2][(partial)header] POST https://cloudresourcemanager.googleapis.com/v1/projects/bentree-oms:testIamPermissions x-goog-quota-user=projects/bentree-oms
+[debug] [2026-01-27T10:33:59.616Z] >>> [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/bentree-oms:testIamPermissions {"permissions":["firebase.projects.get","firebasehosting.sites.update"]}
+[debug] [2026-01-27T10:34:01.503Z] <<< [apiv2][status] POST https://cloudresourcemanager.googleapis.com/v1/projects/bentree-oms:testIamPermissions 200
+[debug] [2026-01-27T10:34:01.503Z] <<< [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/bentree-oms:testIamPermissions {"permissions":["firebase.projects.get","firebasehosting.sites.update"]}
+[debug] [2026-01-27T10:34:01.503Z] Checked if tokens are valid: true, expires at: 1769513570057
+[debug] [2026-01-27T10:34:01.503Z] Checked if tokens are valid: true, expires at: 1769513570057
+[debug] [2026-01-27T10:34:01.503Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects/bentree-oms [none]
+[debug] [2026-01-27T10:34:05.073Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects/bentree-oms 200
+[debug] [2026-01-27T10:34:05.073Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects/bentree-oms {"projectId":"bentree-oms","projectNumber":"863146464502","displayName":"Bentree OMS","name":"projects/bentree-oms","resources":{"hostingSite":"bentree-oms"},"state":"ACTIVE","etag":"1_a03f2ed9-8bba-486a-aabe-992aa763caa0"}
+[info] 
+[info] === Deploying to 'bentree-oms'...
+[info] 
+[info] i  deploying hosting 
+[debug] [2026-01-27T10:34:05.081Z] Checked if tokens are valid: true, expires at: 1769513570057
+[debug] [2026-01-27T10:34:05.081Z] Checked if tokens are valid: true, expires at: 1769513570057
+[debug] [2026-01-27T10:34:05.081Z] >>> [apiv2][query] POST https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/bentree-oms/versions [none]
+[debug] [2026-01-27T10:34:05.081Z] >>> [apiv2][body] POST https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/bentree-oms/versions {"status":"CREATED","labels":{"deployment-tool":"cli-firebase"}}
+[debug] [2026-01-27T10:34:09.723Z] <<< [apiv2][status] POST https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/bentree-oms/versions 200
+[debug] [2026-01-27T10:34:09.723Z] <<< [apiv2][body] POST https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/bentree-oms/versions {"name":"projects/863146464502/sites/bentree-oms/versions/bc75925bba8a66f2","status":"CREATED","config":{},"labels":{"deployment-tool":"cli-firebase"}}
+[info] i  hosting[bentree-oms]: beginning deploy... 
+[info] i  hosting[bentree-oms]: found 4 files in dist 
+[debug] [2026-01-27T10:34:09.732Z] [hosting] uploading with 200 concurrency
+[debug] [2026-01-27T10:34:09.754Z] Checked if tokens are valid: true, expires at: 1769513570057
+[debug] [2026-01-27T10:34:09.754Z] Checked if tokens are valid: true, expires at: 1769513570057
+[debug] [2026-01-27T10:34:09.755Z] [hosting] hash cache [ZGlzdA] stored for 4 files
+[debug] [2026-01-27T10:34:09.755Z] [hosting][hash queue][FINAL] {"max":19,"min":2,"avg":6.25,"active":0,"complete":4,"success":4,"errored":0,"retried":0,"total":4,"elapsed":22}
+[debug] [2026-01-27T10:34:09.755Z] >>> [apiv2][query] POST https://firebasehosting.googleapis.com/v1beta1/projects/863146464502/sites/bentree-oms/versions/bc75925bba8a66f2:populateFiles [none]
+[debug] [2026-01-27T10:34:09.755Z] >>> [apiv2][body] POST https://firebasehosting.googleapis.com/v1beta1/projects/863146464502/sites/bentree-oms/versions/bc75925bba8a66f2:populateFiles {"files":{"/index.html":"5e8cf945efdbcedc77c9e01a8f18b252e4f096e7c1988aac37040e51c516d4b0","/assets/index-D9iryBmS.css":"46e93cf14bb5ac7257a5e52538d54d41df526d8b121291c26e90d960c0777296","/bentree_logo.webp":"ed04b6fe883deca22cd1c52fa0b90938098f0898b31b421198e591e7b8be268e","/assets/index-BX7NrO2g.js":"ee73baa5e010fadb40499fb148d9a130ec73839781aa049d1e050e4df2b63e48"}}
+[debug] [2026-01-27T10:34:11.164Z] <<< [apiv2][status] POST https://firebasehosting.googleapis.com/v1beta1/projects/863146464502/sites/bentree-oms/versions/bc75925bba8a66f2:populateFiles 200
+[debug] [2026-01-27T10:34:11.164Z] <<< [apiv2][body] POST https://firebasehosting.googleapis.com/v1beta1/projects/863146464502/sites/bentree-oms/versions/bc75925bba8a66f2:populateFiles {"uploadRequiredHashes":["5e8cf945efdbcedc77c9e01a8f18b252e4f096e7c1988aac37040e51c516d4b0","ed04b6fe883deca22cd1c52fa0b90938098f0898b31b421198e591e7b8be268e","ee73baa5e010fadb40499fb148d9a130ec73839781aa049d1e050e4df2b63e48"],"uploadUrl":"https://upload-firebasehosting.googleapis.com/upload/sites/bentree-oms/versions/bc75925bba8a66f2/files"}
+[debug] [2026-01-27T10:34:11.165Z] Checked if tokens are valid: true, expires at: 1769513570057
+[debug] [2026-01-27T10:34:11.165Z] Checked if tokens are valid: true, expires at: 1769513570057
+[debug] [2026-01-27T10:34:11.165Z] Checked if tokens are valid: true, expires at: 1769513570057
+[debug] [2026-01-27T10:34:11.165Z] Checked if tokens are valid: true, expires at: 1769513570057
+[debug] [2026-01-27T10:34:11.165Z] Checked if tokens are valid: true, expires at: 1769513570057
+[debug] [2026-01-27T10:34:11.165Z] Checked if tokens are valid: true, expires at: 1769513570057
+[debug] [2026-01-27T10:34:11.166Z] >>> [apiv2][query] POST https://upload-firebasehosting.googleapis.com/upload/sites/bentree-oms/versions/bc75925bba8a66f2/files/5e8cf945efdbcedc77c9e01a8f18b252e4f096e7c1988aac37040e51c516d4b0 [none]
+[debug] [2026-01-27T10:34:11.166Z] >>> [apiv2][body] POST https://upload-firebasehosting.googleapis.com/upload/sites/bentree-oms/versions/bc75925bba8a66f2/files/5e8cf945efdbcedc77c9e01a8f18b252e4f096e7c1988aac37040e51c516d4b0 [stream]
+[debug] [2026-01-27T10:34:11.167Z] >>> [apiv2][query] POST https://upload-firebasehosting.googleapis.com/upload/sites/bentree-oms/versions/bc75925bba8a66f2/files/ed04b6fe883deca22cd1c52fa0b90938098f0898b31b421198e591e7b8be268e [none]
+[debug] [2026-01-27T10:34:11.167Z] >>> [apiv2][body] POST https://upload-firebasehosting.googleapis.com/upload/sites/bentree-oms/versions/bc75925bba8a66f2/files/ed04b6fe883deca22cd1c52fa0b90938098f0898b31b421198e591e7b8be268e [stream]
+[debug] [2026-01-27T10:34:11.168Z] >>> [apiv2][query] POST https://upload-firebasehosting.googleapis.com/upload/sites/bentree-oms/versions/bc75925bba8a66f2/files/ee73baa5e010fadb40499fb148d9a130ec73839781aa049d1e050e4df2b63e48 [none]
+[debug] [2026-01-27T10:34:11.168Z] >>> [apiv2][body] POST https://upload-firebasehosting.googleapis.com/upload/sites/bentree-oms/versions/bc75925bba8a66f2/files/ee73baa5e010fadb40499fb148d9a130ec73839781aa049d1e050e4df2b63e48 [stream]
+[debug] [2026-01-27T10:34:11.169Z] [hosting][populate queue][FINAL] {"max":1411,"min":1411,"avg":1411,"active":0,"complete":1,"success":1,"errored":0,"retried":0,"total":1,"elapsed":1415}
+[debug] [2026-01-27T10:34:11.169Z] [hosting] uploads queued: 3
+[debug] [2026-01-27T10:34:12.790Z] <<< [apiv2][status] POST https://upload-firebasehosting.googleapis.com/upload/sites/bentree-oms/versions/bc75925bba8a66f2/files/ed04b6fe883deca22cd1c52fa0b90938098f0898b31b421198e591e7b8be268e 200
+[debug] [2026-01-27T10:34:12.790Z] <<< [apiv2][body] POST https://upload-firebasehosting.googleapis.com/upload/sites/bentree-oms/versions/bc75925bba8a66f2/files/ed04b6fe883deca22cd1c52fa0b90938098f0898b31b421198e591e7b8be268e [stream]
+[debug] [2026-01-27T10:34:13.247Z] <<< [apiv2][status] POST https://upload-firebasehosting.googleapis.com/upload/sites/bentree-oms/versions/bc75925bba8a66f2/files/ee73baa5e010fadb40499fb148d9a130ec73839781aa049d1e050e4df2b63e48 200
+[debug] [2026-01-27T10:34:13.247Z] <<< [apiv2][body] POST https://upload-firebasehosting.googleapis.com/upload/sites/bentree-oms/versions/bc75925bba8a66f2/files/ee73baa5e010fadb40499fb148d9a130ec73839781aa049d1e050e4df2b63e48 [stream]
+[debug] [2026-01-27T10:34:13.696Z] <<< [apiv2][status] POST https://upload-firebasehosting.googleapis.com/upload/sites/bentree-oms/versions/bc75925bba8a66f2/files/5e8cf945efdbcedc77c9e01a8f18b252e4f096e7c1988aac37040e51c516d4b0 200
+[debug] [2026-01-27T10:34:13.696Z] <<< [apiv2][body] POST https://upload-firebasehosting.googleapis.com/upload/sites/bentree-oms/versions/bc75925bba8a66f2/files/5e8cf945efdbcedc77c9e01a8f18b252e4f096e7c1988aac37040e51c516d4b0 [stream]
+[debug] [2026-01-27T10:34:13.696Z] [hosting][upload queue][FINAL] {"max":2531,"min":1625,"avg":2079.3333333333335,"active":0,"complete":3,"success":3,"errored":0,"retried":0,"total":3,"elapsed":2531}
+[info] +  hosting[bentree-oms]: file upload complete 
+[debug] [2026-01-27T10:34:13.699Z] [hosting] deploy completed after 3973ms
+[debug] [2026-01-27T10:34:13.699Z] [
+  {
+    "config": {
+      "public": "dist",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ],
+      "rewrites": [
+        {
+          "source": "**",
+          "destination": "/index.html"
+        }
+      ],
+      "site": "bentree-oms"
+    },
+    "version": "projects/863146464502/sites/bentree-oms/versions/bc75925bba8a66f2"
+  }
+]
+[info] i  hosting[bentree-oms]: finalizing version... 
+[debug] [2026-01-27T10:34:13.702Z] Checked if tokens are valid: true, expires at: 1769513570057
+[debug] [2026-01-27T10:34:13.702Z] Checked if tokens are valid: true, expires at: 1769513570057
+[debug] [2026-01-27T10:34:13.702Z] >>> [apiv2][query] PATCH https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/bentree-oms/versions/bc75925bba8a66f2 updateMask=status%2Cconfig
+[debug] [2026-01-27T10:34:13.702Z] >>> [apiv2][body] PATCH https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/bentree-oms/versions/bc75925bba8a66f2 {"status":"FINALIZED","config":{"rewrites":[{"glob":"**","path":"/index.html"}]}}
+[debug] [2026-01-27T10:34:14.106Z] <<< [apiv2][status] PATCH https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/bentree-oms/versions/bc75925bba8a66f2 200
+[debug] [2026-01-27T10:34:14.107Z] <<< [apiv2][body] PATCH https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/bentree-oms/versions/bc75925bba8a66f2 {"name":"projects/863146464502/sites/bentree-oms/versions/bc75925bba8a66f2","status":"FINALIZED","config":{"rewrites":[{"glob":"**","path":"/index.html"}]},"labels":{"deployment-tool":"cli-firebase"},"createTime":"2026-01-27T10:34:09.535305Z","createUser":{"email":"mominrhaman007@gmail.com"},"finalizeTime":"2026-01-27T10:34:14.228529Z","finalizeUser":{"email":"mominrhaman007@gmail.com"}}
+[debug] [2026-01-27T10:34:14.107Z] [hosting] finalized version for bentree-oms:[object Object]
+[info] +  hosting[bentree-oms]: version finalized 
+[info] i  hosting[bentree-oms]: releasing new version... 
+[debug] [2026-01-27T10:34:14.107Z] Checked if tokens are valid: true, expires at: 1769513570057
+[debug] [2026-01-27T10:34:14.107Z] Checked if tokens are valid: true, expires at: 1769513570057
+[debug] [2026-01-27T10:34:14.107Z] >>> [apiv2][query] POST https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/bentree-oms/channels/live/releases versionName=projects%2F863146464502%2Fsites%2Fbentree-oms%2Fversions%2Fbc75925bba8a66f2
+[debug] [2026-01-27T10:34:14.107Z] >>> [apiv2][body] POST https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/bentree-oms/channels/live/releases {}
+[debug] [2026-01-27T10:34:14.505Z] <<< [apiv2][status] POST https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/bentree-oms/channels/live/releases 200
+[debug] [2026-01-27T10:34:14.505Z] <<< [apiv2][body] POST https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/bentree-oms/channels/live/releases {"name":"projects/863146464502/sites/bentree-oms/channels/live/releases/1769510054084000","version":{"name":"projects/863146464502/sites/bentree-oms/versions/bc75925bba8a66f2","status":"FINALIZED","config":{"rewrites":[{"glob":"**","path":"/index.html"}]},"labels":{"deployment-tool":"cli-firebase"},"createTime":"2026-01-27T10:34:09.535305Z","createUser":{"email":"mominrhaman007@gmail.com","imageUrl":"https://lh3.googleusercontent.com/a/ACg8ocIGgbzqtNOQ2y3uZSSWbiDUHYF9qFjFEHUZMZuS2ItrCXvw4j4BbQ"},"finalizeTime":"2026-01-27T10:34:14.228529Z","finalizeUser":{"email":"mominrhaman007@gmail.com","imageUrl":"https://lh3.googleusercontent.com/a/ACg8ocIGgbzqtNOQ2y3uZSSWbiDUHYF9qFjFEHUZMZuS2ItrCXvw4j4BbQ"}},"type":"DEPLOY","releaseTime":"2026-01-27T10:34:14.084Z","releaseUser":{"email":"mominrhaman007@gmail.com","imageUrl":"https://lh3.googleusercontent.com/a/ACg8ocIGgbzqtNOQ2y3uZSSWbiDUHYF9qFjFEHUZMZuS2ItrCXvw4j4BbQ"}}
+[debug] [2026-01-27T10:34:14.506Z] [hosting] release: {"name":"projects/863146464502/sites/bentree-oms/channels/live/releases/1769510054084000","version":{"name":"projects/863146464502/sites/bentree-oms/versions/bc75925bba8a66f2","status":"FINALIZED","config":{"rewrites":[{"glob":"**","path":"/index.html"}]},"labels":{"deployment-tool":"cli-firebase"},"createTime":"2026-01-27T10:34:09.535305Z","createUser":{"email":"mominrhaman007@gmail.com","imageUrl":"https://lh3.googleusercontent.com/a/ACg8ocIGgbzqtNOQ2y3uZSSWbiDUHYF9qFjFEHUZMZuS2ItrCXvw4j4BbQ"},"finalizeTime":"2026-01-27T10:34:14.228529Z","finalizeUser":{"email":"mominrhaman007@gmail.com","imageUrl":"https://lh3.googleusercontent.com/a/ACg8ocIGgbzqtNOQ2y3uZSSWbiDUHYF9qFjFEHUZMZuS2ItrCXvw4j4BbQ"}},"type":"DEPLOY","releaseTime":"2026-01-27T10:34:14.084Z","releaseUser":{"email":"mominrhaman007@gmail.com","imageUrl":"https://lh3.googleusercontent.com/a/ACg8ocIGgbzqtNOQ2y3uZSSWbiDUHYF9qFjFEHUZMZuS2ItrCXvw4j4BbQ"}}
+[info] +  hosting[bentree-oms]: release complete 
+[info] 
+[info] +  Deploy complete! 
+[info] 
+[info] Project Console: https://console.firebase.google.com/project/bentree-oms/overview
+[info] Hosting URL: https://bentree-oms.web.app
+[debug] [2026-01-27T10:34:19.793Z] Error: Timed out.
+    at Timeout._onTimeout (C:\Users\z b oo k\AppData\Roaming\npm\node_modules\firebase-tools\lib\utils.js:275:49)
+    at listOnTimeout (node:internal/timers:605:17)
+    at process.processTimers (node:internal/timers:541:7)
+[error] 
+[error] Error: An unexpected error has occurred.
