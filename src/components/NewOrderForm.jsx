@@ -17,9 +17,9 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         discountType: 'Fixed',
         discountValue: '',
         deliveryCharge: '',
-        isExpress: false, 
+        isExpress: false,
         advanceAmount: '',
-        receiver: '', 
+        receiver: '',
         recipientName: '',
         recipientPhone: '',
         recipientAddress: '',
@@ -53,7 +53,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
             recipientAddress: '',
             specialInstructions: '',
             remarks: '',
-            isExpress: false 
+            isExpress: false
         }));
     };
 
@@ -121,6 +121,8 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         if (!hasProductCode) return;
 
         const found = existingOrders.some(o =>
+            // Logic: Only flag if the old order is ACTIVE (not Cancelled, Returned, or Delivered)
+            !['Cancelled', 'Returned', 'Delivered'].includes(o.status) &&
             o.recipientPhone === formData.recipientPhone &&
             o.products.some(op => formData.products.some(fp => fp.code.toUpperCase() === op.code.toUpperCase()))
         );
@@ -137,20 +139,20 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         if (!invItem) return "Product code not found in inventory.";
 
         const qtyNeeded = Number(p.qty);
-        
+
         // 2. Check Variable Stock (Size)
         if (invItem.type === 'Variable') {
             if (!p.size) return "Size is required for this product.";
             const sizeKey = p.size.trim().toUpperCase();
-            
+
             const stockKeys = Object.keys(invItem.stock || {});
             const exactKey = stockKeys.find(k => k.toUpperCase() === sizeKey);
-            
+
             if (!exactKey) return `Size '${p.size}' not found. Avail: ${stockKeys.join(', ')}`;
-            
+
             const available = Number(invItem.stock[exactKey] || 0);
             if (available < qtyNeeded) return `Insufficient Stock (Avail: ${available})`;
-        } 
+        }
         // 3. Check Single Stock
         else {
             const available = Number(invItem.totalStock || 0);
@@ -163,6 +165,12 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
     const validateForm = () => {
         const newErrors = {};
         let isValid = true;
+
+        // Logic: STOP the process immediately if the detection hook found a duplicate
+        if (isDuplicate) {
+            setGlobalError("A duplicate active order (Phone + Product) already exists.");
+            return false;
+        }
         const phoneRegex = /^\d{11}$/;
 
         if (!formData.recipientPhone) {
@@ -208,9 +216,9 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         setGlobalError('');
 
         if (!validateForm()) {
-            setGlobalError("Please fix the highlighted errors before submitting.");
+            if (!globalError) setGlobalError("Please fix the highlighted errors before submitting.");
             window.scrollTo({ top: 0, behavior: 'smooth' });
-            return;
+            return; // Stops execution here
         }
 
         if (!user) {
@@ -287,7 +295,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                 await updateInventoryStock(p.code, p.size, -Number(p.qty), inventory);
             }
             await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), payload);
-            
+
             if (orderType === 'Online') setActiveTab('primary');
             else setActiveTab('store-sales');
 
@@ -300,7 +308,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
     const updateProduct = (index, field, value) => {
         const newProducts = [...formData.products];
         newProducts[index][field] = value;
-        
+
         // Auto-fill price if code is found
         if (field === 'code') {
             const normalizedCode = value.trim().toUpperCase();
@@ -309,12 +317,12 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                 newProducts[index].price = foundItem.mrp || '';
             }
         }
-        
+
         setFormData({ ...formData, products: newProducts });
 
         // --- REAL-TIME ERROR CHECKING ---
         const stockError = getStockError(newProducts[index]);
-        
+
         setErrors(prev => {
             const currentProductsErrors = prev.products ? { ...prev.products } : {};
             const currentRowErrors = currentProductsErrors[index] ? { ...currentProductsErrors[index] } : {};
@@ -357,7 +365,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
             )}
 
             <form onSubmit={handleSubmit} className="p-6 space-y-6">
-                
+
                 {/* Date Field */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
@@ -376,11 +384,11 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-1">Order Receiver Name</label>
-                                    <input 
-                                        className="w-full p-2 border rounded-md bg-white" 
+                                    <input
+                                        className="w-full p-2 border rounded-md bg-white"
                                         placeholder="Name of person taking order"
-                                        value={formData.receiver} 
-                                        onChange={(e) => setFormData({ ...formData, receiver: e.target.value })} 
+                                        value={formData.receiver}
+                                        onChange={(e) => setFormData({ ...formData, receiver: e.target.value })}
                                     />
                                 </div>
                                 <div>
@@ -424,15 +432,15 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                                             value={prod.code}
                                             onChange={e => updateProduct(idx, 'code', e.target.value)}
                                         />
-                                        {rowError?.stock && <div className="text-xs text-red-600 font-bold mt-1 flex items-center"><AlertTriangle size={12} className="mr-1"/> {rowError.stock}</div>}
+                                        {rowError?.stock && <div className="text-xs text-red-600 font-bold mt-1 flex items-center"><AlertTriangle size={12} className="mr-1" /> {rowError.stock}</div>}
                                         {rowError?.code && <p className="text-xs text-red-500">{rowError.code}</p>}
                                     </div>
                                     <div className="flex gap-2 w-full sm:w-auto">
                                         {/* SIZE DROPDOWN */}
                                         <div className="flex-1 sm:w-24">
-                                            <select 
-                                                className={`w-full p-2 border rounded ${rowError?.stock ? 'border-red-500 bg-red-50' : ''}`} 
-                                                value={prod.size} 
+                                            <select
+                                                className={`w-full p-2 border rounded ${rowError?.stock ? 'border-red-500 bg-red-50' : ''}`}
+                                                value={prod.size}
                                                 onChange={e => updateProduct(idx, 'size', e.target.value)}
                                             >
                                                 <option value="">Size</option>
@@ -444,7 +452,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                                                 <option value="3XL">3XL</option>
                                             </select>
                                         </div>
-                                        
+
                                         <div className="flex-1 sm:w-20"><input type="number" min="1" className={`w-full p-2 border rounded ${rowError?.qty ? 'border-red-500' : ''}`} value={prod.qty} onChange={e => updateProduct(idx, 'qty', e.target.value)} onWheel={disableScroll} /></div>
                                         <div className="flex-1 sm:w-28"><input type="number" min="0" placeholder="Price" className={`w-full p-2 border rounded ${rowError?.price ? 'border-red-500' : ''}`} value={prod.price} onChange={e => updateProduct(idx, 'price', e.target.value)} onWheel={disableScroll} /></div>
                                         {formData.products.length > 1 && <button type="button" onClick={() => removeProduct(idx)} className="p-2 text-red-500 hover:bg-red-50 rounded"><Trash2 size={18} /></button>}
@@ -478,10 +486,10 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                                 <label className="block text-sm font-medium mb-1">Delivery Charge</label>
                                 <input type="number" className="w-full p-2 border rounded" value={formData.deliveryCharge} onChange={e => setFormData({ ...formData, deliveryCharge: e.target.value })} onWheel={disableScroll} />
                             </div>
-                            
+
                             {/* --- NEW: EXPRESS DELIVERY CHECKBOX (Placed Between) --- */}
                             <div className="flex flex-col justify-end">
-                                 <label className={`flex items-center gap-2 p-2 border rounded cursor-pointer transition-all h-[42px] ${formData.isExpress ? 'bg-amber-50 border-amber-300 shadow-sm' : 'bg-white hover:bg-slate-50'}`}>
+                                <label className={`flex items-center gap-2 p-2 border rounded cursor-pointer transition-all h-[42px] ${formData.isExpress ? 'bg-amber-50 border-amber-300 shadow-sm' : 'bg-white hover:bg-slate-50'}`}>
                                     <input
                                         type="checkbox"
                                         className="w-4 h-4 text-emerald-600 rounded focus:ring-emerald-500"
@@ -514,7 +522,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                                 <div><textarea placeholder="Address *" className={`w-full p-2 border rounded h-20 ${errors.recipientAddress ? 'border-red-500 bg-red-50' : ''}`} value={formData.recipientAddress} onChange={e => setFormData({ ...formData, recipientAddress: e.target.value })} />{errors.recipientAddress && <p className="text-xs text-red-500 mt-1">{errors.recipientAddress}</p>}</div>
                                 <div className="grid grid-cols-3 gap-2"><input placeholder="City" className="w-full p-2 border rounded" value={formData.recipientCity} onChange={e => setFormData({ ...formData, recipientCity: e.target.value })} /><input placeholder="Zone" className="w-full p-2 border rounded" value={formData.recipientZone} onChange={e => setFormData({ ...formData, recipientZone: e.target.value })} /><input placeholder="Area" className="w-full p-2 border rounded" value={formData.recipientArea} onChange={e => setFormData({ ...formData, recipientArea: e.target.value })} /></div>
                             </div>
-                            
+
                             <div className="space-y-4">
                                 <h4 className="font-semibold text-emerald-800">Order Details</h4>
                                 <div className="grid grid-cols-2 gap-4">

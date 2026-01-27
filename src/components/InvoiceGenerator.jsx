@@ -51,13 +51,17 @@ const InvoiceGenerator = ({ orders }) => {
 
                     return (
                         <div key={order.id || index} className="invoice-page bg-white w-full max-w-[800px] mx-auto p-8 shadow-sm border border-slate-200 print:max-w-full">
-                            
+
                             {/* --- HEADER --- */}
                             <div className="flex justify-between items-start border-b-2 border-slate-800 pb-4 mb-6">
                                 <div>
-                                    <h1 className="text-3xl font-extrabold text-slate-800 tracking-tight">BENTREE</h1>
-                                    <p className="text-sm text-slate-500 mt-1">Fashion & Lifestyle</p>
-                                    <p className="text-xs text-slate-400 mt-1">Dhaka, Bangladesh</p>
+                                    <img
+                                        src="/bentree_logo.webp"
+                                        alt="Bentree"
+                                        className="h-[40px] w-auto object-contain"
+                                    />
+                                    {/* <h1 className="text-3xl font-extrabold text-slate-800 tracking-tight">BENTREE</h1> */}
+                                    <p className="text-xs text-slate-400 mt-1">House 62, Level 4, Road 3, <br />Block B, Niketon, Gulshan 1, Dhaka 1212</p>
                                     <p className="text-xs text-slate-400">Phone: +880 1870630402</p>
                                     <p className="text-xs text-slate-400">Email: bentreebd@gmail.com</p>
                                 </div>
@@ -137,7 +141,7 @@ const InvoiceGenerator = ({ orders }) => {
                             <div className="mt-12 pt-6 border-t border-slate-200 text-center">
                                 <p className="text-sm font-bold text-slate-700 mb-2">Thank you for shopping with Bentree!</p>
                                 <p className="text-xs text-slate-400">
-                                    For any queries, please contact us within 24 hours. <br/>
+                                    For any queries, please contact us within 24 hours. <br />
                                     Note: Products can be exchanged within 3 days if unused and tags attached.
                                 </p>
                                 <div className="mt-8 flex justify-between items-end px-8">
