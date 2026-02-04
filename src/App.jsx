@@ -39,6 +39,7 @@ function App() {
 
     const [isAuthChecking, setIsAuthChecking] = useState(true);
     const [loading, setLoading] = useState(false);
+    const [isDataReceived, setIsDataReceived] = useState(false);
 
     const [orders, setOrders] = useState([]);
     const [inventory, setInventory] = useState([]);
@@ -117,6 +118,7 @@ function App() {
             const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
             data.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
             setOrders(data);
+            setIsDataReceived(true);
         }, handleSnapshotError);
 
         const unsubInv = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'inventory'), (snap) => setInventory(snap.docs.map(d => ({ id: d.id, ...d.data() }))), handleSnapshotError);
@@ -227,8 +229,6 @@ function App() {
             console.log('Order data:', { status: orderData.status, products: orderData.products?.length });
 
             // CRITICAL: For RETURNED/CANCELLED orders, we DON'T touch inventory
-            // The inventory restoration happens when we update the original order's status
-            // through handleEditOrderWithStock which is called separately
 
             // Only deduct inventory if creating a new ACTIVE order (not a return)
             if (!['Cancelled', 'Returned'].includes(orderData.status)) {
@@ -285,7 +285,7 @@ function App() {
     };
 
     const renderContent = () => {
-        if (loading && orders.length === 0 && inventory.length === 0) {
+        if (loading && !isDataReceived) {
             return <div className="flex justify-center items-center h-64 text-slate-400 animate-pulse font-bold tracking-widest uppercase">Initializing System...</div>;
         }
 

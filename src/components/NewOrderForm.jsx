@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Save, AlertTriangle, Plus, Trash2, XCircle, Zap } from 'lucide-react';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db, appId } from '../firebase';
@@ -38,6 +38,10 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
     const [errors, setErrors] = useState({});
     const [globalError, setGlobalError] = useState('');
     const [isDuplicate, setIsDuplicate] = useState(false);
+    // NEW: States for product suggestions and input focus management
+    const [suggestions, setSuggestions] = useState({ index: null, list: [] });
+    const suggestionRef = useRef(null);
+    const productRefs = useRef([]);
 
     // --- Switch Logic (Reset Form) ---
     const switchType = (type) => {
@@ -305,9 +309,36 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         }
     };
 
+    // NEW: Function to handle clicking a suggestion
+    const selectSuggestion = (index, item) => {
+        const newProducts = [...formData.products];
+        newProducts[index].code = item.code;
+        newProducts[index].price = item.mrp || '';
+        setFormData({ ...formData, products: newProducts });
+        setSuggestions({ index: null, list: [] });
+
+        // NEW: Auto-focus back to input
+        setTimeout(() => { if (productRefs.current[index]) productRefs.current[index].focus(); }, 10);
+    };
+
     const updateProduct = (index, field, value) => {
         const newProducts = [...formData.products];
         newProducts[index][field] = value;
+
+        // NEW: Suggestion logic (Last 3 digits search)
+        if (field === 'code') {
+            const val = value.trim();
+            if (val.length >= 3) {
+                const searchStr = val.toUpperCase();
+                const matches = inventory.filter(i =>
+                    i.code.toUpperCase().endsWith(searchStr) ||
+                    i.code.toUpperCase().includes(searchStr)
+                );
+                setSuggestions({ index, list: matches.slice(0, 5) });
+            } else {
+                setSuggestions({ index: null, list: [] });
+            }
+        }
 
         // Auto-fill price if code is found
         if (field === 'code') {
@@ -327,9 +358,10 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
             const currentProductsErrors = prev.products ? { ...prev.products } : {};
             const currentRowErrors = currentProductsErrors[index] ? { ...currentProductsErrors[index] } : {};
 
-            if (stockError) {
-                currentRowErrors.stock = stockError;
-            } else {
+            // 1. Inside updateProduct: Filter out "Not Found" from real-time updates
+            if (stockError && stockError !== "Product code not found in inventory.") {
+                currentRowErrors.stock = stockError; // Only shows stock/size errors
+            } else if (!stockError) {
                 delete currentRowErrors.stock;
             }
 
@@ -341,6 +373,22 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
 
             return { ...prev, products: currentProductsErrors };
         });
+    };
+
+    const handleCodeBlur = (index) => {
+        setTimeout(() => {
+            const product = formData.products[index];
+            const stockError = getStockError(product);
+            if (stockError === "Product code not found in inventory.") {
+                setErrors(prev => {
+                    const currentProductsErrors = prev.products ? { ...prev.products } : {};
+                    const currentRowErrors = currentProductsErrors[index] ? { ...currentProductsErrors[index] } : {};
+                    currentRowErrors.stock = stockError;
+                    currentProductsErrors[index] = currentRowErrors;
+                    return { ...prev, products: currentProductsErrors };
+                });
+            }
+        }, 100); // 100ms delay to allow clicking suggestions
     };
 
     const addProduct = () => setFormData({ ...formData, products: [...formData.products, { code: '', size: '', qty: 1, price: '' }] });
@@ -424,14 +472,40 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                             const rowError = errors.products?.[idx];
                             return (
                                 <div key={idx} className="flex flex-col sm:flex-row gap-2 sm:items-start relative bg-white p-3 rounded border sm:border-none sm:bg-transparent shadow-sm sm:shadow-none">
-                                    <div className="flex-1">
+                                    <div className="flex-1 relative w-full">
                                         <label className="text-xs text-slate-500 sm:hidden">Code</label>
-                                        <input
+                                        <input ref={el => productRefs.current[idx] = el}
                                             placeholder="Code"
                                             className={`w-full p-2 border rounded ${rowError?.code || rowError?.stock ? 'border-red-500 bg-red-50' : ''}`}
                                             value={prod.code}
                                             onChange={e => updateProduct(idx, 'code', e.target.value)}
+                                            onBlur={() => handleCodeBlur(idx)}
+                                            autoComplete="off"
                                         />
+
+                                        {/* NEW: DROPDOWN UI LOOP */}
+                                        {suggestions.index === idx && suggestions.list.length > 0 && (
+                                            <div ref={suggestionRef} className="absolute left-0 right-0 top-full bg-white border border-slate-200 rounded-b-lg shadow-xl z-[100] max-h-64 overflow-y-auto">
+                                                {suggestions.list.map((item) => (
+                                                    <button key={item.id} type="button" onClick={() => selectSuggestion(idx, item)} className="w-full text-left px-4 py-3 hover:bg-emerald-50 border-b border-slate-50 last:border-0 group">
+                                                        <div className="flex justify-between items-center mb-1">
+                                                            <span className="font-bold text-slate-800">{item.code}</span>
+                                                            <span className="text-xs font-bold text-emerald-600">৳{item.mrp}</span>
+                                                        </div>
+                                                        {/* Size list logic inside button */}
+                                                        <div className="flex flex-wrap gap-1">
+                                                            {item.type === 'Variable' ? (
+                                                                Object.entries(item.stock || {}).map(([sz, qty]) => (
+                                                                    qty > 0 && <span key={sz} className="text-[10px] bg-slate-100 px-1 py-0.5 rounded">{sz}: {qty}</span>
+                                                                ))
+                                                            ) : (
+                                                                <span className="text-[10px] bg-slate-100 px-1 py-0.5 rounded">Stock: {item.totalStock}</span>
+                                                            )}
+                                                        </div>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
                                         {rowError?.stock && <div className="text-xs text-red-600 font-bold mt-1 flex items-center"><AlertTriangle size={12} className="mr-1" /> {rowError.stock}</div>}
                                         {rowError?.code && <p className="text-xs text-red-500">{rowError.code}</p>}
                                     </div>
