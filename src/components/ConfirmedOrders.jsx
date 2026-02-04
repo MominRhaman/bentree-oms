@@ -81,23 +81,23 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
     const handleExport = () => {
         const data = filteredOrders.map(o => {
             const totalQty = (o.products || []).reduce((sum, p) => sum + Number(p.qty || 0), 0);
-            const calculatedTotalWeight = "0.20 kg";
+            const calculatedTotalWeight = "0.20";
 
             return {
-                'Item Type': 'Parcel',
-                'Store Name': 'Bentree',
-                'Merchant Order ID': o.merchantOrderId || '',
-                'Recipient Name': o.recipientName || '',
-                'Phone Number': o.recipientPhone || '',
-                'Recipient Address': o.recipientAddress || '',
-                'Recipient City': o.city || o.recipientCity || '',
-                'Recipient Zone': o.zone || o.recipientZone || '',
-                'Recipient Area': o.area || o.recipientArea || '',
-                'Amount To Collect': o.dueAmount || 0,
-                'Item Quantity': totalQty,
-                'Item Weight': calculatedTotalWeight,
-                'Item Description': o.itemDescription || '',
-                'Special Instructions': o.specialInstructions || o.remarks || ''
+                'ItemType': 'Parcel',
+                'StoreName': 'Bentree',
+                'MerchantOrderId': o.merchantOrderId || '',
+                'RecipientName(*)': o.recipientName || '',
+                'RecipientPhone(*)': o.recipientPhone || '',
+                'RecipientAddress(*)': o.recipientAddress || '',
+                'RecipientCity(*)': o.city || o.recipientCity || '',
+                'RecipientZone(*)': o.zone || o.recipientZone || '',
+                'RecipientArea': o.area || o.recipientArea || '',
+                'AmountToCollect(*)': o.dueAmount || 0,
+                'ItemQuantity': totalQty,
+                'ItemWeight': calculatedTotalWeight,
+                'ItemDesc': o.itemDescription || '',
+                'SpecialInstruction': o.specialInstructions || o.remarks || ''
             };
         });
         downloadCSV(data, 'confirmed_orders_export.csv');
@@ -392,7 +392,7 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                                                     disabled={!isMasterUser}
                                                     onClick={(e) => {
                                                         if (!isMasterUser) return;
-                                                        if (confirm('⚠️ Are you sure you want to PERMANENTLY DELETE this order? This cannot be undone.')) {
+                                                        if (confirm('⚠️ Are you sure you want to PERMANENTLY DELETE this order?')) {
                                                             onDelete(order.id);
                                                         }
                                                     }}

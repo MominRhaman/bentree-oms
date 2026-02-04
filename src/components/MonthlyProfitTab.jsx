@@ -11,7 +11,7 @@ const MonthlyProfitTab = ({ orders, inventory, expenses }) => {
     // Default empty expenses
     const [newExpense, setNewExpense] = useState({
         media: '', salary: '', rent: '', utility: '', vat: '',
-        codCharge: '', food: '', transport: '', accessories: '', others: '', others: '', others: ''
+        codCharge: '', food: '', transport: '', accessories: '', paymentGatewayFees: '', maintenanceRepairs: ''
     });
 
     // --- Load Data ---
@@ -23,7 +23,7 @@ const MonthlyProfitTab = ({ orders, inventory, expenses }) => {
             // Reset if no data found for selected month
             setNewExpense({
                 media: '', salary: '', rent: '', utility: '', vat: '',
-                codCharge: '', food: '', transport: '', accessories: '', others: ''
+                codCharge: '', food: '', transport: '', accessories: '',  others: ''
             });
         }
     }, [month, year, expenses]);
@@ -186,9 +186,9 @@ const MonthlyProfitTab = ({ orders, inventory, expenses }) => {
                         onChange={e => setYear(e.target.value)}
                         className="p-2 border rounded w-1/2 md:w-32 bg-white"
                     >
-                        <option value={2024}>2024</option>
-                        <option value={2025}>2025</option>
                         <option value={2026}>2026</option>
+                        <option value={2027}>2027</option>
+                        <option value={2028}>2028</option>
                     </select>
                 </div>
             </div>

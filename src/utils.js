@@ -42,7 +42,7 @@ export const SIZES = ['M', 'L', 'XL', '2XL', '3XL'];
 
 export const EXPENSE_FIELDS = [
     'media', 'salary', 'rent', 'utility', 'vat',
-    'codCharge', 'food', 'transport', 'accessories', 'others', 'others', 'others'
+    'codCharge', 'food', 'transport', 'accessories', 'paymentGatewayFees', 'maintenanceRepairs', 'others'
 ];
 
 // --- Utility Functions ---
