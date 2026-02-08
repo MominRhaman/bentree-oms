@@ -61,16 +61,35 @@ export const getStatusColor = (status) => {
 
 export const downloadCSV = (data, filename) => {
     if (!data || !data.length) return;
+
+    // 1. Generate Headers and Rows
     const headers = Object.keys(data[0]).join(',');
-    const rows = data.map(obj => Object.values(obj).map(val => `"${val}"`).join(','));
-    const csvContent = "data:text/csv;charset=utf-8," + [headers, ...rows].join('\n');
-    const encodedUri = encodeURI(csvContent);
+    const rows = data.map(obj =>
+        Object.values(obj).map(val => {
+            // Clean values: handle null/undefined and escape existing double quotes
+            let str = val === null || val === undefined ? '' : String(val);
+            return `"${str.replace(/"/g, '""')}"`;
+        }).join(',')
+    ).join('\n');
+
+    const csvContent = headers + '\n' + rows;
+
+    // 2. USE BLOB INSTEAD OF encodeURI
+    // The \uFEFF is a magic character that tells Excel "This is UTF-8 text"
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+
+    // 3. Trigger Download
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
+    link.setAttribute("href", url);
     link.setAttribute("download", filename);
+    link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
+
+    // 4. Cleanup memory
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
 };
 
 export const disableScroll = (e) => e.target.blur();
@@ -78,16 +97,16 @@ export const disableScroll = (e) => e.target.blur();
 // --- ATOMIC STOCK LOGIC ---
 export const updateInventoryStock = async (productCode, size, qtyChange, inventoryList) => {
     if (!productCode || qtyChange === 0) return false;
-    
+
     // Normalize code
     const targetCode = productCode.trim().toUpperCase();
-    
+
     // Find Product
     const product = (inventoryList || []).find(p => p.code && p.code.toUpperCase() === targetCode);
 
     if (!product) {
         console.warn(`Stock Sync: Product ${productCode} not found in current inventory state.`);
-        return false; 
+        return false;
     }
 
     const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventory', product.id);
@@ -112,6 +131,6 @@ export const updateInventoryStock = async (productCode, size, qtyChange, invento
     } catch (err) {
         console.error("CRITICAL: updateInventoryStock failed:", err);
         // We throw the error so the calling function (App.jsx) knows to stop the DB swap
-        throw err; 
+        throw err;
     }
 };

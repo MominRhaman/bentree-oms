@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Calendar, Download, Trash2, RefreshCw, Ban, CheckCircle, Clock } from 'lucide-react';
+import { Calendar, Download, Trash2, RefreshCw, Ban, CheckCircle, Clock, Eye } from 'lucide-react';
 import { doc, deleteDoc } from "firebase/firestore";
 import { getStatusColor, downloadCSV } from '../utils';
 
@@ -135,7 +135,7 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
                             <th className="p-3 text-center">Action</th>
                         </tr>
                     </thead>
-                    <tbody>
+                    <tbody className="divide-y divide-slate-100">
                         {filteredOrders.map(order => {
                             // Fix: Show original products if current products list is empty (Full Return)
                             let displayProducts = [...(order.products || [])];
@@ -166,6 +166,12 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
 
                             const isReceived = order.isReturnReceived === true;
 
+                            // --- NEW VISIBILITY LOGIC ---
+                            const hasAdvance = Number(order.advanceAmount || 0) > 0;
+                            const wasDelivered = (order.history || []).some(h => (h.status || '').toLowerCase() === 'delivered');
+                            const shouldShowRefund = hasAdvance || wasDelivered;
+                            const shouldShowReturnCheckbox = wasDelivered;
+
                             return (
                                 <tr
                                     key={order.id}
@@ -174,14 +180,20 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
                                 >
                                     {/* REQUIREMENT: Return Checkbox under Return Column */}
                                     <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
-                                        <input
-                                            type="checkbox"
-                                            checked={order.isReturnReceived || false}
-                                            onChange={(e) => {
-                                                onUpdate(order.id, order.status, { isReturnReceived: e.target.checked });
-                                            }}
-                                            className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500 cursor-pointer"
-                                        />
+                                        {/* --- WRAPPED IN CONDITIONAL --- */}
+                                        {shouldShowReturnCheckbox ? (
+                                            <input
+                                                type="checkbox"
+                                                checked={order.isReturnReceived || false}
+                                                onChange={(e) => {
+                                                    onUpdate(order.id, order.status, { isReturnReceived: e.target.checked });
+                                                }}
+                                                className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500 cursor-pointer"
+                                            />
+                                        ) : (
+                                            /* Empty placeholder for non-delivered orders */
+                                            <div className="w-4 h-4 mx-auto bg-slate-50 rounded border border-slate-100"></div>
+                                        )}
                                     </td>
                                     <td className="p-3 text-slate-500">{order.date?.includes('T') ? order.date.split('T')[0] : order.date}</td>
                                     <td className="p-3 font-mono text-xs font-bold">{order.merchantOrderId || order.storeOrderId}</td>
@@ -207,22 +219,30 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
 
                                             <div className="flex flex-col items-end min-h-[36px]">
                                                 {/* REQUIREMENT: Show "Received Product" when checked */}
-                                                {isReceived ? (
-                                                    <span className="text-green-600 font-black text-[10px] flex items-center gap-1 uppercase mb-1">
-                                                        <CheckCircle size={12} className="fill-current" /> Received Product
-                                                    </span>
-                                                ) : (
-                                                    <span className="text-red-600 font-bold text-[10px] flex items-center gap-1 uppercase mb-1 opacity-50">
-                                                        <Clock size={12} /> Awaiting Return
-                                                    </span>
+                                                {/* --- WRAPPED IN CONDITIONAL --- */}
+                                                {shouldShowReturnCheckbox && (
+                                                    isReceived ? (
+                                                        <span className="text-green-600 font-black text-[10px] flex items-center gap-1 uppercase mb-1">
+                                                            <CheckCircle size={12} className="fill-current" /> Received Product
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-red-600 font-bold text-[10px] flex items-center gap-1 uppercase mb-1 opacity-50">
+                                                            <Clock size={12} /> Awaiting Return
+                                                        </span>
+                                                    )
                                                 )}
 
-                                                {order.isRefunded ? (
-                                                    <span className="text-emerald-600 font-black text-sm">Refunded</span>
+                                                {/* CONDITIONAL REFUND DISPLAY */}
+                                                {shouldShowRefund ? (
+                                                    order.isRefunded ? (
+                                                        <span className="text-emerald-600 font-black text-sm">Refunded</span>
+                                                    ) : (
+                                                        <div className="text-red-600 font-black text-sm">
+                                                            Refund: ৳{Math.abs(Number(order.advanceAmount || 0) + Number(order.collectedAmount || 0))}
+                                                        </div>
+                                                    )
                                                 ) : (
-                                                    <div className="text-red-600 font-black text-sm">
-                                                        Refund: ৳{Math.abs(order.dueAmount || 0)}
-                                                    </div>
+                                                    <span className="text-slate-300 italic text-[10px]">No Refund Due</span>
                                                 )}
                                             </div>
 
@@ -273,9 +293,7 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
                                                 disabled={!isMasterUser}
                                                 onClick={(e) => {
                                                     if (!isMasterUser) return;
-                                                    if (confirm('⚠️ Are you sure you want to PERMANENTLY DELETE this order? This cannot be undone.')) {
-                                                        onDelete(order.id);
-                                                    }
+                                                    processDelete(order.id);
                                                 }}
                                                 className={`p-1.5 rounded border border-slate-200 transition-all ${isMasterUser
                                                     ? 'bg-slate-200 text-slate-700 hover:bg-slate-300 cursor-pointer'
@@ -289,6 +307,13 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
                                 </tr>
                             );
                         })}
+                        {filteredOrders.length === 0 && (
+                            <tr>
+                                <td colSpan="8" className="p-10 text-center text-slate-400 italic">
+                                    No records found.
+                                </td>
+                            </tr>
+                        )}
                     </tbody>
                 </table>
             </div>

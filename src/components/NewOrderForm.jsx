@@ -173,7 +173,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         // Logic: STOP the process immediately if the detection hook found a duplicate
         if (isDuplicate) {
             setGlobalError("A duplicate active order (Phone + Product) already exists.");
-            return false;
+            // return false;
         }
         const phoneRegex = /^\d{11}$/;
 

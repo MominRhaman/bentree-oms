@@ -83,6 +83,14 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
             const totalQty = (o.products || []).reduce((sum, p) => sum + Number(p.qty || 0), 0);
             const calculatedTotalWeight = "0.20";
 
+            // 1. I added this helper inside handleExport to handle symbols
+            const clean = (val) => {
+                if (val === null || val === undefined) return '';
+                let str = String(val);
+                // Standard CSV protection: wrap in quotes and escape existing quotes
+                return `"${str.replace(/"/g, '""')}"`;
+            };
+
             return {
                 'ItemType': 'Parcel',
                 'StoreName': 'Bentree',
