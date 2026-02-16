@@ -71,11 +71,20 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                 (o.recipientPhone && o.recipientPhone.toLowerCase().includes(term)) ||
                 (o.recipientName && o.recipientName.toLowerCase().includes(term)) ||
                 (o.merchantOrderId && o.merchantOrderId.toLowerCase().includes(term)) ||
-                (o.remarks && o.remarks.toLowerCase().includes(term))
+                (o.remarks && o.remarks.toLowerCase().includes(term)) ||
+                (o.orderSource && o.orderSource.toLowerCase().includes(term))
             );
         }
         return res;
     }, [orders, filterDate, searchTerm, filterStatus]);
+
+    const footerStats = useMemo(() => {
+        const totalOrders = filteredOrders.length;
+        const totalAmountExDelivery = filteredOrders.reduce((sum, o) => {
+            return sum + (Number(o.grandTotal || 0) - Number(o.deliveryCharge || 0));
+        }, 0);
+        return { totalOrders, totalAmountExDelivery };
+    }, [filteredOrders]);
 
     // --- Handlers ---
     const handleExport = () => {
@@ -163,6 +172,18 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
     // --- Access Control Robust Check ---
     const isMasterUser = String(userRole || '').trim().toLowerCase() === 'master';
 
+    // --- Source Label Mapping ---
+    const getSourceLabel = (source) => {
+        const mapping = {
+            'Facebook': 'FB',
+            'Website': 'Web',
+            'Instagram': 'IG',
+            'Whatsapp': 'WP',
+            'Other': 'Other'
+        };
+        return mapping[source] || source || '-';
+    };
+
     return (
         <div className="space-y-4">
             {/* Header Section */}
@@ -171,7 +192,7 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
 
                 <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
                     <div className="w-full md:w-auto">
-                        <SearchBar searchTerm={searchTerm} setSearchTerm={setSearchTerm} placeholder="Search by Phone/Name..." />
+                        <SearchBar searchTerm={searchTerm} setSearchTerm={setSearchTerm} placeholder="Search by Phone, Name or Source..." />
                     </div>
                     <div className="flex items-center gap-2 bg-white border rounded p-2 w-full md:w-auto">
                         <Calendar size={18} className="text-slate-500" />
@@ -184,6 +205,7 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                         <option value="Delivered">Delivered</option>
                         <option value="Returned">Returned</option>
                         <option value="Exchanged">Exchanged</option>
+                        <option value="Cancelled">Cancelled</option>
                     </select>
                     <button onClick={handleExport} className="flex items-center justify-center gap-2 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 font-medium text-sm p-2 rounded w-full md:w-auto transition-colors">
                         <Download size={16} /> Export
@@ -202,6 +224,7 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                                 <th className="p-3">Recipient</th>
                                 <th className="p-3">Items</th>
                                 <th className="p-3">Status</th>
+                                <th className="p-3 w-12">Src</th>
                                 <th className="p-3">Tracking ID</th>
                                 <th className="p-3">Refund / Remarks</th>
                                 <th className="p-3 text-center">Outcome</th>
@@ -245,6 +268,8 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                                         }
                                     });
                                 }
+                                // This logic check was added inside the loop (around line 186)
+                                const isCancelDisabled = ['Delivered', 'Dispatched', 'Returned', 'Exchanged'].includes(order.status);
 
                                 return (
                                     <tr
@@ -274,37 +299,45 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
 
                                             {!shouldHideFinancials && (
                                                 <>
-                                                    {order.dueAmount < 0 ? (
-                                                        <div className="flex items-center gap-2 mt-1">
-                                                            {order.isRefunded ? (
-                                                                <div className="text-[10px] font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded">
-                                                                    REFUNDED MONEY
-                                                                </div>
-                                                            ) : (
-                                                                <div className="text-[10px] font-bold text-red-600 animate-pulse">
-                                                                    REFUND: ৳{Math.abs(order.dueAmount)}
-                                                                </div>
-                                                            )}
-                                                            <label className="flex items-center cursor-pointer" onClick={(e) => e.stopPropagation()}>
-                                                                <input
-                                                                    type="checkbox"
-                                                                    className="w-3 h-3 text-green-600 rounded focus:ring-green-500 cursor-pointer"
-                                                                    checked={order.isRefunded || false}
-                                                                    onChange={() => {
-                                                                        const newRefundStatus = !order.isRefunded;
-                                                                        onUpdate(order.id, order.status, {
-                                                                            isRefunded: newRefundStatus,
-                                                                            note: newRefundStatus ? 'Refund amount marked as refunded' : 'Refund status removed'
-                                                                        });
-                                                                    }}
-                                                                />
-                                                            </label>
-                                                        </div>
-                                                    ) : (
-                                                        <div className="text-[10px] font-bold mt-1 text-slate-500">
-                                                            Due: ৳{order.dueAmount}
-                                                        </div>
-                                                    )}
+                                                    {order.status === 'Cancelled' || order.status === 'Returned' ? (
+                                                        // If Cancelled, show Refund only if Advance was paid
+                                                        Number(order.advanceAmount || 0) > 0 && (
+                                                            <div className="text-[10px] font-bold mt-1 text-red-600 uppercase">
+                                                                Refund Due: ৳{order.advanceAmount}
+                                                            </div>
+                                                        )
+                                                    )
+                                                        : order.dueAmount < 0 ? (
+                                                            <div className="flex items-center gap-2 mt-1">
+                                                                {order.isRefunded ? (
+                                                                    <div className="text-[10px] font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded">
+                                                                        REFUNDED MONEY
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="text-[10px] font-bold text-red-600 animate-pulse">
+                                                                        REFUND: ৳{Math.abs(order.dueAmount)}
+                                                                    </div>
+                                                                )}
+                                                                <label className="flex items-center cursor-pointer" onClick={(e) => e.stopPropagation()}>
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        className="w-3 h-3 text-green-600 rounded focus:ring-green-500 cursor-pointer"
+                                                                        checked={order.isRefunded || false}
+                                                                        onChange={() => {
+                                                                            const newRefundStatus = !order.isRefunded;
+                                                                            onUpdate(order.id, order.status, {
+                                                                                isRefunded: newRefundStatus,
+                                                                                note: newRefundStatus ? 'Refund amount marked as refunded' : 'Refund status removed'
+                                                                            });
+                                                                        }}
+                                                                    />
+                                                                </label>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="text-[10px] font-bold mt-1 text-slate-500">
+                                                                Due: ৳{order.dueAmount}
+                                                            </div>
+                                                        )}
                                                 </>
                                             )}
 
@@ -328,6 +361,9 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                                         </td>
                                         <td className="p-3 font-bold">
                                             <span className={`px-2 py-1 rounded ${getStatusColor(order.status)}`}>{order.status}</span>
+                                        </td>
+                                        <td className="p-3 font-bold text-slate-700">
+                                            {getSourceLabel(order.orderSource)}
                                         </td>
                                         <td className="p-3">
                                             <input
@@ -382,15 +418,18 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                                                     <PauseCircle size={16} />
                                                 </button>
                                                 <button
-                                                    title="Cancel Order"
+                                                    // Tooltip changes based on status
+                                                    title={isCancelDisabled ? "Cannot cancel after dispatch/delivery" : "Cancel Order"}
+                                                    // Button is physically disabled
+                                                    disabled={isCancelDisabled}
                                                     onClick={() => {
-                                                        if (order.status === 'Delivered') {
-                                                            alert("Delivered orders cannot be Cancelled.");
-                                                            return;
-                                                        }
                                                         if (confirm('Are you sure you want to Cancel this order?')) onUpdate(order.id, 'Cancelled');
                                                     }}
-                                                    className="p-1.5 bg-red-100 text-red-700 rounded hover:bg-red-200"
+                                                    // Style changes to gray/low opacity if disabled
+                                                    className={`p-1.5 rounded transition-all ${isCancelDisabled
+                                                        ? 'bg-slate-100 text-slate-700 hover:bg-red-200 cursor-not-allowed'
+                                                        : 'bg-red-100 text-red-700 hover:bg-red-200'
+                                                        }`}
                                                 >
                                                     <Ban size={16} />
                                                 </button>
@@ -418,6 +457,15 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                                 )
                             })}
                         </tbody>
+                        {/* FOOTER SECTION */}
+                        <tfoot className="bg-slate-800 text-white font-bold border-t sticky bottom-0 z-20 shadow-[0_-2px_10px_rgba(0,0,0,0.1)]">
+                            <tr>
+                                <td colSpan="2" className="p-3 text-center border-r border-slate-700">Total Order Count</td>
+                                <td colSpan="1" className="p-3 text-center text-emerald-400 border-r border-slate-700 text-lg">{footerStats.totalOrders}</td>
+                                <td colSpan="5" className="p-3 text-right border-r border-slate-700 text-slate-300 font-medium">Total Revenue (Ex. Delivery):</td>
+                                <td colSpan="1" className="p-3 text-center text-emerald-400 text-lg">৳{footerStats.totalAmountExDelivery.toLocaleString()}</td>
+                            </tr>
+                        </tfoot>
                     </table>
                 </div>
             </div>

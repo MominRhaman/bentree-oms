@@ -32,7 +32,10 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         checkOutStatus: 'Pending',
         storePaymentMode: 'Cash',
         storeOrderId: '',
-        storeCheckoutStatus: 'Pending'
+        storeCheckoutStatus: 'Pending',
+        // NEW FIELDS
+        salesByName: '',
+        storeReceivedAmount: ''
     });
 
     const [errors, setErrors] = useState({});
@@ -57,7 +60,9 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
             recipientAddress: '',
             specialInstructions: '',
             remarks: '',
-            isExpress: false
+            isExpress: false,
+            salesByName: '',
+            storeReceivedAmount: ''
         }));
     };
 
@@ -188,6 +193,10 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         if (orderType === 'Online') {
             if (!formData.recipientName) { newErrors.recipientName = "Name is required"; isValid = false; }
             if (!formData.recipientAddress) { newErrors.recipientAddress = "Address is required"; isValid = false; }
+        } else {
+            // Store Specific Validation
+            if (!formData.salesByName) { newErrors.salesByName = "Sales By is required"; isValid = false; }
+            if (!formData.storeReceivedAmount) { newErrors.storeReceivedAmount = "Received Amount is required"; isValid = false; }
         }
 
         const productErrors = {};
@@ -242,6 +251,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
             createdAt: serverTimestamp(),
             date: formData.date,
             addedBy: user?.displayName || 'Unknown',
+            addedByEmail: user?.email || 'N/A', // Audit: Creator account
             products: formData.products.map(p => ({
                 ...p,
                 code: p.code.toUpperCase(),
@@ -256,14 +266,16 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
             grandTotal: totals.grandTotal,
             status: orderType === 'Store' ? 'Completed' : 'Pending',
             history: initialHistory,
-            recipientPhone: formData.recipientPhone
+            recipientPhone: formData.recipientPhone,
+            recipientName: formData.recipientName || 'Walk-in Customer',
+            receiver: formData.receiver || user?.displayName || 'System', // Unified receiver
+            orderProfile: formData.orderProfile || 'Direct' // Unified profile
         };
 
         if (orderType === 'Online') {
             Object.assign(payload, {
                 shift: formData.shift,
                 orderSource: formData.orderSource,
-                orderProfile: formData.orderProfile,
                 paymentType: formData.paymentType,
                 deliveryCharge: Number(formData.deliveryCharge || 0),
                 isExpress: formData.isExpress, // --- SAVE EXPRESS STATUS ---
@@ -272,9 +284,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                 itemQuantity: totals.totalQty,
                 itemWeight: totals.weight,
                 itemDescription: totals.productDesc,
-                receiver: formData.receiver,
                 merchantOrderId: formData.merchantOrderId,
-                recipientName: formData.recipientName,
                 recipientAddress: formData.recipientAddress,
                 recipientCity: formData.recipientCity,
                 recipientZone: formData.recipientZone,
@@ -290,7 +300,10 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
             Object.assign(payload, {
                 storePaymentMode: formData.storePaymentMode,
                 storeOrderId: formData.storeOrderId,
-                checkOutStatus: formData.storeCheckoutStatus
+                checkOutStatus: formData.storeCheckoutStatus,
+                salesByName: formData.salesByName,
+                collectedAmount: Number(formData.storeReceivedAmount || 0),
+                dueAmount: totals.grandTotal - Number(formData.storeReceivedAmount || 0)
             });
         }
 
@@ -636,14 +649,40 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                 )}
 
                 {orderType === 'Store' && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="space-y-4">
-                            <div><label className="block text-sm font-medium mb-1">Order ID</label><input className="w-full p-2 border rounded bg-slate-50" value={formData.storeOrderId} readOnly /></div>
-                            <div><label className="block text-sm font-medium mb-1">Payment Mode</label><select className="w-full p-2 border rounded" value={formData.storePaymentMode} onChange={e => setFormData({ ...formData, storePaymentMode: e.target.value })}><option>Cash</option><option>Card</option><option>MFS</option></select></div>
+                    <div className="space-y-6">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="space-y-4">
+                                <div><label className="block text-sm font-medium mb-1">Order ID</label><input className="w-full p-2 border rounded bg-slate-50" value={formData.storeOrderId} readOnly /></div>
+                                <div><label className="block text-sm font-medium mb-1">Payment Mode</label><select className="w-full p-2 border rounded" value={formData.storePaymentMode} onChange={e => setFormData({ ...formData, storePaymentMode: e.target.value })}><option>Cash</option><option>Card</option><option>MFS</option></select></div>
+                                <div>
+                                    <label className="block text-sm font-medium mb-1">Sales By Name *</label>
+                                    <input
+                                        className={`w-full p-2 border rounded ${errors.salesByName ? 'border-red-500 bg-red-50' : ''}`}
+                                        placeholder="Employee Name"
+                                        value={formData.salesByName}
+                                        onChange={e => setFormData({ ...formData, salesByName: e.target.value })}
+                                    />
+                                    {errors.salesByName && <p className="text-xs text-red-500 mt-1">{errors.salesByName}</p>}
+                                </div>
+                            </div>
+                            <div className="space-y-4">
+                                <div><label className="block text-sm font-medium mb-1">Customer Phone *</label><input className={`w-full p-2 border rounded ${errors.recipientPhone ? 'border-red-500 bg-red-50' : ''}`} placeholder="Enter phone number" value={formData.recipientPhone} onChange={e => { const val = e.target.value.replace(/\D/g, ''); if (val.length <= 11) setFormData({ ...formData, recipientPhone: val }); }} required />{errors.recipientPhone && <p className="text-xs text-red-500 mt-1">{errors.recipientPhone}</p>}</div>
+                                <div><label className="block text-sm font-medium mb-1">Customer Name (Optional)</label><input className="w-full p-2 border rounded" placeholder="Enter customer name" value={formData.recipientName} onChange={e => setFormData({ ...formData, recipientName: e.target.value })} /></div>
+                                <div>
+                                    <label className="block text-sm font-medium mb-1">Total Received Amount *</label>
+                                    <input
+                                        type="number"
+                                        className={`w-full p-2 border rounded ${errors.storeReceivedAmount ? 'border-red-500 bg-red-50' : ''}`}
+                                        placeholder="Amount collected"
+                                        value={formData.storeReceivedAmount}
+                                        onChange={e => setFormData({ ...formData, storeReceivedAmount: e.target.value })}
+                                        onWheel={disableScroll}
+                                    />
+                                    {errors.storeReceivedAmount && <p className="text-xs text-red-500 mt-1">{errors.storeReceivedAmount}</p>}
+                                </div>
+                            </div>
                         </div>
-                        <div className="space-y-4">
-                            <div><label className="block text-sm font-medium mb-1">Customer Phone *</label><input className={`w-full p-2 border rounded ${errors.recipientPhone ? 'border-red-500 bg-red-50' : ''}`} placeholder="Enter phone number" value={formData.recipientPhone} onChange={e => { const val = e.target.value.replace(/\D/g, ''); if (val.length <= 11) setFormData({ ...formData, recipientPhone: val }); }} required />{errors.recipientPhone && <p className="text-xs text-red-500 mt-1">{errors.recipientPhone}</p>}</div>
-                            {/* Row 3: Status */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-1">Checkout Status</label>
                                 <select className="w-full p-2 border rounded-md" value={formData.checkOutStatus} onChange={(e) => setFormData({ ...formData, checkOutStatus: e.target.value })}>

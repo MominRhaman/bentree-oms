@@ -170,7 +170,8 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
                             const hasAdvance = Number(order.advanceAmount || 0) > 0;
                             const wasDelivered = (order.history || []).some(h => (h.status || '').toLowerCase() === 'delivered');
                             const shouldShowRefund = hasAdvance || wasDelivered;
-                            const shouldShowReturnCheckbox = wasDelivered;
+                            const isCurrentReturn = (order.status || '').toLowerCase().includes('return');
+                            const shouldShowReturnCheckbox = wasDelivered || isCurrentReturn;
 
                             return (
                                 <tr
@@ -192,7 +193,7 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
                                             />
                                         ) : (
                                             /* Empty placeholder for non-delivered orders */
-                                            <div className="w-4 h-4 mx-auto bg-slate-50 rounded border border-slate-100"></div>
+                                            <div className="w-4 h-4 mx-auto bg-slate-50 rounded border border-slate-100 opacity-20"></div>
                                         )}
                                     </td>
                                     <td className="p-3 text-slate-500">{order.date?.includes('T') ? order.date.split('T')[0] : order.date}</td>

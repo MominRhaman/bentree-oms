@@ -511,9 +511,9 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                                 </div>
                             ) : (
                                 <div className="text-sm space-y-1">
-                                    <p><span className="font-medium">Name:</span> {order.recipientName}</p>
+                                    <p><span className="font-medium">Name:</span> {order.recipientName || 'Walk-in Customer'}</p>
                                     <p><span className="font-medium">Phone:</span> {order.recipientPhone}</p>
-                                    <p className="flex gap-1"><MapPin size={14} className="mt-1 flex-shrink-0" /> {order.recipientAddress}</p>
+                                    {order.recipientAddress && <p className="flex gap-1"><MapPin size={14} className="mt-1 flex-shrink-0" /> {order.recipientAddress}</p>}
                                 </div>
                             )}
                         </div>
@@ -522,14 +522,28 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                             <h3 className="font-semibold text-slate-700 flex items-center gap-2 border-b pb-2">
                                 <Package size={16} /> Order Info
                             </h3>
-                            <div className="grid grid-cols-2 gap-4 text-sm">
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
                                 <div>
                                     <p className="text-slate-500 text-xs">Source</p>
-                                    <p className="font-medium">{order.orderSource}</p>
+                                    <p className="font-medium">{order.orderSource || 'Store'}</p>
                                 </div>
                                 <div>
                                     <p className="text-slate-500 text-xs">Type</p>
                                     <p className="font-medium">{order.type}</p>
+                                </div>
+                                {order.salesByName && (
+                                    <div className="col-span-1">
+                                        <p className="text-slate-500 text-xs">Sales By</p>
+                                        <p className="font-medium text-emerald-600">{order.salesByName}</p>
+                                    </div>
+                                )}
+                                <div>
+                                    <p className="text-slate-500 text-xs">Receiver</p>
+                                    <p className="font-medium">{order.receiver || order.addedBy || 'N/A'}</p>
+                                </div>
+                                <div className="col-span-2">
+                                    <p className="text-slate-500 text-xs">Account / Profile</p>
+                                    <p className="font-medium text-xs truncate">{order.addedByEmail || 'N/A'} {order.orderProfile ? `(${order.orderProfile})` : ''}</p>
                                 </div>
                                 <div className="col-span-2">
                                     <p className="text-slate-500 text-xs">Order ID</p>
@@ -537,19 +551,6 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                                         <input className="border rounded px-2 py-1 w-full text-sm bg-yellow-50 focus:bg-white transition-colors" value={editedOrder.merchantOrderId || editedOrder.storeOrderId || ''} onChange={e => { handleInputChange('merchantOrderId', e.target.value); handleInputChange('storeOrderId', e.target.value); }} />
                                     ) : (
                                         <p className="font-mono bg-slate-100 px-2 py-0.5 rounded inline-block">{order.merchantOrderId || order.storeOrderId || 'N/A'}</p>
-                                    )}
-                                </div>
-                                <div className="col-span-2">
-                                    <p className="text-slate-500 text-xs">Check Out Status</p>
-                                    {isEditing ? (
-                                        <select className="border rounded px-2 py-1 w-full text-sm" value={editedOrder.checkOutStatus || 'Pending'} onChange={e => handleInputChange('checkOutStatus', e.target.value)}>
-                                            <option value="Pending">Pending</option>
-                                            <option value="Completed">Completed</option>
-                                        </select>
-                                    ) : (
-                                        <span className={`px-2 py-0.5 rounded text-xs font-bold ${editedOrder.checkOutStatus === 'Completed' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                                            {editedOrder.checkOutStatus || 'Pending'}
-                                        </span>
                                     )}
                                 </div>
                             </div>
@@ -649,7 +650,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                             </div>
 
                             <div className="flex justify-between font-bold text-slate-800 border-t border-slate-200 pt-1">
-                                <span>Total</span>
+                                <span>Total Payable</span>
                                 <span>৳ {Number(editedOrder.grandTotal) - Number(editedOrder.advanceAmount || 0)}</span>
                             </div>
 
@@ -660,7 +661,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                                 </div>
                                 {isEditing ?
                                     <input className="w-32 p-1 border rounded text-right bg-white" value={editedOrder.collectedAmount} onChange={e => handleInputChange('collectedAmount', e.target.value)} onWheel={disableScroll} /> :
-                                    <span>- ৳ {(Number(editedOrder.advanceAmount || 0) + Number(editedOrder.collectedAmount || 0))}</span>
+                                    <span className="text-emerald-600">৳ {(Number(editedOrder.advanceAmount || 0) + Number(editedOrder.collectedAmount || 0))}</span>
                                 }
                             </div>
 
@@ -700,7 +701,9 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                                             {new Date(h.timestamp).toLocaleDateString('en-US', {
                                                 year: 'numeric',
                                                 month: 'short',
-                                                day: 'numeric'
+                                                day: 'numeric',
+                                                hour: '2-digit',
+                                                minute: '2-digit'
                                             })}
                                         </time>
                                         <div className="flex items-center gap-2">
@@ -709,6 +712,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                                             </h3>
                                             <button onClick={() => setHistoryModalData(h.note || 'No additional details available.')} className="text-blue-500 hover:text-blue-700 bg-blue-50 p-1 rounded-full" title="View History Details"><Eye size={14} /></button>
                                         </div>
+                                        <p className="text-xs text-slate-600 leading-relaxed italic">By: {h.updatedBy || 'System'}</p>
                                         <p className="text-xs text-slate-600 leading-relaxed">{h.note || 'Status updated'}</p>
                                     </li>
                                 ))}

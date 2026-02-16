@@ -66,16 +66,17 @@ export const downloadCSV = (data, filename) => {
     const headers = Object.keys(data[0]).join(',');
     const rows = data.map(obj =>
         Object.values(obj).map(val => {
-            // Clean values: handle null/undefined and escape existing double quotes
             let str = val === null || val === undefined ? '' : String(val);
+            // Protects structure by escaping internal quotes
             return `"${str.replace(/"/g, '""')}"`;
         }).join(',')
     ).join('\n');
 
     const csvContent = headers + '\n' + rows;
 
-    // 2. USE BLOB INSTEAD OF encodeURI
-    // The \uFEFF is a magic character that tells Excel "This is UTF-8 text"
+    // 2. THE CRITICAL CHANGE:
+    // Adding '\uFEFF' (BOM) tells Excel: "This is Bangla/UTF-8 text"
+    // Using 'Blob' instead of 'encodeURI' allows symbols like #, $, &, % to export without failing
     const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
 
@@ -87,7 +88,7 @@ export const downloadCSV = (data, filename) => {
     document.body.appendChild(link);
     link.click();
 
-    // 4. Cleanup memory
+    // 4. Cleanup
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
 };
