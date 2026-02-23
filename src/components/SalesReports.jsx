@@ -63,9 +63,11 @@ const SalesReports = ({ orders, inventory }) => {
         });
 
         const data = [];
+        const uniqueOrderIds = new Set();
         let totalDiscount = 0; 
 
         realizedOrders.forEach(order => {
+            uniqueOrderIds.add(order.id);
             const orderId = order.type === 'Store' ? order.storeOrderId : order.merchantOrderId;
             const salesBy = order.type === 'Store' ? 'Store' : (order.orderSource || 'Online');
             const addedBy = order.addedBy || 'System';
@@ -169,6 +171,8 @@ const SalesReports = ({ orders, inventory }) => {
             revenue: acc.revenue + row.revenue,
             profitLoss: acc.profitLoss + row.profitLoss
         }), { unitSold: 0, revenue: 0, profitLoss: 0 });
+
+        totals.orderCount = uniqueOrderIds.size;
 
         return {
             stats: { netProductSales, storeSales, deliveryIncome, returnDeliveryLoss, totalRevenue, totalDiscount },
@@ -345,7 +349,9 @@ const SalesReports = ({ orders, inventory }) => {
                         </tbody>
                         <tfoot className="sticky bottom-0 bg-slate-100 border-t-2 border-slate-200 font-bold text-slate-700 z-10">
                             <tr>
-                                <td className="p-3" colSpan="5">TOTALS</td>
+                                <td className="p-3 text-right uppercase text-xs text-slate-500" colSpan="7">
+                                    Total Orders: <span className="text-slate-900 text-sm ml-1">{totals.orderCount}</span> | TOTALS
+                                </td>
                                 <td className="p-3 text-center">{totals.unitSold}</td>
                                 <td className="p-3 text-right text-emerald-800">৳{totals.revenue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
                                 <td className={`p-3 text-right ${totals.profitLoss >= 0 ? 'text-emerald-800' : 'text-red-700'}`}>

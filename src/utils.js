@@ -28,6 +28,9 @@ export const CREDENTIAL_ACCOUNTS = {
     'user10': { pass: 'bentree15243', role: 'qmt', name: 'Team Member 10' },
     'user11': { pass: 'bentree51234', role: 'qmt', name: 'Team Member 11' },
     'user12': { pass: 'bentree12553', role: 'qmt', name: 'Team Member 12' },
+    'user13': { pass: 'bentree6969', role: 'qmt', name: 'Team Member 13' },
+    'user14': { pass: 'bentree2404', role: 'qmt', name: 'Team Member 14' },
+    'user15': { pass: 'bentree12563', role: 'qmt', name: 'Team Member 15' },
 };
 
 // --- Constants ---
