@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Plus, Trash2, X, RefreshCw, AlertCircle } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { Plus, Trash2, X, RefreshCw, AlertCircle, AlertTriangle } from 'lucide-react';
 import { updateInventoryStock } from '../utils';
 
 // Added 'user' to the props list below
@@ -7,6 +7,10 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
     // Detect if this is completing a partial exchange that was already created
     const isCompletingPartialExchange = order.isPartialExchange === true || order.exchangeDetails?.isPartial === true;
     const originalOrderId = order.originalOrderId || null;
+    const [suggestions, setSuggestions] = useState({ index: null, list: [] });
+    const [errors, setErrors] = useState({});
+    const suggestionRef = useRef(null);
+    const productRefs = useRef([]);
 
     // Debug: Log props to help identify the issue
     console.log('ExchangeModal Props:', {
@@ -34,8 +38,29 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
     // --- NEW: Partial Exchange Items Selection ---
     const [partialExchangeItems, setPartialExchangeItems] = useState(new Set());
 
-    // --- REVISED CALCULATIONS ---
+    // --- Stock Logic Helper ---
+    const getStockError = (prod) => {
+        if (!inventory || !inventory.length) return null;
+        if (!prod.code) return null;
+        const item = inventory.find(i => i.code && i.code.toUpperCase() === prod.code.trim().toUpperCase());
 
+        if (!item) return "Product not found";
+
+        const qtyNeeded = Number(prod.qty);
+        if (item.type === 'Variable') {
+            if (!prod.size) return "Size required";
+            const sizeKey = Object.keys(item.stock || {}).find(k => k.toUpperCase() === (prod.size || '').toUpperCase());
+            if (!sizeKey) return "Size not found";
+            const available = Number(item.stock[sizeKey] || 0);
+            if (available < qtyNeeded) return `Max Avail: ${available}`;
+        } else {
+            const available = Number(item.totalStock || 0);
+            if (available < qtyNeeded) return `Max Avail: ${available}`;
+        }
+        return null;
+    };
+
+    // --- REVISED CALCULATIONS ---
     // A. Calculate New Product Value (After Discount)
     const newProductTotal = newProducts.reduce((acc, p) => acc + (Number(p.price || 0) * Number(p.qty || 0)), 0);
 
@@ -92,8 +117,44 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
         return JSON.parse(JSON.stringify(obj));
     };
 
+    // --- Dropdown Handlers ---
+    const selectSuggestion = (index, item) => {
+        const np = [...newProducts];
+        np[index].code = item.code;
+        np[index].price = item.mrp || '';
+
+        if (item.type === 'Variable' && item.stock) {
+            const sizes = Object.keys(item.stock);
+            if (sizes.length > 0) np[index].size = sizes[0];
+        } else {
+            np[index].size = 'Free';
+        }
+
+        setNewProducts(np);
+        setSuggestions({ index: null, list: [] });
+
+        // Clear errors for this row as it's now valid
+        setErrors(prev => {
+            const n = { ...prev };
+            delete n[index];
+            return n;
+        });
+
+        setTimeout(() => { if (productRefs.current[index]) productRefs.current[index].focus(); }, 10);
+    };
+
+    const handleCodeBlur = (index) => {
+        setTimeout(() => { setSuggestions({ index: null, list: [] }); }, 150);
+    };
+
     // --- NEW: Handle Partial Exchange Process ---
     const handlePartialExchangeProcess = async () => {
+        // PREVENT IF ERRORS EXIST
+        if (Object.keys(errors).length > 0) {
+            alert("Please fix product errors before processing partial exchange.");
+            return;
+        }
+
         const exchangedItems = order.products.filter((_, i) => partialExchangeItems.has(i));
         const keptItems = order.products.filter((_, i) => !partialExchangeItems.has(i));
         // Get newly added items for the partial exchange order
@@ -233,6 +294,11 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        // BLOCK IF ERRORS EXIST
+        if (Object.keys(errors).length > 0) {
+            alert("Cannot confirm: Please fix the product errors (Stock/Not Found) first.");
+            return;
+        }
 
         if (partialExchangeItems.size > 0 && !isCompletingPartialExchange) {
             await handlePartialExchangeProcess();
@@ -315,7 +381,19 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
         const np = [...newProducts];
         np[idx][field] = val;
         if (field === 'code') {
-            const normalizedCode = val.trim().toUpperCase();
+            const searchVal = val.trim();
+            if (searchVal.length >= 3) {
+                const searchStr = searchVal.toUpperCase();
+                const matches = inventory.filter(i =>
+                    i.code.toUpperCase().endsWith(searchStr) ||
+                    i.code.toUpperCase().includes(searchStr)
+                );
+                setSuggestions({ index: idx, list: matches.slice(0, 5) });
+            } else {
+                setSuggestions({ index: null, list: [] });
+            }
+
+            const normalizedCode = searchVal.toUpperCase();
             const foundItem = inventory.find(i => i.code.toUpperCase() === normalizedCode);
             if (foundItem) {
                 np[idx].price = foundItem.mrp || '';
@@ -328,9 +406,25 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
             }
         }
         setNewProducts(np);
+
+        // Update error state immediately
+        const error = getStockError(np[idx]);
+        setErrors(prev => {
+            const n = { ...prev };
+            if (error) n[idx] = error; else delete n[idx];
+            return n;
+        });
     };
 
-    const addProduct = () => setNewProducts([...newProducts, { code: '', size: '', qty: 1, price: '' }]);
+    const addProduct = () => {
+        // PREVENT IF ERRORS EXIST
+        if (Object.keys(errors).length > 0) {
+            alert("Please fix existing product errors before adding more items.");
+            return;
+        }
+        setNewProducts([...newProducts, { code: '', size: '', qty: 1, price: '' }]);
+    };
+
     const removeProduct = (idx) => {
         if (newProducts.length > 0) setNewProducts(newProducts.filter((_, i) => i !== idx));
         setPartialExchangeItems(prev => {
@@ -359,6 +453,7 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
                         {newProducts.map((p, i) => {
                             const invItem = inventory.find(inv => inv.code.toUpperCase() === (p.code || '').toUpperCase());
                             const availableSizes = (invItem && invItem.type === 'Variable' && invItem.stock) ? Object.keys(invItem.stock) : [];
+                            const hasError = errors[i];
 
                             return (
                                 <div key={i} className="flex flex-col lg:flex-row gap-8 mb-3 bg-slate-50 p-2 sm:p-3 rounded-lg border border-slate-200 relative">
@@ -367,13 +462,41 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
                                     <div className="flex flex-col justify-center lg:h-1/2">
                                         <label className="text-[10px] font-bold text-slate-500 uppercase mb-1">Code</label>
                                         <input
+                                            ref={el => productRefs.current[i] = el}
                                             placeholder="Code"
                                             value={p.code}
                                             onChange={e => updateNewProduct(i, 'code', e.target.value)}
-                                            className="border px-2 py-1.5 w-full rounded text-sm font-medium"
+                                            onBlur={() => handleCodeBlur(i)}
+                                            autoComplete="off"
+                                            className={`border px-2 py-1.5 w-full rounded text-sm font-medium ${hasError ? 'border-red-500 bg-red-50' : ''}`}
                                             required
                                         />
+                                        {/* Dropdown Suggestions */}
+                                        {suggestions.index === i && suggestions.list.length > 0 && (
+                                            <div ref={suggestionRef} className="absolute left-0 right-0 top-full bg-white border border-slate-200 rounded-b-lg shadow-xl z-[100] max-h-48 overflow-y-auto">
+                                                {suggestions.list.map((item) => (
+                                                    <button key={item.id} type="button" onMouseDown={(e) => { e.preventDefault(); selectSuggestion(i, item); }} className="w-full text-left px-3 py-2 hover:bg-emerald-50 border-b border-slate-50 last:border-0">
+                                                        <div className="flex justify-between items-center mb-0.5">
+                                                            <span className="font-bold text-slate-800 text-xs">{item.code}</span>
+                                                            <span className="text-[10px] font-bold text-emerald-600">৳{item.mrp}</span>
+                                                        </div>
+                                                        <div className="flex flex-wrap gap-1">
+                                                            {item.type === 'Variable' ? (
+                                                                Object.entries(item.stock || {}).map(([sz, qty]) => (
+                                                                    qty > 0 && <span key={sz} className="text-[9px] bg-slate-100 px-1 py-0.5 rounded">{sz}: {qty}</span>
+                                                                ))
+                                                            ) : (
+                                                                <span className="text-[9px] bg-slate-100 px-1 py-0.5 rounded">Stock: {item.totalStock}</span>
+                                                            )}
+                                                        </div>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
+                                        {/* Added Error Message */}
+                                        {hasError && <div className="text-[10px] text-red-600 font-bold mt-1 flex items-center"><AlertTriangle size={10} className="mr-1" /> {hasError}</div>}
                                     </div>
+
                                     {/* Secondary Inputs Container */}
                                     <div className="lg:h-1/2 flex items-end gap-8 w-full">
                                         <div className="lg:w-24 flex flex-col justify-start">

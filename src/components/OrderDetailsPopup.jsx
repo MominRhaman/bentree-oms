@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Edit2, Save, Trash2, Printer, MapPin, Phone, User, Package, Plus, Clock, RefreshCw, AlertTriangle, RotateCcw, CheckCircle, Eye, Zap, ArrowLeft } from 'lucide-react';
 import { disableScroll, updateInventoryStock } from '../utils';
 import InvoiceGenerator from './InvoiceGenerator';
@@ -8,6 +8,9 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
     const [editedOrder, setEditedOrder] = useState(null);
     const [errors, setErrors] = useState({});
     const [isRefunded, setIsRefunded] = useState(false);
+    const [suggestions, setSuggestions] = useState({ index: null, list: [] }); // NEW
+    const suggestionRef = useRef(null); // NEW
+    const productRefs = useRef([]); // NEW
 
     // --- State to track marked products for Partial Return ---
     const [partialReturnItems, setPartialReturnItems] = useState(new Set());
@@ -46,15 +49,20 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
     };
 
     // --- Stock Logic ---
-    const getStockError = (prod) => {
+    const getStockError = (prod, index) => {
         if (!inventory || !inventory.length) return null;
         if (!prod.code) return null;
         const item = inventory.find(i => i.code && i.code.toUpperCase() === prod.code.toUpperCase());
         if (!item) return "Product not found";
 
         let qtyHeldByOrder = 0;
-        const originalProd = order.products.find(p => p.code === prod.code && p.size === prod.size);
-        if (originalProd) qtyHeldByOrder = Number(originalProd.qty || 0);
+        // Fix: Find the original product by index to see what was originally held at this position
+        const originalProdAtIndex = order.products[index];
+        if (originalProdAtIndex && 
+            originalProdAtIndex.code === prod.code && 
+            originalProdAtIndex.size === prod.size) {
+            qtyHeldByOrder = Number(originalProdAtIndex.qty || 0);
+        }
 
         let dbStock = 0;
         if (item.type === 'Variable') {
@@ -103,9 +111,38 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
         setEditedOrder(prev => recalculateTotals({ ...prev, [field]: value }));
     };
 
+    const selectSuggestion = (index, item) => {
+        const newProducts = [...editedOrder.products];
+        newProducts[index].code = item.code;
+        newProducts[index].price = item.mrp || 0;
+        // ... size logic ...
+        setEditedOrder(prev => recalculateTotals({ ...prev, products: newProducts }));
+        setSuggestions({ index: null, list: [] });
+        setTimeout(() => { if (productRefs.current[index]) productRefs.current[index].focus(); }, 10);
+    };
+
+    const handleCodeBlur = (index) => {
+        setTimeout(() => { setSuggestions({ index: null, list: [] }); }, 150);
+    };
+
     const handleProductChange = (index, field, value) => {
         const newProducts = [...editedOrder.products];
         newProducts[index][field] = value;
+
+        // NEW Logic: Trigger suggestions after 3 characters
+        if (field === 'code') {
+            const val = value.trim();
+            if (val.length >= 3) {
+                const searchStr = val.toUpperCase();
+                const matches = inventory.filter(i =>
+                    i.code.toUpperCase().endsWith(searchStr) ||
+                    i.code.toUpperCase().includes(searchStr)
+                );
+                setSuggestions({ index, list: matches.slice(0, 5) });
+            } else {
+                setSuggestions({ index: null, list: [] });
+            }
+        }
 
         if (field === 'code' && inventory && inventory.length > 0) {
             const foundItem = inventory.find(i => i.code && i.code.toUpperCase() === value.toUpperCase());
@@ -122,7 +159,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
 
         setEditedOrder(prev => recalculateTotals({ ...prev, products: newProducts }));
 
-        const error = getStockError(newProducts[index]);
+        const error = getStockError(newProducts[index], index);
         setErrors(prev => {
             const n = { ...prev };
             if (error) n[index] = error;
@@ -265,24 +302,24 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                 throw new Error('onCreate function not provided');
             }
 
-            console.log('✅ Creating return order...');
+            console.log('Creating return order...');
             await onCreate(sanitizedReturnOrder);
-            console.log('✅ Return order created successfully');
+            console.log('Return order created successfully');
 
             // Small delay to ensure Firebase sync
             await new Promise(resolve => setTimeout(resolve, 500));
 
             // 3b. UPDATE original order
-            console.log('✅ Updating original order...');
+            console.log('Updating original order...');
             const sanitizedOriginalOrder = sanitizeForFirebase(updatedOriginalOrder);
             await onEdit(order.id, updatedOriginalOrder.status, sanitizedOriginalOrder);
-            console.log('✅ Original order updated successfully');
+            console.log('Original order updated successfully');
 
             setShowPartialReturnModal(false);
             onClose();
             alert(`Partial Return processed successfully!\n\nReturn Order ID: ${returnOrderId}\n\nReturned items are now visible in the Cancel & Return tab.`);
         } catch (error) {
-            console.error("❌ Error processing partial return:", error);
+            console.error("Error processing partial return:", error);
             alert(`Failed to process partial return: ${error.message || 'Unknown error'}\n\nCheck console for details.`);
         }
     };
@@ -575,8 +612,39 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                                     <div key={i} className={`flex flex-col sm:flex-row gap-2 ${isEditing ? 'bg-slate-50 p-3 rounded-lg border border-slate-200 shadow-sm' : 'border-b border-slate-100 pb-2 last:border-0'}`}>
                                         {isEditing ? (
                                             <>
-                                                <div className="flex-1">
-                                                    <input className={`w-full p-2 border rounded text-sm bg-white ${hasError ? 'border-red-500 bg-red-50' : ''}`} value={p.code} onChange={e => handleProductChange(i, 'code', e.target.value)} placeholder="Code" />
+                                                <div className="flex-1 relative">
+                                                    <input 
+                                                        ref={el => productRefs.current[i] = el}
+                                                        className={`w-full p-2 border rounded text-sm bg-white ${hasError ? 'border-red-500 bg-red-50' : ''}`} 
+                                                        value={p.code} 
+                                                        onChange={e => handleProductChange(i, 'code', e.target.value)} 
+                                                        onBlur={() => handleCodeBlur(i)}
+                                                        autoComplete="off"
+                                                        placeholder="Code" 
+                                                    />
+                                                    
+                                                    {/* NEW: DROPDOWN UI LOOP */}
+                                                    {suggestions.index === i && suggestions.list.length > 0 && (
+                                                        <div ref={suggestionRef} className="absolute left-0 right-0 top-full bg-white border border-slate-200 rounded-b-lg shadow-xl z-[100] max-h-60 overflow-y-auto">
+                                                            {suggestions.list.map((item) => (
+                                                                <button key={item.id} type="button" onMouseDown={(e) => { e.preventDefault(); selectSuggestion(i, item); }} className="w-full text-left px-3 py-2 hover:bg-emerald-50 border-b border-slate-50 last:border-0">
+                                                                    <div className="flex justify-between items-center mb-0.5">
+                                                                        <span className="font-bold text-slate-800 text-xs">{item.code}</span>
+                                                                        <span className="text-[10px] font-bold text-emerald-600">৳{item.mrp}</span>
+                                                                    </div>
+                                                                    <div className="flex flex-wrap gap-1">
+                                                                        {item.type === 'Variable' ? (
+                                                                            Object.entries(item.stock || {}).map(([sz, qty]) => (
+                                                                                qty > 0 && <span key={sz} className="text-[9px] bg-slate-100 px-1 py-0.5 rounded">{sz}: {qty}</span>
+                                                                            ))
+                                                                        ) : (
+                                                                            <span className="text-[9px] bg-slate-100 px-1 py-0.5 rounded">Stock: {item.totalStock}</span>
+                                                                        )}
+                                                                    </div>
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    )}
                                                     {hasError && <div className="text-xs text-red-600 font-bold mt-1 flex items-center"><AlertTriangle size={12} className="mr-1" /> {hasError}</div>}
                                                 </div>
                                                 <div className="flex gap-2 items-center">
