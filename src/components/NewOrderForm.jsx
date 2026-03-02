@@ -13,7 +13,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         orderSource: 'Facebook',
         orderProfile: '',
         paymentType: 'COD',
-        products: [{ code: '', size: '', qty: 1, price: '' }],
+        products: [{ code: '', size: '', qty: 1, price: '', discountType: 'Fixed', discountValue: '' }],
         discountType: 'Fixed',
         discountValue: '',
         deliveryCharge: '',
@@ -54,7 +54,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         setFormData(prev => ({
             ...prev,
             date: new Date().toISOString().split('T')[0],
-            products: [{ code: '', size: '', qty: 1, price: '' }],
+            products: [{ code: '', size: '', qty: 1, price: '', discountType: 'Fixed', discountValue: '' }],
             recipientName: '',
             recipientPhone: '',
             recipientAddress: '',
@@ -99,7 +99,21 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
 
     // --- Calculations ---
     const totals = useMemo(() => {
-        const subtotal = formData.products.reduce((acc, p) => acc + (Number(p.price || 0) * Number(p.qty || 0)), 0);
+        // Inside totals calculation
+        const subtotal = formData.products.reduce((acc, p) => {
+            const basePrice = Number(p.price || 0) * Number(p.qty || 0);
+            let itemDiscount = 0;
+
+            if (p.discountType === 'Fixed') {
+                itemDiscount = Number(p.discountValue || 0);
+            } else {
+                // Apply percentage calculation for this specific product
+                itemDiscount = basePrice * (Number(p.discountValue || 0) / 100);
+            }
+
+            return acc + (basePrice - itemDiscount);
+        }, 0);
+
         const totalQty = formData.products.reduce((acc, p) => acc + Number(p.qty || 0), 0);
 
         let discount = 0;
@@ -257,7 +271,9 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                 code: p.code.toUpperCase(),
                 size: p.size ? p.size.toUpperCase() : '',
                 price: Number(p.price || 0),
-                qty: Number(p.qty || 0)
+                qty: Number(p.qty || 0),
+                discountValue: Number(p.discountValue || 0),
+                discountType: p.discountType
             })),
             discountType: formData.discountType,
             discountValue: Number(formData.discountValue || 0),
@@ -404,7 +420,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         }, 100); // 100ms delay to allow clicking suggestions
     };
 
-    const addProduct = () => setFormData({ ...formData, products: [...formData.products, { code: '', size: '', qty: 1, price: '' }] });
+    const addProduct = () => setFormData({ ...formData, products: [...formData.products, { code: '', size: '', qty: 1, price: '', discountType: 'Fixed', discountValue: '' }] });
     const removeProduct = (idx) => setFormData({ ...formData, products: formData.products.filter((_, i) => i !== idx) });
 
     return (
@@ -542,6 +558,24 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
 
                                         <div className="flex-1 sm:w-20"><input type="number" min="1" className={`w-full p-2 border rounded ${rowError?.qty ? 'border-red-500' : ''}`} value={prod.qty} onChange={e => updateProduct(idx, 'qty', e.target.value)} onWheel={disableScroll} /></div>
                                         <div className="flex-1 sm:w-28"><input type="number" min="0" placeholder="Price" className={`w-full p-2 border rounded ${rowError?.price ? 'border-red-500' : ''}`} value={prod.price} onChange={e => updateProduct(idx, 'price', e.target.value)} onWheel={disableScroll} /></div>
+                                        {/* Added this block inside the products map */}
+                                        <div className="w-[calc(50%-4px)] sm:w-32 flex">
+                                            <input
+                                                type="number"
+                                                placeholder="Disc"
+                                                className="w-full p-2 border border-r-0 rounded-l"
+                                                value={prod.discountValue}
+                                                onChange={e => updateProduct(idx, 'discountValue', e.target.value)}
+                                            />
+                                            <select
+                                                className="p-2 border rounded-r bg-white text-xs"
+                                                value={prod.discountType}
+                                                onChange={e => updateProduct(idx, 'discountType', e.target.value)}
+                                            >
+                                                <option value="Fixed">৳</option>
+                                                <option value="Percent">%</option>
+                                            </select>
+                                        </div>
                                         {formData.products.length > 1 && <button type="button" onClick={() => removeProduct(idx)} className="p-2 text-red-500 hover:bg-red-50 rounded"><Trash2 size={18} /></button>}
                                     </div>
                                 </div>
@@ -552,7 +586,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
 
                     <div className="mt-4 pt-4 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
-                            <label className="block text-sm font-medium mb-1">Discount</label>
+                            <label className="block text-sm font-medium mb-1">Global Discount</label>
                             <div className="flex gap-2">
                                 <input type="number" className="w-full p-2 border rounded" value={formData.discountValue} onChange={e => setFormData({ ...formData, discountValue: e.target.value })} onWheel={disableScroll} />
                                 <select className="p-2 border rounded bg-white" value={formData.discountType} onChange={e => setFormData({ ...formData, discountType: e.target.value })}><option value="Fixed">Tk</option><option value="Percent">%</option></select>

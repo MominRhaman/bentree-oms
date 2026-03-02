@@ -37,8 +37,18 @@ const InvoiceGenerator = ({ orders }) => {
 
             <div id="print-area" className="flex flex-col gap-8 bg-slate-100 p-4 print:p-0 print:bg-white">
                 {orders.map((order, index) => {
-                    // --- Calculations ---
-                    const subtotal = (order.products || []).reduce((sum, p) => sum + (Number(p.price || 0) * Number(p.qty || 0)), 0);
+                    // --- UPDATED Calculations for Product Discounts ---
+                    const subtotal = (order.products || []).reduce((sum, p) => {
+                        const base = Number(p.price || 0) * Number(p.qty || 0);
+                        let itemDisc = 0;
+                        if (p.discountType === 'Percent') {
+                            itemDisc = base * (Number(p.discountValue || 0) / 100);
+                        } else {
+                            itemDisc = Number(p.discountValue || 0);
+                        }
+                        return sum + (base - itemDisc);
+                    }, 0);
+
                     let discount = Number(order.discountValue || 0);
                     if (order.discountType === 'Percent') {
                         discount = subtotal * (discount / 100);
@@ -97,15 +107,33 @@ const InvoiceGenerator = ({ orders }) => {
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
-                                    {(order.products || []).map((p, i) => (
-                                        <tr key={i}>
-                                            <td className="p-3 font-bold text-slate-700">{p.code}</td>
-                                            <td className="p-3 text-center">{p.size}</td>
-                                            <td className="p-3 text-center">{p.qty}</td>
-                                            <td className="p-3 text-right">৳{p.price}</td>
-                                            <td className="p-3 text-right font-medium">৳{Number(p.price) * Number(p.qty)}</td>
-                                        </tr>
-                                    ))}
+                                    {(order.products || []).map((p, i) => {
+                                        const lineBase = Number(p.price || 0) * Number(p.qty || 0);
+                                        let lineDisc = 0;
+                                        if (p.discountType === 'Percent') {
+                                            lineDisc = lineBase * (Number(p.discountValue || 0) / 100);
+                                        } else {
+                                            lineDisc = Number(p.discountValue || 0);
+                                        }
+                                        const lineTotal = lineBase - lineDisc;
+
+                                        return (
+                                            <tr key={i}>
+                                                <td className="p-3">
+                                                    <div className="font-bold text-slate-700">{p.code}</div>
+                                                    {lineDisc > 0 && (
+                                                        <div className="text-[10px] text-red-500 italic">
+                                                            Discount: {p.discountType === 'Percent' ? `${p.discountValue}%` : `৳${p.discountValue}`}
+                                                        </div>
+                                                    )}
+                                                </td>
+                                                <td className="p-3 text-center">{p.size}</td>
+                                                <td className="p-3 text-center">{p.qty}</td>
+                                                <td className="p-3 text-right">৳{p.price}</td>
+                                                <td className="p-3 text-right font-medium">৳{lineTotal.toFixed(0)}</td>
+                                            </tr>
+                                        );
+                                    })}
                                 </tbody>
                             </table>
 
@@ -114,14 +142,14 @@ const InvoiceGenerator = ({ orders }) => {
                                 <div className="w-64 space-y-2 text-sm">
                                     <div className="flex justify-between text-slate-600">
                                         <span>Subtotal:</span>
-                                        <span>৳{subtotal}</span>
+                                        <span>৳{subtotal.toFixed(0)}</span>
                                     </div>
                                     <div className="flex justify-between text-slate-600">
                                         <span>Delivery Charge:</span>
                                         <span>৳{delivery}</span>
                                     </div>
                                     <div className="flex justify-between text-slate-600">
-                                        <span>Discount:</span>
+                                        <span>Global Discount:</span>
                                         <span>- ৳{discount.toFixed(0)}</span>
                                     </div>
                                     {(advance > 0 || collected > 0) && (
@@ -132,7 +160,7 @@ const InvoiceGenerator = ({ orders }) => {
                                     )}
                                     <div className="flex justify-between text-lg font-bold text-slate-800 border-t border-slate-800 pt-2">
                                         <span>Total Due:</span>
-                                        <span>৳{dueAmount > 0 ? dueAmount : 0}</span>
+                                        <span>৳{dueAmount > 0 ? dueAmount.toFixed(0) : 0}</span>
                                     </div>
                                 </div>
                             </div>
