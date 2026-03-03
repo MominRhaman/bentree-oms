@@ -27,6 +27,12 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
     useEffect(() => {
         if (order) {
             const deepCopy = JSON.parse(JSON.stringify(order));
+            // Ensure products have discount fields
+            deepCopy.products = deepCopy.products.map(p => ({
+                ...p,
+                discountType: p.discountType || 'Fixed',
+                discountValue: p.discountValue || 0
+            }));
             setEditedOrder(deepCopy);
             setErrors({});
             setPartialReturnItems(new Set()); // Reset on open
@@ -58,8 +64,8 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
         let qtyHeldByOrder = 0;
         // Fix: Find the original product by index to see what was originally held at this position
         const originalProdAtIndex = order.products[index];
-        if (originalProdAtIndex && 
-            originalProdAtIndex.code === prod.code && 
+        if (originalProdAtIndex &&
+            originalProdAtIndex.code === prod.code &&
             originalProdAtIndex.size === prod.size) {
             qtyHeldByOrder = Number(originalProdAtIndex.qty || 0);
         }
@@ -81,7 +87,17 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
     // --- Calculation Logic ---
     const recalculateTotals = (currentOrder) => {
         const products = currentOrder.products || [];
-        const subtotal = products.reduce((sum, p) => sum + (Number(p.price || 0) * Number(p.qty || 0)), 0);
+        // Inside recalculateTotals
+        const subtotal = products.reduce((sum, p) => {
+            const basePrice = Number(p.price || 0) * Number(p.qty || 0);
+            let itemDiscount = 0;
+            if (p.discountType === 'Percent') {
+                itemDiscount = basePrice * (Number(p.discountValue || 0) / 100);
+            } else {
+                itemDiscount = Number(p.discountValue || 0);
+            }
+            return sum + (basePrice - itemDiscount);
+        }, 0);
 
         let discount = 0;
         if (currentOrder.discountType === 'Percent') {
@@ -613,16 +629,16 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                                         {isEditing ? (
                                             <>
                                                 <div className="flex-1 relative">
-                                                    <input 
+                                                    <input
                                                         ref={el => productRefs.current[i] = el}
-                                                        className={`w-full p-2 border rounded text-sm bg-white ${hasError ? 'border-red-500 bg-red-50' : ''}`} 
-                                                        value={p.code} 
-                                                        onChange={e => handleProductChange(i, 'code', e.target.value)} 
+                                                        className={`w-full p-2 border rounded text-sm bg-white ${hasError ? 'border-red-500 bg-red-50' : ''}`}
+                                                        value={p.code}
+                                                        onChange={e => handleProductChange(i, 'code', e.target.value)}
                                                         onBlur={() => handleCodeBlur(i)}
                                                         autoComplete="off"
-                                                        placeholder="Code" 
+                                                        placeholder="Code"
                                                     />
-                                                    
+
                                                     {/* NEW: DROPDOWN UI LOOP */}
                                                     {suggestions.index === i && suggestions.list.length > 0 && (
                                                         <div ref={suggestionRef} className="absolute left-0 right-0 top-full bg-white border border-slate-200 rounded-b-lg shadow-xl z-[100] max-h-60 overflow-y-auto">
@@ -661,6 +677,25 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                                                     <div className="w-20"><input type="number" className="w-full p-2 border rounded text-sm bg-white" value={p.qty} onChange={e => handleProductChange(i, 'qty', e.target.value)} onWheel={disableScroll} /></div>
                                                     <div className="w-24"><input type="number" className="w-full p-2 border rounded text-sm bg-white" value={p.price} onChange={e => handleProductChange(i, 'price', e.target.value)} onWheel={disableScroll} /></div>
 
+                                                    {/* Added after the Price input in the items map */}
+                                                    <div className="flex gap-1 w-32 bg-white border rounded">
+                                                        <input
+                                                            type="number"
+                                                            className="w-full p-1 text-sm border-0 focus:ring-0"
+                                                            placeholder="Disc"
+                                                            value={p.discountValue}
+                                                            onChange={e => handleProductChange(i, 'discountValue', e.target.value)}
+                                                        />
+                                                        <select
+                                                            className="p-1 text-[10px] bg-slate-100 border-l border-slate-200"
+                                                            value={p.discountType}
+                                                            onChange={e => handleProductChange(i, 'discountType', e.target.value)}
+                                                        >
+                                                            <option value="Fixed">৳</option>
+                                                            <option value="Percent">%</option>
+                                                        </select>
+                                                    </div>
+
                                                     <div className="flex items-center gap-3 ml-2 border-l pl-3 border-slate-300">
                                                         {isReturnMode && (
                                                             <label className="flex flex-col items-center cursor-pointer group">
@@ -680,6 +715,12 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                                         ) : (
                                             <div className="flex justify-between items-center w-full">
                                                 <div><p className="font-bold text-slate-800">{p.code}</p><p className="text-xs text-slate-500">Size: {p.size} | Qty: {p.qty}</p></div>
+                                                {/* Inside the non-editing view */}
+                                                {(Number(p.discountValue) > 0) && (
+                                                    <p className="text-[10px] text-red-500 italic">
+                                                        Discount: {p.discountType === 'Percent' ? `${p.discountValue}%` : `৳${p.discountValue}`}
+                                                    </p>
+                                                )}
                                                 <p className="font-medium">৳{Number(p.price) * Number(p.qty)}</p>
                                             </div>
                                         )}
@@ -695,9 +736,15 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                             <div className="flex justify-between text-sm"><span className="text-slate-500">Subtotal</span><span className="font-medium">৳ {editedOrder.subtotal}</span></div>
 
                             <div className="flex justify-between text-sm items-center">
-                                <span className="text-slate-500">Discount</span>
+                                <span className="text-slate-500">Global Discount</span>
                                 {isEditing ?
-                                    <input className="w-24 p-1 border rounded text-right" value={editedOrder.discountValue} onChange={e => handleInputChange('discountValue', e.target.value)} onWheel={disableScroll} /> :
+                                    <div className="flex gap-2">
+                                        <select className="p-1 text-xs border rounded" value={editedOrder.discountType} onChange={e => handleInputChange('discountType', e.target.value)}>
+                                            <option value="Fixed">৳</option>
+                                            <option value="Percent">%</option>
+                                        </select>
+                                        <input className="w-24 p-1 border rounded text-right" value={editedOrder.discountValue} onChange={e => handleInputChange('discountValue', e.target.value)} onWheel={disableScroll} />
+                                    </div> :
                                     <span className="text-red-500">- ৳ {order.discountType === 'Percent' ? (order.subtotal * (order.discountValue / 100)) : order.discountValue}</span>
                                 }
                             </div>

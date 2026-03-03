@@ -26,7 +26,9 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
             code: p.code,
             size: p.size || '',
             qty: p.qty,
-            price: p.price
+            price: p.price,
+            discountType: p.discountType || 'amount', // New
+            discountValue: p.discountValue || ''      // New
         }))
     );
     const [newDeliveryCost, setNewDeliveryCost] = useState('');
@@ -44,7 +46,7 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
         if (!prod.code) return null;
         const item = inventory.find(i => i.code && i.code.toUpperCase() === prod.code.trim().toUpperCase());
 
-        if (!item) return "Product not found";
+        // if (!item) return "Product not found";
 
         const qtyNeeded = Number(prod.qty);
         if (item.type === 'Variable') {
@@ -62,7 +64,17 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
 
     // --- REVISED CALCULATIONS ---
     // A. Calculate New Product Value (After Discount)
-    const newProductTotal = newProducts.reduce((acc, p) => acc + (Number(p.price || 0) * Number(p.qty || 0)), 0);
+    // Inside REVISED CALCULATIONS
+    const newProductTotal = newProducts.reduce((acc, p) => {
+        const itemBase = Number(p.price || 0) * Number(p.qty || 0);
+        let itemDisc = 0;
+        if (p.discountType === 'percent') {
+            itemDisc = (itemBase * Number(p.discountValue || 0)) / 100;
+        } else {
+            itemDisc = Number(p.discountValue || 0);
+        }
+        return acc + (itemBase - itemDisc); // Subtotal is now net of item discounts
+    }, 0);
 
     let actualDiscountAmount = 0;
     const rawDiscount = Number(discountInput || 0);
@@ -328,7 +340,9 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
                 code: p.code.toUpperCase(),
                 size: p.size?.toUpperCase() || '',
                 price: Number(p.price),
-                qty: Number(p.qty)
+                qty: Number(p.qty),
+                iscountValue: Number(p.discountValue || 0),
+                discountType: p.discountType
             })),
             priceDeviation: finalAdjustment,
             exchangeDate: new Date().toISOString().split('T')[0],
@@ -347,7 +361,9 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
                 code: p.code.toUpperCase(),
                 size: p.size?.toUpperCase() || '',
                 price: Number(p.price),
-                qty: Number(p.qty)
+                qty: Number(p.qty),
+                iscountValue: Number(p.discountValue || 0),
+                discountType: p.discountType
             })),
             subtotal: newProductTotal, // Requirement: Subtotal = Product Value
             discountValue: actualDiscountAmount,
@@ -499,7 +515,7 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
 
                                     {/* Secondary Inputs Container */}
                                     <div className="lg:h-1/2 flex items-end gap-8 w-full">
-                                        <div className="lg:w-24 flex flex-col justify-start">
+                                        <div className="w-16">
                                             <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Size</label>
                                             {availableSizes.length > 0 ? (
                                                 <select
@@ -520,7 +536,7 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
                                             )}
                                         </div>
 
-                                        <div className="lg:w-16">
+                                        <div className="w-12">
                                             <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Qty</label>
                                             <input
                                                 type="number"
@@ -532,7 +548,7 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
                                             />
                                         </div>
 
-                                        <div className="lg:w-24">
+                                        <div className="w-14">
                                             <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Price</label>
                                             <input
                                                 type="number"
@@ -542,6 +558,26 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
                                                 className="border px-2 py-1.5 w-full rounded text-sm"
                                                 required
                                             />
+                                        </div>
+                                        {/* Added this block inside the newProducts.map loop */}
+                                        <div className="w-16">
+                                            <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Item Disc.</label>
+                                            <div className="flex shadow-sm">
+                                                <input
+                                                    type="number"
+                                                    className="w-full border px-1 py-1.5 rounded-l text-xs"
+                                                    value={p.discountValue}
+                                                    onChange={e => updateNewProduct(i, 'discountValue', e.target.value)}
+                                                />
+                                                <select
+                                                    className="border border-l-0 rounded-r bg-slate-100 text-[10px]"
+                                                    value={p.discountType}
+                                                    onChange={e => updateNewProduct(i, 'discountType', e.target.value)}
+                                                >
+                                                    <option value="amount">৳</option>
+                                                    <option value="percent">%</option>
+                                                </select>
+                                            </div>
                                         </div>
                                     </div>
                                     {/* Actions Container */}
