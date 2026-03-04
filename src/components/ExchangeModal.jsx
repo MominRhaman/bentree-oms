@@ -12,6 +12,9 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
     const suggestionRef = useRef(null);
     const productRefs = useRef([]);
 
+    // --- FIX: Added missing state declaration ---
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
     // Debug: Log props to help identify the issue
     console.log('ExchangeModal Props:', {
         hasOnCreate: !!onCreate,
@@ -41,12 +44,14 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
     const [partialExchangeItems, setPartialExchangeItems] = useState(new Set());
 
     // --- Stock Logic Helper ---
-    const getStockError = (prod) => {
+    const getStockError = (prod, isBlur = false) => {
         if (!inventory || !inventory.length) return null;
         if (!prod.code) return null;
         const item = inventory.find(i => i.code && i.code.toUpperCase() === prod.code.trim().toUpperCase());
 
-        // if (!item) return "Product not found";
+        if (!item) {
+            return isBlur ? "Product not found" : null;
+        }
 
         const qtyNeeded = Number(prod.qty);
         if (item.type === 'Variable') {
@@ -68,7 +73,7 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
     const newProductTotal = newProducts.reduce((acc, p) => {
         const itemBase = Number(p.price || 0) * Number(p.qty || 0);
         let itemDisc = 0;
-        if (p.discountType === 'percent') {
+        if (p.discountType === 'Percent') {
             itemDisc = (itemBase * Number(p.discountValue || 0)) / 100;
         } else {
             itemDisc = Number(p.discountValue || 0);
@@ -111,6 +116,7 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
     const systemNewGrandTotal = newProductValue + totalSystemDeliveryCharge;
 
     const togglePartialExchange = (index) => {
+        if (isSubmitting) return;
         setPartialExchangeItems(prev => {
             const next = new Set(prev);
             if (next.has(index)) next.delete(index);
@@ -156,6 +162,14 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
     };
 
     const handleCodeBlur = (index) => {
+        // Trigger the "Not Found" check ONLY here
+        const error = getStockError(newProducts[index], true);
+        setErrors(prev => {
+            const n = { ...prev };
+            if (error) n[index] = error;
+            else delete n[index];
+            return n;
+        });
         setTimeout(() => { setSuggestions({ index: null, list: [] }); }, 150);
     };
 
@@ -306,11 +320,13 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        if (isSubmitting) return;
         // BLOCK IF ERRORS EXIST
         if (Object.keys(errors).length > 0) {
             alert("Cannot confirm: Please fix the product errors (Stock/Not Found) first.");
             return;
         }
+        setIsSubmitting(true);
 
         if (partialExchangeItems.size > 0 && !isCompletingPartialExchange) {
             await handlePartialExchangeProcess();
@@ -388,9 +404,15 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
             ]
         };
 
+        try {
         await onConfirm(order.id, 'Exchanged', updatedPayload);
         onClose();
         alert(`Exchange completed successfully!`);
+        } catch (error) {
+            console.error(error);
+            setIsSubmitting(false);
+            alert("Submission failed.");
+        }
     };
 
     const updateNewProduct = (idx, field, val) => {
@@ -424,7 +446,7 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
         setNewProducts(np);
 
         // Update error state immediately
-        const error = getStockError(np[idx]);
+        const error = getStockError(np[idx, false]);
         setErrors(prev => {
             const n = { ...prev };
             if (error) n[idx] = error; else delete n[idx];
@@ -484,12 +506,12 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
                                             onChange={e => updateNewProduct(i, 'code', e.target.value)}
                                             onBlur={() => handleCodeBlur(i)}
                                             autoComplete="off"
-                                            className={`border px-2 py-1.5 w-full rounded text-sm font-medium ${hasError ? 'border-red-500 bg-red-50' : ''}`}
+                                            className={`border px-2 py-1.5 w-full rounded text-sm font-medium ${hasError === "Product not found" ? 'border-red-500 bg-red-50' : 'border-slate-300'}`}
                                             required
                                         />
                                         {/* Dropdown Suggestions */}
                                         {suggestions.index === i && suggestions.list.length > 0 && (
-                                            <div ref={suggestionRef} className="absolute left-0 right-0 top-full bg-white border border-slate-200 rounded-b-lg shadow-xl z-[100] max-h-48 overflow-y-auto">
+                                            <div ref={suggestionRef} className="absolute left-0 right-0 top-full bg-white border border-slate-200 rounded-b-lg shadow-xl z-[100] max-h-60 overflow-y-auto">
                                                 {suggestions.list.map((item) => (
                                                     <button key={item.id} type="button" onMouseDown={(e) => { e.preventDefault(); selectSuggestion(i, item); }} className="w-full text-left px-3 py-2 hover:bg-emerald-50 border-b border-slate-50 last:border-0">
                                                         <div className="flex justify-between items-center mb-0.5">
@@ -574,8 +596,8 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
                                                     value={p.discountType}
                                                     onChange={e => updateNewProduct(i, 'discountType', e.target.value)}
                                                 >
-                                                    <option value="amount">৳</option>
-                                                    <option value="percent">%</option>
+                                                    <option value="Fixed">৳</option>
+                                                    <option value="Percent">%</option>
                                                 </select>
                                             </div>
                                         </div>

@@ -55,11 +55,13 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
     };
 
     // --- Stock Logic ---
-    const getStockError = (prod, index) => {
+    const getStockError = (prod, index, isBlur = false) => {
         if (!inventory || !inventory.length) return null;
         if (!prod.code) return null;
-        const item = inventory.find(i => i.code && i.code.toUpperCase() === prod.code.toUpperCase());
-        if (!item) return "Product not found";
+        const item = inventory.find(i => i.code && i.code.toUpperCase() === prod.code.trim().toUpperCase());
+        if (!item) {
+            return isBlur ? "Product not found" : null;
+        }
 
         let qtyHeldByOrder = 0;
         // Fix: Find the original product by index to see what was originally held at this position
@@ -138,6 +140,16 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
     };
 
     const handleCodeBlur = (index) => {
+        // Validation on blur to show "Not Found" if typing is truly completed
+        const prod = editedOrder.products[index];
+        const error = getStockError(prod, index, true);
+        setErrors(prev => {
+            const n = { ...prev };
+            if (error) n[index] = error;
+            else delete n[index];
+            return n;
+        });
+
         setTimeout(() => { setSuggestions({ index: null, list: [] }); }, 150);
     };
 
@@ -175,7 +187,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
 
         setEditedOrder(prev => recalculateTotals({ ...prev, products: newProducts }));
 
-        const error = getStockError(newProducts[index], index);
+        const error = getStockError(newProducts[index], index, false);
         setErrors(prev => {
             const n = { ...prev };
             if (error) n[index] = error;
