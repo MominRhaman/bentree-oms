@@ -153,7 +153,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
     }, [formData.recipientPhone, formData.products, existingOrders]);
 
     // --- STRICT INVENTORY CHECKER ---
-    const getStockError = (p) => {
+    const getStockError = (p, allProducts = []) => {
         if (!p.code) return null;
         const normalizedCode = p.code.trim().toUpperCase();
         const invItem = inventory.find(i => i.code.toUpperCase() === normalizedCode);
@@ -161,25 +161,28 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         // 1. Check if Code Exists
         if (!invItem) return "Product code not found in inventory.";
 
-        const qtyNeeded = Number(p.qty);
+        // Calculate total quantity for this specific product across ALL rows
+        const totalQtyForThisProduct = allProducts
+            .filter(item => item.code.trim().toUpperCase() === normalizedCode && item.size === p.size)
+            .reduce((sum, item) => sum + Number(item.qty || 0), 0);
+
+        const qtyNeeded = Math.max(Number(p.qty), totalQtyForThisProduct);
 
         // 2. Check Variable Stock (Size)
         if (invItem.type === 'Variable') {
-            if (!p.size) return "Size is required for this product.";
-            const sizeKey = p.size.trim().toUpperCase();
+            if (!p.size) return "Size is required.";
+            const sizeKey = Object.keys(invItem.stock || {}).find(k => k.toUpperCase() === p.size.trim().toUpperCase());
+            if (!sizeKey) return "Size not found.";
 
-            const stockKeys = Object.keys(invItem.stock || {});
-            const exactKey = stockKeys.find(k => k.toUpperCase() === sizeKey);
-
-            if (!exactKey) return `Size '${p.size}' not found. Avail: ${stockKeys.join(', ')}`;
-
-            const available = Number(invItem.stock[exactKey] || 0);
-            if (available < qtyNeeded) return `Insufficient Stock (Avail: ${available})`;
+            const available = Number(invItem.stock[sizeKey] || 0);
+            if (available <= 0) return "Out of stock";
+            if (qtyNeeded > available) return `Insufficient Stock (Avail: ${available})`;
         }
         // 3. Check Single Stock
         else {
             const available = Number(invItem.totalStock || 0);
-            if (available < qtyNeeded) return `Insufficient Stock (Avail: ${available})`;
+            if (available <= 0) return "Out of stock";
+            if (qtyNeeded > available) return `Insufficient Stock (Avail: ${available})`;
         }
         return null;
     };
@@ -343,6 +346,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         const newProducts = [...formData.products];
         newProducts[index].code = item.code;
         newProducts[index].price = item.mrp || '';
+        newProducts[index].size = item.type === 'Single' ? 'Free' : '';
         setFormData({ ...formData, products: newProducts });
         setSuggestions({ index: null, list: [] });
 
@@ -381,7 +385,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         setFormData({ ...formData, products: newProducts });
 
         // --- REAL-TIME ERROR CHECKING ---
-        const stockError = getStockError(newProducts[index]);
+        const stockError = getStockError(newProducts[index], newProducts);
 
         setErrors(prev => {
             const currentProductsErrors = prev.products ? { ...prev.products } : {};
@@ -407,8 +411,8 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
     const handleCodeBlur = (index) => {
         setTimeout(() => {
             const product = formData.products[index];
-            const stockError = getStockError(product);
-            if (stockError === "Product code not found in inventory.") {
+            const stockError = getStockError(formData.products[index], formData.products);
+            if (stockError === "Product code not found in inventory." || stockError === "Out of stock") {
                 setErrors(prev => {
                     const currentProductsErrors = prev.products ? { ...prev.products } : {};
                     const currentRowErrors = currentProductsErrors[index] ? { ...currentProductsErrors[index] } : {};
@@ -420,7 +424,10 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         }, 100); // 100ms delay to allow clicking suggestions
     };
 
-    const addProduct = () => setFormData({ ...formData, products: [...formData.products, { code: '', size: '', qty: 1, price: '', discountType: 'Fixed', discountValue: '' }] });
+    const addProduct = () => {
+        const lastProd = formData.products[formData.products.length - 1];
+    if (getStockError(lastProd, formData.products)) return;
+        setFormData({ ...formData, products: [...formData.products, { code: '', size: '', qty: 1, price: '', discountType: 'Fixed', discountValue: '' }] });};
     const removeProduct = (idx) => setFormData({ ...formData, products: formData.products.filter((_, i) => i !== idx) });
 
     return (
