@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Download, Filter, Edit, Trash2, CheckCircle, ShoppingBag, XCircle, Search, ArrowLeft } from 'lucide-react';
+import { Download, Filter, Edit, Trash2, CheckCircle, ShoppingBag, XCircle, Search, ArrowLeft, CreditCard } from 'lucide-react';
 import SearchBar from './SearchBar';
 import OrderDetailsPopup from './OrderDetailsPopup';
 import { INVENTORY_CATEGORIES, downloadCSV } from '../utils';
@@ -13,6 +13,7 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
     // --- Standard Filter States ---
     const [searchTerm, setSearchTerm] = useState('');
     const [catFilter, setCatFilter] = useState('');
+    const [paymentFilter, setPaymentFilter] = useState('');
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
     const [selectedOrder, setSelectedOrder] = useState(null);
@@ -45,6 +46,11 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
 
         if (startDate) processedOrders = processedOrders.filter(o => o.date >= startDate);
         if (endDate) processedOrders = processedOrders.filter(o => o.date <= endDate);
+
+         // NEW: Payment Mode Filter Logic
+        if (paymentFilter) {
+            processedOrders = processedOrders.filter(o => (o.storePaymentMode || 'Cash') === paymentFilter);
+        }
 
         if (searchTerm) {
             const term = searchTerm.toLowerCase();
@@ -112,7 +118,7 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
         totals.orderCount = uniqueOrderIds.size;
 
         return { salesData: data, totals };
-    }, [orders, inventory, startDate, endDate, searchTerm, catFilter, isCheckoutMode]);
+    }, [orders, inventory, startDate, endDate, searchTerm, catFilter, paymentFilter, isCheckoutMode]);
 
     // --- Input Handlers (Primary Order Style) ---
     const handleIdChange = (orderId, value) => {
@@ -318,6 +324,21 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
                                     {INVENTORY_CATEGORIES.map(c => <option key={c}>{c}</option>)}
                                 </select>
                                 <Filter size={14} className="absolute left-2.5 top-3 text-slate-400 pointer-events-none" />
+                            </div>
+
+                            {/* NEW: Payment Mode Filter UI */}
+                            <div className="relative">
+                                <select 
+                                    className="p-2 pl-8 border rounded text-sm bg-white outline-none w-full md:w-40 appearance-none cursor-pointer hover:border-emerald-400 transition-colors" 
+                                    value={paymentFilter} 
+                                    onChange={e => setPaymentFilter(e.target.value)}
+                                >
+                                    <option value="">All Payments</option>
+                                    <option value="Cash">Cash</option>
+                                    <option value="Card">Card</option>
+                                    <option value="MFS">MFS</option>
+                                </select>
+                                <CreditCard size={14} className="absolute left-2.5 top-3 text-slate-400 pointer-events-none" />
                             </div>
                         </div>
                         <div className="flex flex-col md:flex-row gap-2 w-full md:w-auto">
