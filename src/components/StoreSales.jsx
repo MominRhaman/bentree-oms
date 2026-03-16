@@ -454,10 +454,10 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
                             </tbody>
                             <tfoot className="sticky bottom-0 bg-slate-100 border-t-2 border-slate-200 font-bold text-slate-700 z-10 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
                                 <tr>
-                                    <td className="p-3 text-right uppercase text-xs text-slate-500" colSpan="7">
+                                    <td className="p-3 text-right uppercase text-xs text-slate-500" colSpan="3">
                                         Total Orders: <span className="text-slate-900 text-sm ml-1">{totals.orderCount}</span> | TOTALS
                                     </td>
-                                    <td className="p-3 text-center">{totals.unitSold}</td>
+                                    <td className="p-3 text-center" colSpan="4">{totals.unitSold}</td>
                                     <td className="p-3 text-right text-emerald-800">৳{totals.revenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                                     <td className={`p-3 text-right ${totals.profitLoss >= 0 ? 'text-emerald-800' : 'text-red-700'}`}>৳{totals.profitLoss.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                                     <td className="p-3" colSpan="3"></td>
