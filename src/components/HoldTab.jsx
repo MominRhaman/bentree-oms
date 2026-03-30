@@ -15,7 +15,7 @@ const HoldTab = ({ orders, onUpdate }) => {
             {/* Header */}
             <div className="bg-white p-4 rounded-lg shadow-sm flex flex-col md:flex-row md:justify-between md:items-center gap-4">
                 <h2 className="text-xl font-bold text-slate-800">On-Hold Orders</h2>
-                
+
                 <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
                     <div className="w-full md:w-auto">
                         <SearchBar searchTerm={searchTerm} setSearchTerm={setSearchTerm} placeholder="Search by Phone..." />

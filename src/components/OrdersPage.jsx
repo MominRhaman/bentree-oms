@@ -188,8 +188,8 @@ const OrdersPage = () => {
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
               className={`flex-1 py-3 px-4 rounded-lg font-semibold transition-all ${activeTab === tab.key
-                  ? 'bg-blue-600 text-white shadow-md'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                ? 'bg-blue-600 text-white shadow-md'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                 }`}
             >
               {tab.label}

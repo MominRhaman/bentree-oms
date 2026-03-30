@@ -225,14 +225,14 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
             createdAt: { seconds: Math.floor(Date.now() / 1000) },
             isPartialExchange: true,
             originalOrderId: originalOrderId,
-            subtotal: partialProductValue, 
+            subtotal: partialProductValue,
             discountValue: partialDiscount,
             discountType: 'amount',
             deliveryCharge: partialDeliveryCharge,
-            grandTotal: partialGrandTotal, 
-            dueAmount: partialGrandTotal, 
-            advanceAmount: 0, 
-            collectedAmount: 0, 
+            grandTotal: partialGrandTotal,
+            dueAmount: partialGrandTotal,
+            advanceAmount: 0,
+            collectedAmount: 0,
             exchangeDetails: partialExchangeRecord,
             exchangeHistory: [partialExchangeRecord],
             history: [{
@@ -281,8 +281,8 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
             status: originalStatus,
             subtotal: keptSubtotal,
             grandTotal: keptGrandTotal,
-            advanceAmount: adjustedOriginalCollected, 
-            collectedAmount: 0, 
+            advanceAmount: adjustedOriginalCollected,
+            collectedAmount: 0,
             dueAmount: keptDueAmount,
             history: [
                 ...(order.history || []),
@@ -357,8 +357,8 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
             : null;
 
         const itemsBeingReturned = lastExchange
-            ? lastExchange.newProducts   
-            : order.products;            
+            ? lastExchange.newProducts
+            : order.products;
 
         const mappedNewProducts = newProducts.map(p => ({
             ...p,
@@ -394,10 +394,10 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
                 discountValue: Number(p.discountValue || 0),
                 discountType: p.discountType
             })),
-            subtotal: newProductTotal, 
+            subtotal: newProductTotal,
             discountValue: actualDiscountAmount,
             discountType: discountType === 'percent' ? 'Percent' : 'Amount',
-            grandTotal: systemNewGrandTotal, 
+            grandTotal: systemNewGrandTotal,
             deliveryCharge: totalSystemDeliveryCharge,
             dueAmount: finalAdjustment > 0 ? finalAdjustment : 0,
             refundAmount: finalAdjustment < 0 ? Math.abs(finalAdjustment) : 0,

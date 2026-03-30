@@ -1,15 +1,17 @@
 import React, { useState, useMemo, useRef } from 'react';
-import { Package, DollarSign, Plus, X, Edit, Trash2, Upload, Download } from 'lucide-react';
+import { Package, DollarSign, Plus, X, Edit, Trash2, Upload, Download, Printer } from 'lucide-react';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db, appId } from '../firebase';
 import { INVENTORY_CATEGORIES, SIZES, downloadCSV } from '../utils';
 import SearchBar from './SearchBar';
+import BarcodePrintView from './BarcodePrintView';
 
 const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) => {
     // --- Form State ---
     const [form, setForm] = useState({
         id: '',
         date: new Date().toISOString().split('T')[0],
+        productName: '',
         code: '',
         type: 'Variable',
         category: 'Panjabi',
@@ -24,6 +26,8 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
     // --- UI States ---
     const [showAddForm, setShowAddForm] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
+    const [printQueue, setPrintQueue] = useState([]);
+    const [showPrintView, setShowPrintView] = useState(false);
 
     // --- Filter States ---
     const [searchTerm, setSearchTerm] = useState('');
@@ -94,10 +98,23 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
             // Cross-reference with Orders to calculate sales performance
             orders.forEach(o => {
                 if (o.status !== 'Cancelled' && o.status !== 'Returned') {
+                    const orderSubtotal = Number(o.subtotal || 0);
+                    const orderDiscount = Number(o.totalDiscount || 0);
+
                     (o.products || []).forEach(p => {
                         if (p.code && p.code.toUpperCase() === item.code.toUpperCase()) {
-                            soldQty += Number(p.qty || 0);
-                            revenue += Number(p.price || 0) * Number(p.qty || 0);
+                            const qtySoldInOrder = Number(p.qty || 0);
+                            const pricePerUnit = Number(p.price || 0);
+                            const lineTotal = pricePerUnit * qtySoldInOrder;
+
+                            soldQty += qtySoldInOrder;
+
+                            let proportionalDiscount = 0;
+                            if (orderSubtotal > 0) {
+                                proportionalDiscount = (lineTotal / orderSubtotal) * orderDiscount;
+                            }
+
+                            revenue += (lineTotal - proportionalDiscount);
                         }
                     });
                 }
@@ -131,6 +148,40 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
             return acc;
         }, { totalQty: 0, totalValue: 0 });
     }, [inventoryStats]);
+
+    // --- NEW: Prepare Barcode Print Logic based on Stock Qty ---
+    const handlePreparePrint = (item) => {
+        const labels = [];
+        const itemInfo = {
+            code: item.code,
+            productName: item.productName || item.category,
+            category: item.category,
+            mrp: item.mrp
+        };
+
+        if (item.type === 'Variable') {
+            Object.entries(item.stock || {}).forEach(([size, qty]) => {
+                const count = Number(qty || 0);
+                // Loop through the available stock quantity to generate multiple labels
+                for (let i = 0; i < count; i++) {
+                    labels.push({ ...itemInfo, size: size });
+                }
+            });
+        } else {
+            const count = Number(item.totalStock || 0);
+            for (let i = 0; i < count; i++) {
+                labels.push({ ...itemInfo, size: 'Free' });
+            }
+        }
+
+        if (labels.length === 0) {
+            alert("No stock available to print barcodes.");
+            return;
+        }
+
+        setPrintQueue(labels);
+        setShowPrintView(true);
+    };
 
     // --- Handlers ---
     const handleEditClick = (item) => {
@@ -183,6 +234,7 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
 
         const payload = {
             date: form.date,
+            productName: form.productName,
             code: normalizedCode,
             type: form.type,
             category: form.category,
@@ -220,8 +272,8 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
             'Total Cost': i.totalCost,
             'Total Value': i.totalMrpValue,
             'Sold Qty': i.soldQty,
-            Revenue: i.revenue,
-            Profit: i.deviation,
+            Revenue: Number(i.revenue.toFixed(2)),
+            Profit: Number(i.deviation.toFixed(2)),
             'Added By': i.addedBy,
             'Last Edited': i.lastEditedBy,
         }));
@@ -241,7 +293,7 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
 
             // Standardize headers (cleaning quotes and spaces)
             const headers = rows[0].split(',').map(h => h.trim().toLowerCase().replace(/['"]+/g, ''));
-            
+
             const getIdx = (key) => headers.findIndex(h => h === key); // Exact match for standard sequence
 
             const idxDate = getIdx('date');
@@ -352,7 +404,7 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
                         <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100 flex justify-between items-center">
                             <div>
                                 <h3 className="text-slate-500 font-bold text-xs uppercase">Total Asset Value</h3>
-                                <p className="text-2xl font-bold text-emerald-700">৳{grandTotals.totalValue.toLocaleString()}</p>
+                                <p className="text-2xl font-bold text-emerald-700">৳{Number(grandTotals.totalValue.toFixed(2)).toLocaleString()}</p>
                             </div>
                             <DollarSign size={32} className="text-emerald-200" />
                         </div>
@@ -384,6 +436,10 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
                             <div>
                                 <label className="text-xs font-bold text-slate-500">Date</label>
                                 <input type="date" className="w-full p-2 border rounded" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} required />
+                            </div>
+                            <div className="md:col-span-1">
+                                <label className="text-xs font-bold text-slate-500">Product Name</label>
+                                <input className="w-full p-2 border rounded" placeholder="e.g. Name" value={form.productName} onChange={e => setForm({ ...form, productName: e.target.value })} required />
                             </div>
                             <div>
                                 <label className="text-xs font-bold text-slate-500">Code</label>
@@ -483,9 +539,9 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
                             <span className="text-slate-300">-</span>
                             <input type="date" className="text-xs outline-none text-slate-600 bg-transparent" value={historyEnd} onChange={e => setHistoryEnd(e.target.value)} />
                         </div>
-                        
+
                         <input type="file" accept=".csv" ref={fileInputRef} className="hidden" onChange={handleImportCSV} />
-                        
+
                         <div className="flex gap-2">
                             <button onClick={() => fileInputRef.current.click()} className="flex items-center justify-center gap-1 text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded text-sm font-medium transition-colors w-1/2 md:w-auto">
                                 <Upload size={16} /> Import
@@ -502,7 +558,7 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
                     <table className="w-full text-sm text-left min-w-[900px]">
                         <thead className="bg-white text-slate-600 font-bold border-b sticky top-0 z-10 shadow-sm">
                             <tr>
-                                <th className="p-3">Code</th>
+                                <th className="p-3">Product /Code</th>
                                 <th className="p-3">Category</th>
                                 <th className="p-3">Location</th>
                                 <th className="p-3 text-center">Stock</th>
@@ -519,7 +575,10 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
                                 const loc = locations.find(l => l.id === item.locationId);
                                 return (
                                     <tr key={item.id} className="hover:bg-slate-50 transition-colors">
-                                        <td className="p-3 font-medium text-slate-800">{item.code}</td>
+                                        <td className="p-3">
+                                            <p className="font-bold text-slate-800">{item.productName || 'N/A'}</p>
+                                            <p className="text-[10px] font-mono text-slate-400">{item.code}</p>
+                                        </td>
                                         <td className="p-3 text-xs text-slate-500">{item.category}</td>
                                         <td className="p-3 text-xs text-slate-600">
                                             {loc?.numbering} {item.shelfRow ? `- ${item.shelfRow}` : ''}
@@ -534,11 +593,11 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
                                                 </div>
                                             )}
                                         </td>
-                                        <td className="p-3 text-right text-slate-600">৳{item.unitCost}</td>
-                                        <td className="p-3 text-right text-slate-600">৳{item.totalMrpValue}</td>
+                                        <td className="p-3 text-right text-slate-600">৳{Number(item.unitCost.toFixed(2))}</td>
+                                        <td className="p-3 text-right text-slate-600">৳{Number(item.totalMrpValue.toFixed(2))}</td>
                                         <td className="p-3 text-right">
-                                            <div className="font-bold text-emerald-600">৳{item.deviation}</div>
-                                            <div className="text-[10px] text-slate-400">Rev: {item.revenue}</div>
+                                            <div className="font-bold text-emerald-600">৳{Number(item.deviation.toFixed(2))}</div>
+                                            <div className="text-[10px] text-slate-400">Rev: {Number(item.revenue.toFixed(2))}</div>
                                         </td>
                                         <td className="p-3 text-xs text-slate-500 truncate max-w-[100px]" title={item.addedBy}>
                                             {item.addedBy || '-'}
@@ -548,6 +607,14 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
                                         </td>
                                         <td className="p-3 text-center">
                                             <div className="flex items-center justify-center gap-2">
+                                                {/* BARCODE PRINT BUTTON */}
+                                                <button
+                                                    onClick={() => handlePreparePrint(item)}
+                                                    className="text-emerald-600 hover:bg-emerald-50 p-1.5 rounded transition-colors"
+                                                    title="Print Barcodes"
+                                                >
+                                                    <Printer size={16} />
+                                                </button>
                                                 <button
                                                     onClick={() => handleEditClick(item)}
                                                     className="text-blue-500 hover:bg-blue-50 p-1.5 rounded transition-colors"
@@ -578,6 +645,17 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
                     </table>
                 </div>
             </div>
+
+            {/* PRINT VIEW OVERLAY */}
+            {showPrintView && (
+                <BarcodePrintView
+                    items={printQueue}
+                    onClose={() => {
+                        setShowPrintView(false);
+                        setPrintQueue([]);
+                    }}
+                />
+            )}
         </div>
     );
 };

@@ -22,7 +22,7 @@ const SalesReports = ({ orders, inventory }) => {
         // 1. Date Filter
         if (startDate) filteredOrders = filteredOrders.filter(o => o.date >= startDate);
         if (endDate) filteredOrders = filteredOrders.filter(o => o.date <= endDate);
-        
+
         // 2. Platform Filter
         if (platformFilter && platformFilter !== "") {
             if (platformFilter === 'Store') {
@@ -46,10 +46,10 @@ const SalesReports = ({ orders, inventory }) => {
         const safeNum = (v) => Number(v) || 0;
 
         // 4. Identify Orders (Using String() wrapper to prevent crashes)
-        const onlineDelivered = filteredOrders.filter(o => 
+        const onlineDelivered = filteredOrders.filter(o =>
             o.type === 'Online' && String(o.status || '').toLowerCase() === 'delivered'
         );
-        const returns = filteredOrders.filter(o => 
+        const returns = filteredOrders.filter(o =>
             o.type === 'Online' && String(o.status || '').toLowerCase() === 'returned'
         );
 
@@ -58,13 +58,13 @@ const SalesReports = ({ orders, inventory }) => {
             const status = String(o.status || '').toLowerCase(); // FIX APPLIED HERE
             const isOnlineDelivered = o.type === 'Online' && status === 'delivered';
             const isStoreValid = o.type === 'Store' && status !== 'cancelled' && status !== 'returned';
-            
+
             return isOnlineDelivered || isStoreValid;
         });
 
         const data = [];
         const uniqueOrderIds = new Set();
-        let totalDiscount = 0; 
+        let totalDiscount = 0;
 
         realizedOrders.forEach(order => {
             uniqueOrderIds.add(order.id);
@@ -73,16 +73,16 @@ const SalesReports = ({ orders, inventory }) => {
             const addedBy = order.addedBy || 'System';
 
             const orderSubtotal = safeNum(order.subtotal);
-            
+
             // --- Discount Calculation ---
             let orderDiscount = safeNum(order.discountValue);
             if (order.discountType === 'Percent') {
                 orderDiscount = orderSubtotal * (orderDiscount / 100);
             }
-            
+
             // --- UPDATED: Include Deductions in Total Discount ---
-            const revenueAdjustment = Math.abs(safeNum(order.revenueAdjustment)); 
-            
+            const revenueAdjustment = Math.abs(safeNum(order.revenueAdjustment));
+
             // Add both standard discount AND manual deduction to the total stat
             totalDiscount += (orderDiscount + revenueAdjustment);
 
@@ -140,9 +140,9 @@ const SalesReports = ({ orders, inventory }) => {
         // 6. Calculate Stats
         const netProductSales = data.filter(d => d.type === 'Online').reduce((acc, item) => acc + item.revenue, 0);
         const storeSales = data.filter(d => d.type === 'Store').reduce((acc, item) => acc + item.revenue, 0);
-        
+
         // --- UPDATED DELIVERY LOGIC START ---
-        
+
         // A. Baseline Income: Only count Delivered orders
         let deliveryIncome = onlineDelivered.reduce((acc, o) => acc + safeNum(o.deliveryCharge), 0);
         let returnDeliveryLoss = 0;
@@ -160,7 +160,7 @@ const SalesReports = ({ orders, inventory }) => {
                 returnDeliveryLoss += originalCharge;
             }
         });
-        
+
         // --- UPDATED DELIVERY LOGIC END ---
 
         // Total Cash In = (Net Online Sales + Store Sales) - Return Loss
@@ -208,37 +208,37 @@ const SalesReports = ({ orders, inventory }) => {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
                 <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100 shadow-sm">
                     <h3 className="text-slate-500 font-bold text-xs mb-1 uppercase">Net Online Sales</h3>
-                    <p className="text-xl font-bold text-emerald-700">৳{stats.netProductSales.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</p>
+                    <p className="text-xl font-bold text-emerald-700">৳{stats.netProductSales.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
                     <p className="text-[10px] text-emerald-600/70 mt-1">Delivered Items</p>
                 </div>
-                
+
                 <div className="bg-purple-50 p-4 rounded-xl border border-purple-100 shadow-sm">
                     <h3 className="text-slate-500 font-bold text-xs mb-1 uppercase">Store Sales</h3>
-                    <p className="text-xl font-bold text-purple-700">৳{stats.storeSales.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</p>
+                    <p className="text-xl font-bold text-purple-700">৳{stats.storeSales.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
                     <p className="text-[10px] text-purple-600/70 mt-1">Completed Items</p>
                 </div>
-                
+
                 <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 shadow-sm">
                     <h3 className="text-slate-500 font-bold text-xs mb-1 uppercase">Delivery Income</h3>
-                    <p className="text-xl font-bold text-blue-700">৳{stats.deliveryIncome.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</p>
+                    <p className="text-xl font-bold text-blue-700">৳{stats.deliveryIncome.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
                     <p className="text-[10px] text-blue-600/70 mt-1">Net Delivery Earnings</p>
                 </div>
 
                 <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 shadow-sm">
                     <h3 className="text-slate-500 font-bold text-xs mb-1 uppercase">Total Discount</h3>
-                    <p className="text-xl font-bold text-orange-700">৳{stats.totalDiscount.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</p>
+                    <p className="text-xl font-bold text-orange-700">৳{stats.totalDiscount.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
                     <p className="text-[10px] text-orange-600/70 mt-1">Given to Customers</p>
                 </div>
-                
+
                 <div className="bg-red-50 p-4 rounded-xl border border-red-100 shadow-sm">
                     <h3 className="text-slate-500 font-bold text-xs mb-1 uppercase">Return Loss</h3>
-                    <p className="text-xl font-bold text-red-700">৳{stats.returnDeliveryLoss.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</p>
+                    <p className="text-xl font-bold text-red-700">৳{stats.returnDeliveryLoss.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
                     <p className="text-[10px] text-red-600/70 mt-1">Unpaid Delivery Fees</p>
                 </div>
-                
+
                 <div className="bg-slate-100 p-4 rounded-xl border border-slate-200 shadow-sm">
                     <h3 className="text-slate-500 font-bold text-xs mb-1 uppercase">Total Cash In</h3>
-                    <p className="text-xl font-bold text-slate-800">৳{stats.totalRevenue.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</p>
+                    <p className="text-xl font-bold text-slate-800">৳{stats.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
                     <p className="text-[10px] text-slate-500/70 mt-1">Online + Store - Returns</p>
                 </div>
             </div>
@@ -246,12 +246,12 @@ const SalesReports = ({ orders, inventory }) => {
             {/* Controls */}
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                 <div className="p-4 border-b bg-slate-50 flex flex-col md:flex-row md:justify-between md:items-center gap-4">
-                    
+
                     <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
                         <div className="w-full md:w-64">
                             <SearchBar searchTerm={searchTerm} setSearchTerm={setSearchTerm} placeholder="Search product, phone, or ID..." />
                         </div>
-                        
+
                         {/* PLATFORM FILTER */}
                         <div className="relative">
                             <select
@@ -288,9 +288,9 @@ const SalesReports = ({ orders, inventory }) => {
                             <span className="text-slate-300">-</span>
                             <input type="date" className="text-xs outline-none text-slate-600 bg-transparent cursor-pointer" value={endDate} onChange={e => setEndDate(e.target.value)} />
                         </div>
-                        
-                        <button 
-                            onClick={handleExport} 
+
+                        <button
+                            onClick={handleExport}
                             className="flex items-center justify-center gap-1 text-emerald-600 bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded text-sm font-medium transition-colors w-1/2 md:w-auto"
                         >
                             <Download size={16} /> Export
@@ -353,9 +353,9 @@ const SalesReports = ({ orders, inventory }) => {
                                     Total Orders: <span className="text-slate-900 text-sm ml-1">{totals.orderCount}</span> | TOTALS
                                 </td>
                                 <td className="p-3 text-center" colSpan="1">{totals.unitSold}</td>
-                                <td className="p-3 text-right text-emerald-800"  colSpan="5">৳{totals.revenue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                                <td className="p-3 text-right text-emerald-800" colSpan="5">৳{totals.revenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                                 <td className={`p-3 text-right ${totals.profitLoss >= 0 ? 'text-emerald-800' : 'text-red-700'}`}>
-                                    ৳{totals.profitLoss.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                                    ৳{totals.profitLoss.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </td>
                                 <td className="p-3" colSpan="2"></td>
                             </tr>
@@ -375,7 +375,7 @@ const SalesReports = ({ orders, inventory }) => {
                             default: return 'text-slate-600 bg-slate-50';
                         }
                     }}
-                    onEdit={() => {}} 
+                    onEdit={() => { }}
                 />
             )}
         </div>

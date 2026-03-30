@@ -46,7 +46,7 @@ const Sidebar = ({ activeTab, setActiveTab, userRole, onLogout, user, setUser, i
         <>
             {/* Mobile Overlay */}
             {isOpen && (
-                <div 
+                <div
                     className="fixed inset-0 bg-black bg-opacity-50 z-20 lg:hidden"
                     onClick={onClose}
                 ></div>
@@ -54,9 +54,9 @@ const Sidebar = ({ activeTab, setActiveTab, userRole, onLogout, user, setUser, i
 
             {/* Sidebar Content */}
             <div className={`fixed left-0 top-0 h-screen bg-slate-900 text-white w-64 z-30 transition-transform duration-300 ease-in-out transform ${isOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 overflow-y-auto`}>
-                
+
                 {/* Close Button (Mobile Only) */}
-                <button 
+                <button
                     onClick={onClose}
                     className="absolute top-4 right-4 text-slate-400 hover:text-white lg:hidden"
                 >
@@ -78,7 +78,7 @@ const Sidebar = ({ activeTab, setActiveTab, userRole, onLogout, user, setUser, i
                                     <Camera size={20} className="text-slate-400" />
                                 </div>
                             )}
-                            
+
                             <div className="absolute inset-0 bg-black bg-opacity-50 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                                 <Camera size={16} className="text-white" />
                             </div>
@@ -113,11 +113,11 @@ const Sidebar = ({ activeTab, setActiveTab, userRole, onLogout, user, setUser, i
                                 if (e.ctrlKey || e.metaKey) {
                                     return; // Let browser open new tab
                                 }
-                                
+
                                 // 2. Normal Click
                                 e.preventDefault();
                                 setActiveTab(item.id);
-                                onClose(); 
+                                onClose();
 
                                 // 3. Update URL with clean path
                                 const newUrl = `/${item.id}`;

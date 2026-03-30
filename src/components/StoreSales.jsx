@@ -47,7 +47,7 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
         if (startDate) processedOrders = processedOrders.filter(o => o.date >= startDate);
         if (endDate) processedOrders = processedOrders.filter(o => o.date <= endDate);
 
-         // NEW: Payment Mode Filter Logic
+        // NEW: Payment Mode Filter Logic
         if (paymentFilter) {
             processedOrders = processedOrders.filter(o => (o.storePaymentMode || 'Cash') === paymentFilter);
         }
@@ -328,9 +328,9 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
 
                             {/* NEW: Payment Mode Filter UI */}
                             <div className="relative">
-                                <select 
-                                    className="p-2 pl-8 border rounded text-sm bg-white outline-none w-full md:w-40 appearance-none cursor-pointer hover:border-emerald-400 transition-colors" 
-                                    value={paymentFilter} 
+                                <select
+                                    className="p-2 pl-8 border rounded text-sm bg-white outline-none w-full md:w-40 appearance-none cursor-pointer hover:border-emerald-400 transition-colors"
+                                    value={paymentFilter}
                                     onChange={e => setPaymentFilter(e.target.value)}
                                 >
                                     <option value="">All Payments</option>

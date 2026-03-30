@@ -426,8 +426,9 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
 
     const addProduct = () => {
         const lastProd = formData.products[formData.products.length - 1];
-    if (getStockError(lastProd, formData.products)) return;
-        setFormData({ ...formData, products: [...formData.products, { code: '', size: '', qty: 1, price: '', discountType: 'Fixed', discountValue: '' }] });};
+        if (getStockError(lastProd, formData.products)) return;
+        setFormData({ ...formData, products: [...formData.products, { code: '', size: '', qty: 1, price: '', discountType: 'Fixed', discountValue: '' }] });
+    };
     const removeProduct = (idx) => setFormData({ ...formData, products: formData.products.filter((_, i) => i !== idx) });
 
     return (

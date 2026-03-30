@@ -90,7 +90,7 @@ const DispatchTab = ({ orders, onUpdate }) => {
                         {filtered.map((order) => {
                             const isExpress = order.isExpress === true;
                             const isPending = order.status === 'Confirmed' || order.status === 'Exchanged';
-                            
+
                             // --- NEW LOGIC: Determine SL based on status group ---
                             let currentSL = 0;
                             if (isPending) {

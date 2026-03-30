@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { collection, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, arrayUnion, addDoc } from 'firebase/firestore';
 import { auth, db, appId } from './firebase';
-import { updateInventoryStock } from './utils';
+import { getStatusColor, updateInventoryStock } from './utils';
+import { useScanner } from './hooks/useScanner';
 import { Menu } from 'lucide-react';
 
 // Component Imports
@@ -36,6 +37,8 @@ function App() {
     const [userRole, setUserRole] = useState(savedRole);
     const [activeTab, setActiveTab] = useState(getInitialTab);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+    // --- NEW: SCANNER STATE ---
+    const [scannedOrder, setScannedOrder] = useState(null);
 
     const [isAuthChecking, setIsAuthChecking] = useState(true);
     const [loading, setLoading] = useState(false);
@@ -127,6 +130,22 @@ function App() {
 
         return () => { unsubOrders(); unsubInv(); unsubLoc(); unsubExp(); };
     }, [user]);
+
+    // --- SCANNER INTEGRATION ---
+    useScanner((code) => {
+        // Search orders by Merchant ID, Store ID, or Tracking ID
+        const found = orders.find(o =>
+            (o.merchantOrderId && o.merchantOrderId.toString() === code) ||
+            (o.storeOrderId && o.storeOrderId.toString() === code) ||
+            (o.trackingId && o.trackingId.toString() === code)
+        );
+
+        if (found) {
+            setScannedOrder(found);
+        } else {
+            console.log("No order found for scanned code:", code);
+        }
+    });
 
     // --- 5. INVENTORY IMPACT LOGIC: Status Changes (Cancel/Return/Restore) ---
     const handleUpdateStatus = async (orderId, newStatus, extraData = {}) => {
@@ -333,6 +352,18 @@ function App() {
                     {renderContent()}
                 </div>
             </main>
+
+            {/* --- GLOBAL SCANNER POPUP --- */}
+            {scannedOrder && (
+                <OrderDetailsPopup
+                    order={scannedOrder}
+                    onClose={() => setScannedOrder(null)}
+                    getStatusColor={getStatusColor}
+                    onEdit={handleEditOrderWithStock}
+                    onCreate={handleCreateOrder}
+                    inventory={inventory}
+                />
+            )}
         </div>
     );
 }

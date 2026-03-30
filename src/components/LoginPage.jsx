@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { AlertTriangle, User, Lock, Mail } from 'lucide-react';
-import { signInWithPopup, GoogleAuthProvider, signInAnonymously, signOut, updateProfile } from 'firebase/auth'; 
+import { signInWithPopup, GoogleAuthProvider, signInAnonymously, signOut, updateProfile } from 'firebase/auth';
 import { auth } from '../firebase';
 import { GOOGLE_ACCOUNTS, CREDENTIAL_ACCOUNTS } from '../utils';
 
@@ -37,7 +37,7 @@ const LoginPage = ({ onLogin }) => {
             try {
                 // 1. Sign in anonymously to get Firebase Token
                 const result = await signInAnonymously(auth);
-                
+
                 const role = CREDENTIAL_ACCOUNTS[userKey].role;
                 const fullName = CREDENTIAL_ACCOUNTS[userKey].name;
 
