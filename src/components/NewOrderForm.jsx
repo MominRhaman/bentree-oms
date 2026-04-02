@@ -3,6 +3,7 @@ import { Save, AlertTriangle, Plus, Trash2, XCircle, Zap } from 'lucide-react';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db, appId } from '../firebase';
 import { updateInventoryStock, disableScroll } from '../utils';
+import { useScanner } from '../hooks/useScanner';
 
 const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
     // --- State ---
@@ -45,6 +46,9 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
     const [suggestions, setSuggestions] = useState({ index: null, list: [] });
     const suggestionRef = useRef(null);
     const productRefs = useRef([]);
+    // NEW: Ref to always have latest formData inside the scanner callback without stale closure
+    const formDataRef = useRef(formData);
+    useEffect(() => { formDataRef.current = formData; }, [formData]);
 
     // --- Switch Logic (Reset Form) ---
     const switchType = (type) => {
@@ -430,6 +434,90 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         setFormData({ ...formData, products: [...formData.products, { code: '', size: '', qty: 1, price: '', discountType: 'Fixed', discountValue: '' }] });
     };
     const removeProduct = (idx) => setFormData({ ...formData, products: formData.products.filter((_, i) => i !== idx) });
+
+    // NEW: POS Scanner integration — parses CODE-SIZE barcode and auto-fills product row
+    useScanner((scannedValue) => {
+        const current = formDataRef.current;
+
+        // Parse barcode: supports "CODE-SIZE" (e.g. BT001-XL) or plain "CODE"
+        const dashIdx = scannedValue.lastIndexOf('-');
+        let parsedCode = scannedValue.toUpperCase();
+        let parsedSize = '';
+
+        if (dashIdx > 0) {
+            const possibleCode = scannedValue.substring(0, dashIdx).toUpperCase();
+            const possibleSize = scannedValue.substring(dashIdx + 1).toUpperCase();
+            // Only split if the part after dash looks like a valid size
+            const validSizes = ['S', 'M', 'L', 'XL', '2XL', '3XL', 'FREE'];
+            if (validSizes.includes(possibleSize)) {
+                parsedCode = possibleCode;
+                parsedSize = possibleSize === 'FREE' ? 'Free' : possibleSize;
+            }
+        }
+
+        // Auto-fill price from inventory
+        const invItem = inventory.find(i => i.code.toUpperCase() === parsedCode);
+
+        if (!invItem) {
+            alert(`Product code ${parsedCode} not found in inventory.`);
+            return;
+        }
+
+        // If single-type product, default size to 'Free'
+        let sizeToCheck = parsedSize;
+        if (invItem.type === 'Single') sizeToCheck = 'Free';
+
+        const currentQtyInForm = current.products
+            .filter(p => p.code.toUpperCase() === parsedCode && p.size === sizeToCheck)
+            .reduce((sum, p) => sum + Number(p.qty || 0), 0);
+
+        if (invItem.type === 'Variable') {
+            if (!sizeToCheck) {
+                alert(`Please scan a barcode that includes size for ${parsedCode}.`);
+                return;
+            }
+            const stockAvailable = Number(invItem.stock?.[sizeToCheck] || 0);
+            if (stockAvailable <= 0 || currentQtyInForm >= stockAvailable) {
+                alert(`Cannot add ${parsedCode} (${sizeToCheck}). Out of Stock!`);
+                return;
+            }
+        } else {
+            const stockAvailable = Number(invItem.totalStock || 0);
+            if (stockAvailable <= 0 || currentQtyInForm >= stockAvailable) {
+                alert(`Cannot add ${parsedCode}. Out of Stock!`);
+                return;
+            }
+        }
+
+        const autoPrice = invItem ? (invItem.mrp || '') : '';
+        const newProducts = [...current.products];
+
+        // Find the first empty row (no code yet) to fill, otherwise append a new row
+        const emptyIdx = newProducts.findIndex(p => !p.code);
+
+        if (emptyIdx !== -1) {
+            // Fill the existing empty row
+            newProducts[emptyIdx] = {
+                ...newProducts[emptyIdx],
+                code: parsedCode,
+                size: sizeToCheck,
+                price: autoPrice
+            };
+        } else {
+            // All rows are filled — append a new product row with scanned data
+            newProducts.push({
+                code: parsedCode,
+                size: sizeToCheck,
+                qty: 1,
+                price: autoPrice,
+                discountType: 'Fixed',
+                discountValue: ''
+            });
+        }
+
+        setFormData(prev => ({ ...prev, products: newProducts }));
+        setSuggestions({ index: null, list: [] }); // Close any open suggestion dropdown
+    });
 
     return (
         <div className="max-w-4xl mx-auto bg-white rounded-xl shadow-sm border border-slate-200">

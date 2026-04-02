@@ -190,6 +190,7 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
         setForm({
             id: item.id,
             date: item.date || new Date().toISOString().split('T')[0],
+            productName: item.productName || '',
             code: item.code,
             type: item.type,
             category: item.category,
@@ -234,7 +235,7 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
 
         const payload = {
             date: form.date,
-            productName: form.productName,
+            productName: form.productName ? form.productName.trim() : '',
             code: normalizedCode,
             type: form.type,
             category: form.category,
@@ -439,7 +440,7 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
                             </div>
                             <div className="md:col-span-1">
                                 <label className="text-xs font-bold text-slate-500">Product Name</label>
-                                <input className="w-full p-2 border rounded" placeholder="e.g. Name" value={form.productName} onChange={e => setForm({ ...form, productName: e.target.value })} required />
+                                <input className="w-full p-2 border rounded" placeholder="e.g. Name" value={form.productName} onChange={e => setForm({ ...form, productName: e.target.value })} />
                             </div>
                             <div>
                                 <label className="text-xs font-bold text-slate-500">Code</label>

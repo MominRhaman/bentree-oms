@@ -62,14 +62,14 @@ const BarcodePrintView = ({ items, onClose }) => {
                     <p className="text-xs text-slate-400">Total Labels generated from stock: <strong>{items.length}</strong></p>
                 </div>
                 <div className="flex gap-3">
-                    <button 
-                        onClick={onClose} 
+                    <button
+                        onClick={onClose}
                         className="px-4 py-2 text-sm font-bold bg-slate-700 hover:bg-slate-600 rounded transition-all flex items-center gap-2"
                     >
                         <X size={16} /> Close Preview
                     </button>
-                    <button 
-                        onClick={() => window.print()} 
+                    <button
+                        onClick={() => window.print()}
                         className="px-4 py-2 text-sm font-bold bg-emerald-600 hover:bg-emerald-500 rounded transition-all shadow-md flex items-center gap-2"
                     >
                         <Printer size={16} /> Print All labels
@@ -84,14 +84,14 @@ const BarcodePrintView = ({ items, onClose }) => {
                         {/* PRODUCT NAME / BRAND */}
                         <div className="text-[7px] font-bold text-slate-500 uppercase tracking-wider">Bentree</div>
                         <div className="text-[9px] font-black text-slate-900 uppercase truncate w-full text-center">{item.productName}</div>
-                        
+
                         {/* BARCODE (Using Product Code) */}
                         <div className="my-0.5">
-                            <Barcode 
-                                value={item.code} 
-                                width={1.0} 
-                                height={35} 
-                                fontSize={0} 
+                            <Barcode
+                                value={item.size && item.size !== 'Free' ? `${item.code}-${item.size}` : item.code}
+                                width={1.0}
+                                height={35}
+                                fontSize={0}
                                 margin={0}
                                 background="transparent"
                             />
