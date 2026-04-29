@@ -90,6 +90,7 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
     const handleExport = () => {
         const data = filteredOrders.map(o => {
             const totalQty = (o.products || []).reduce((sum, p) => sum + Number(p.qty || 0), 0);
+            const exportTotalMRP = (o.products || []).reduce((sum, p) => sum + (Number(p.price || 0) * Number(p.qty || 0)), 0);
             const calculatedTotalWeight = "0.20";
 
             // 1. I added this helper inside handleExport to handle symbols
@@ -113,7 +114,7 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                 'AmountToCollect(*)': o.dueAmount || 0,
                 'ItemQuantity': totalQty,
                 'ItemWeight': calculatedTotalWeight,
-                'ItemDesc': o.itemDescription || '',
+                'ItemDesc': `${totalQty} item cost: ${exportTotalMRP}`,
                 'SpecialInstruction': o.specialInstructions || o.remarks || ''
             };
         });

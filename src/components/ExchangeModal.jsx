@@ -45,7 +45,7 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
 
     // --- Stock Logic Helper ---
     const getStockError = (prod, isBlur = false) => {
-        if (!inventory || !inventory.length) return null;
+        if (!prod || !inventory || !inventory.length) return null;
         if (!prod.code) return null;
         const item = inventory.find(i => i.code && i.code.toUpperCase() === prod.code.trim().toUpperCase());
 
@@ -431,6 +431,7 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
 
     const updateNewProduct = (idx, field, val) => {
         const np = [...newProducts];
+        const updatedItem = { ...np[idx], [field]: val }
         np[idx][field] = val;
         if (field === 'code') {
             const searchVal = val.trim();
@@ -460,10 +461,11 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
         setNewProducts(np);
 
         // Update error state immediately
-        const error = getStockError(np[idx, false]);
-        setErrors(prev => {
-            const n = { ...prev };
-            if (error) n[idx] = error; else delete n[idx];
+        const error = getStockError(updatedItem); 
+    setErrors(prev => {
+        const n = { ...prev };
+        if (error) n[idx] = error; 
+        else delete n[idx];
             return n;
         });
     };

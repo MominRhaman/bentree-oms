@@ -4,9 +4,9 @@ import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db, appId } from '../firebase';
 import { INVENTORY_CATEGORIES, SIZES, downloadCSV } from '../utils';
 import SearchBar from './SearchBar';
-import BarcodePrintView from './BarcodePrintView';
 
-const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) => {
+// NEW: Accept onOpenBarcodePrint prop instead of managing print state locally
+const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, onOpenBarcodePrint }) => {
     // --- Form State ---
     const [form, setForm] = useState({
         id: '',
@@ -15,7 +15,7 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
         code: '',
         type: 'Variable',
         category: 'Panjabi',
-        stock: { M: '', L: '', XL: '', '2XL': '', '3XL': '' },
+        stock: {'XS': '', S: '', M: '', L: '', XL: '', '2XL': '', '3XL': '' },
         totalStock: '',
         unitCost: '',
         mrp: '',
@@ -26,8 +26,6 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
     // --- UI States ---
     const [showAddForm, setShowAddForm] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
-    const [printQueue, setPrintQueue] = useState([]);
-    const [showPrintView, setShowPrintView] = useState(false);
 
     // --- Filter States ---
     const [searchTerm, setSearchTerm] = useState('');
@@ -149,7 +147,8 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
         }, { totalQty: 0, totalValue: 0 });
     }, [inventoryStats]);
 
-    // --- NEW: Prepare Barcode Print Logic based on Stock Qty ---
+    // --- Prepare Barcode Print Logic based on Stock Qty ---
+    // Now calls onOpenBarcodePrint prop to navigate to the print page
     const handlePreparePrint = (item) => {
         const labels = [];
         const itemInfo = {
@@ -179,8 +178,7 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
             return;
         }
 
-        setPrintQueue(labels);
-        setShowPrintView(true);
+        onOpenBarcodePrint(labels);
     };
 
     // --- Handlers ---
@@ -194,7 +192,7 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
             code: item.code,
             type: item.type,
             category: item.category,
-            stock: item.stock || { M: '', L: '', XL: '', '2XL': '', '3XL': '' },
+            stock: item.stock || {'XS': '',  S: '', M: '', L: '', XL: '', '2XL': '', '3XL': '' },
             totalStock: item.totalStock || '',
             unitCost: item.unitCost,
             mrp: item.mrp,
@@ -211,7 +209,7 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
             id: '',
             date: new Date().toISOString().split('T')[0],
             code: '', type: 'Variable', category: 'Panjabi',
-            stock: { M: '', L: '', XL: '', '2XL': '', '3XL': '' },
+            stock: {'XS': '',  S: '', M: '', L: '', XL: '', '2XL': '', '3XL': '' },
             totalStock: '', unitCost: '', mrp: '', locationId: '', shelfRow: ''
         });
     };
@@ -234,7 +232,7 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
         }
 
         const payload = {
-            date: form.date,
+            date: isEditing ? new Date().toISOString().split('T')[0] : form.date,
             productName: form.productName ? form.productName.trim() : '',
             code: normalizedCode,
             type: form.type,
@@ -646,17 +644,6 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete }) 
                     </table>
                 </div>
             </div>
-
-            {/* PRINT VIEW OVERLAY */}
-            {showPrintView && (
-                <BarcodePrintView
-                    items={printQueue}
-                    onClose={() => {
-                        setShowPrintView(false);
-                        setPrintQueue([]);
-                    }}
-                />
-            )}
         </div>
     );
 };

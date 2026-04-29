@@ -22,6 +22,7 @@ import ExchangeTab from './components/ExchangeTab';
 import CancelledOrders from './components/CancelledOrders';
 import OnlineSalesTab from './components/OnlineSalesTab';
 import SalesReports from './components/SalesReports';
+import BarcodePrintView from './components/BarcodePrintView';
 
 function App() {
     const savedRole = localStorage.getItem('bentree_role');
@@ -39,6 +40,7 @@ function App() {
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     // --- NEW: SCANNER STATE ---
     const [scannedOrder, setScannedOrder] = useState(null);
+    const [barcodePrintQueue, setBarcodePrintQueue] = useState([]);
 
     const [isAuthChecking, setIsAuthChecking] = useState(true);
     const [loading, setLoading] = useState(false);
@@ -146,6 +148,12 @@ function App() {
             console.log("No order found for scanned code:", code);
         }
     });
+
+    // Called from InventoryTab when user clicks the printer icon
+    const handleOpenBarcodePrint = (labels) => {
+        setBarcodePrintQueue(labels);
+        handleTabChange('barcodePrintView');
+    };
 
     // --- 5. INVENTORY IMPACT LOGIC: Status Changes (Cancel/Return/Restore) ---
     const handleUpdateStatus = async (orderId, newStatus, extraData = {}) => {
@@ -320,7 +328,7 @@ function App() {
 
         switch (activeTab) {
             case 'new-order': return <NewOrderForm user={user} existingOrders={orders} setActiveTab={handleTabChange} inventory={inventory} />;
-            case 'inventory': return <InventoryTab {...commonProps} />;
+            case 'inventory': return ( <InventoryTab {...commonProps} onOpenBarcodePrint={handleOpenBarcodePrint} /> );
             case 'stock-location': return <StockLocationTab locations={locations} />;
             case 'monthly-profit': return userRole === 'master' ? <MonthlyProfitTab orders={orders} inventory={inventory} expenses={expenses} /> : <div className="p-10 text-center text-slate-400">Master access required.</div>;
             case 'primary': return <PrimaryOrders orders={orders.filter(o => o.type === 'Online' && o.status === 'Pending')} onUpdate={handleUpdateStatus} onEdit={handleEditOrderWithStock} onCreate={handleCreateOrder} inventory={inventory} />;
@@ -332,6 +340,7 @@ function App() {
             case 'cancelled': return <CancelledOrders orders={orders.filter(o => o.type === 'Online' && (o.status === 'Cancelled' || o.status === 'Returned'))} onUpdate={handleUpdateStatus} onDelete={handleDeleteOrder} onEdit={handleEditOrderWithStock} onCreate={handleCreateOrder} inventory={inventory} userRole={userRole} />;
             case 'online-sales': return <OnlineSalesTab {...orderProps} />;
             case 'reports': return userRole === 'master' ? <SalesReports {...orderProps} /> : <div className="p-10 text-center text-slate-400">Master access required.</div>;
+            case 'barcodePrintView': return (  <BarcodePrintView items={barcodePrintQueue} onClose={() => handleTabChange('inventory')} /> );
             default: return <div className="p-10 text-center">Invalid Tab Selected</div>;
         }
     };

@@ -41,7 +41,7 @@ export const INVENTORY_CATEGORIES = [
 ];
 
 export const LOCATION_TYPES = ['Shelf', 'Bag', 'Carton', 'Display Shelf'];
-export const SIZES = ['M', 'L', 'XL', '2XL', '3XL'];
+export const SIZES = ['XS','S', 'M', 'L', 'XL', '2XL', '3XL'];
 
 export const EXPENSE_FIELDS = [
     'media', 'salary', 'rent', 'utility', 'vat',

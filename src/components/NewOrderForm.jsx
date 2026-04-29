@@ -131,7 +131,10 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         const grandTotal = totalAfterDiscount + Number(formData.deliveryCharge || 0);
         const due = grandTotal - Number(formData.advanceAmount || 0);
 
-        const productDesc = `${totalQty} item cost ${subtotal} tk`;
+        // const productDesc = `${totalQty} item cost ${subtotal} tk`;
+        const totalMRP = formData.products.reduce((sum, p) => sum + (Number(p.price || 0) * Number(p.qty || 0)), 0);
+
+        const productDesc = `${totalQty} item cost: ${totalMRP}`;
         // FIX: Only change this line to show exactly 0.20
         const weight = "0.20 kg";
 
@@ -448,7 +451,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
             const possibleCode = scannedValue.substring(0, dashIdx).toUpperCase();
             const possibleSize = scannedValue.substring(dashIdx + 1).toUpperCase();
             // Only split if the part after dash looks like a valid size
-            const validSizes = ['S', 'M', 'L', 'XL', '2XL', '3XL', 'FREE'];
+            const validSizes = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', 'FREE'];
             if (validSizes.includes(possibleSize)) {
                 parsedCode = possibleCode;
                 parsedSize = possibleSize === 'FREE' ? 'Free' : possibleSize;
@@ -643,6 +646,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                                                 onChange={e => updateProduct(idx, 'size', e.target.value)}
                                             >
                                                 <option value="">Size</option>
+                                                <option value="XS">XS</option>
                                                 <option value="S">S</option>
                                                 <option value="M">M</option>
                                                 <option value="L">L</option>
