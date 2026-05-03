@@ -7,7 +7,8 @@ import { getStatusColor, downloadCSV } from '../utils';
 
 const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDelete, inventory, userRole }) => {
     // --- States ---
-    const [filterDate, setFilterDate] = useState('');
+    const [startDate, setStartDate] = useState(''); // NEW: Start Date State
+    const [endDate, setEndDate] = useState('');
     const [filterStatus, setFilterStatus] = useState('All');
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedOrder, setSelectedOrder] = useState(null);
@@ -62,7 +63,17 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
             o.type !== 'Store'
         );
 
-        if (filterDate) res = res.filter(o => o.date === filterDate);
+        // Date Range Logic
+        if (startDate || endDate) {
+            res = res.filter(o => {
+                if (!o.date) return false;
+                const orderDate = o.date; // Format is YYYY-MM-DD
+                if (startDate && orderDate < startDate) return false;
+                if (endDate && orderDate > endDate) return false;
+                return true;
+            });
+        }
+
         if (filterStatus !== 'All') res = res.filter(o => o.status === filterStatus);
 
         if (searchTerm) {
@@ -76,7 +87,7 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
             );
         }
         return res;
-    }, [orders, filterDate, searchTerm, filterStatus]);
+    }, [orders, startDate, endDate, searchTerm, filterStatus]);
 
     const footerStats = useMemo(() => {
         const totalOrders = filteredOrders.length;
@@ -195,10 +206,17 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                     <div className="w-full md:w-auto">
                         <SearchBar searchTerm={searchTerm} setSearchTerm={setSearchTerm} placeholder="Search by Phone, Name or Source..." />
                     </div>
+                    
+                    {/* Updated Date Range Filter UI */}
                     <div className="flex items-center gap-2 bg-white border rounded p-2 w-full md:w-auto">
                         <Calendar size={18} className="text-slate-500" />
-                        <input type="date" className="bg-transparent text-sm w-full outline-none" onChange={(e) => setFilterDate(e.target.value)} />
+                        <input type="date" className="bg-transparent text-sm w-full outline-none" onChange={(e) => setStartDate(e.target.value)} />
                     </div>
+                    <div className="flex items-center gap-2 bg-white border rounded p-2 w-full md:w-auto">
+                        <Calendar size={18} className="text-slate-500" />
+                        <input type="date" className="bg-transparent text-sm w-full outline-none" onChange={(e) => setEndDate(e.target.value)} />
+                    </div>
+                    
                     <select className="p-2 border rounded text-sm bg-white w-full md:w-auto" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
                         <option value="All">All Status</option>
                         <option value="Confirmed">Confirmed</option>
