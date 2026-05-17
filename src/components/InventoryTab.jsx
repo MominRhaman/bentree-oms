@@ -185,6 +185,18 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
     const handleEditClick = (item) => {
         setIsEditing(true);
         setShowAddForm(true);
+
+        // Normalise legacy size aliases (e.g. XXL→2XL) so all keys map to SIZES
+        const SIZE_ALIASES = { 'XXL': '2XL', 'XXXL': '3XL' };
+        const defaultStock = Object.fromEntries(SIZES.map(s => [s, 0]));
+        const normalizedStock = { ...defaultStock };
+        Object.entries(item.stock || {}).forEach(([size, qty]) => {
+            const canonical = SIZE_ALIASES[size.toUpperCase()] || size;
+            if (canonical in normalizedStock) {
+                normalizedStock[canonical] = (normalizedStock[canonical] || 0) + Number(qty || 0);
+            }
+        });
+
         setForm({
             id: item.id,
             date: item.date || new Date().toISOString().split('T')[0],
@@ -192,7 +204,7 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
             code: item.code,
             type: item.type,
             category: item.category,
-            stock: item.stock || {'XS': '',  S: '', M: '', L: '', XL: '', '2XL': '', '3XL': '' },
+            stock: item.type === 'Variable' ? normalizedStock : defaultStock,
             totalStock: item.totalStock || '',
             unitCost: item.unitCost,
             mrp: item.mrp,
@@ -588,7 +600,15 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
                                             </span>
                                             {item.type === 'Variable' && (
                                                 <div className="text-[10px] text-slate-400 mt-1">
-                                                    {Object.entries(item.stock).map(([k, v]) => v > 0 ? `${k}:${v} ` : '').join('')}
+                                                    {(() => {
+                                                        const SIZE_ALIASES = { 'XXL': '2XL', 'XXXL': '3XL' };
+                                                        const merged = {};
+                                                        Object.entries(item.stock).forEach(([k, v]) => {
+                                                            const key = SIZE_ALIASES[k.toUpperCase()] || k;
+                                                            merged[key] = (merged[key] || 0) + Number(v || 0);
+                                                        });
+                                                        return Object.entries(merged).filter(([, v]) => v > 0).map(([k, v]) => `${k}:${v}`).join(' ');
+                                                    })()}
                                                 </div>
                                             )}
                                         </td>

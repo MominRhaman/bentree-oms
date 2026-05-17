@@ -27,12 +27,40 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
     useEffect(() => {
         if (order) {
             const deepCopy = JSON.parse(JSON.stringify(order));
-            // Ensure products have discount fields
-            deepCopy.products = deepCopy.products.map(p => ({
-                ...p,
-                discountType: p.discountType || 'Fixed',
-                discountValue: p.discountValue || 0
-            }));
+            // Ensure products have discount fields; derive from inventory MRP if no explicit discount set
+            deepCopy.products = deepCopy.products.map(p => {
+                let discountType = p.discountType || 'Fixed';
+                let discountValue = Number(p.discountValue) || 0;
+                let price = p.price;
+
+                if (!discountValue && inventory && inventory.length > 0) {
+                    const invItem = inventory.find(i => i.code && i.code.toUpperCase() === (p.code || '').toUpperCase());
+                    const mrp = invItem ? Number(invItem.mrp || 0) : 0;
+                    const orderPrice = Number(p.price || 0);
+                    if (mrp > orderPrice && orderPrice > 0) {
+                        price = mrp;
+                        discountValue = Math.round(((mrp - orderPrice) / mrp) * 100);
+                        discountType = 'Percent';
+                    }
+                }
+
+                return { ...p, price, discountType, discountValue };
+            });
+            // Compute missing financial fields for orders saved before this fix (e.g. old WooCommerce imports)
+            if (deepCopy.subtotal === undefined || deepCopy.subtotal === null) {
+                deepCopy.subtotal = (deepCopy.products || []).reduce((s, p) => {
+                    const base = Number(p.price || 0) * Number(p.qty || 0);
+                    const disc = p.discountType === 'Percent'
+                        ? base * (Number(p.discountValue || 0) / 100)
+                        : Number(p.discountValue || 0);
+                    return s + base - disc;
+                }, 0);
+            }
+            if (deepCopy.dueAmount === undefined || deepCopy.dueAmount === null) {
+                deepCopy.dueAmount = Number(deepCopy.grandTotal || 0)
+                    - Number(deepCopy.advanceAmount || 0)
+                    - Number(deepCopy.collectedAmount || 0);
+            }
             setEditedOrder(deepCopy);
             setErrors({});
             setPartialReturnItems(new Set()); // Reset on open
@@ -636,6 +664,11 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                             {editedOrder.products.map((p, i) => {
                                 const hasError = errors[i];
                                 const availableSizes = getAvailableSizes(p.code);
+
+                                // View-mode display values (discount already enriched from inventory in useEffect)
+                                const itemQty = Number(p.qty || 0);
+                                const itemPrice = Number(p.price || 0);
+                                const hasDiscount = Number(p.discountValue) > 0;
                                 return (
                                     <div key={i} className={`flex flex-col sm:flex-row gap-2 ${isEditing ? 'bg-slate-50 p-3 rounded-lg border border-slate-200 shadow-sm' : 'border-b border-slate-100 pb-2 last:border-0'}`}>
                                         {isEditing ? (
@@ -725,15 +758,18 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                                                 </div>
                                             </>
                                         ) : (
-                                            <div className="flex justify-between items-center w-full">
+                                            <div className="flex justify-between items-start w-full">
                                                 <div><p className="font-bold text-slate-800">{p.code}</p><p className="text-xs text-slate-500">Size: {p.size} | Qty: {p.qty}</p></div>
-                                                {/* Inside the non-editing view */}
-                                                {(Number(p.discountValue) > 0) && (
-                                                    <p className="text-[10px] text-red-500 italic">
-                                                        Discount: {p.discountType === 'Percent' ? `${p.discountValue}%` : `৳${p.discountValue}`}
-                                                    </p>
-                                                )}
-                                                <p className="font-medium">৳{Number(p.price) * Number(p.qty)}</p>
+                                                <div className="text-right">
+                                                    <p className="font-medium">৳{itemPrice * itemQty}</p>
+                                                    {hasDiscount && (
+                                                        <p className="text-[10px] text-red-500 italic">
+                                                            {p.discountType === 'Percent'
+                                                                ? `-${p.discountValue}% (৳${(itemPrice * itemQty * Number(p.discountValue) / 100).toFixed(0)})`
+                                                                : `-৳${p.discountValue}`}
+                                                        </p>
+                                                    )}
+                                                </div>
                                             </div>
                                         )}
                                     </div>
@@ -792,8 +828,8 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                                 }
                             </div>
 
-                            {/* Requirement Fix: Only show the refund/due section if this is NOT a partial return order record */}
-                            {!editedOrder.isPartialReturn && (
+                            {/* Show Due Amount only for COD orders */}
+                            {!editedOrder.isPartialReturn && editedOrder.paymentType === 'COD' && (
                                 <div className="flex justify-between font-bold border-t border-dashed border-slate-300 pt-2 text-lg">
                                     <span className={editedOrder.dueAmount < 0 ? "text-red-600" : "text-emerald-600"}>
                                         {editedOrder.dueAmount < 0 ? "Refund Due" : "Due Amount"}

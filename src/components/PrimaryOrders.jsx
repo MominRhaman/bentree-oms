@@ -12,6 +12,17 @@ const PrimaryOrders = ({ orders, onUpdate, onEdit, inventory = [] }) => {
     // Track inputs locally so buttons appear instantly
     const [tempIds, setTempIds] = useState({});
 
+    // Pre-generate stable fallback IDs for orders that have no merchantOrderId
+    const generatedIds = useMemo(() => {
+        const ids = {};
+        orders.forEach(order => {
+            if (!order.merchantOrderId && !order.storeOrderId) {
+                ids[order.id] = `OMS-${order.id.slice(-6).toUpperCase()}`;
+            }
+        });
+        return ids;
+    }, [orders]);
+
     // 1. Duplicate Logic
     const duplicateIds = useMemo(() => {
         const phoneCounts = {};
@@ -161,8 +172,9 @@ const PrimaryOrders = ({ orders, onUpdate, onEdit, inventory = [] }) => {
                         {filteredOrders.map(order => {
                             const isDuplicate = duplicateIds.has(order.id);
 
-                            // Input Logic
-                            const currentId = tempIds[order.id] !== undefined ? tempIds[order.id] : '';
+                            // Input Logic — pre-fill from existing ID or auto-generated fallback
+                            const defaultId = order.merchantOrderId || order.storeOrderId || generatedIds[order.id] || '';
+                            const currentId = tempIds[order.id] !== undefined ? tempIds[order.id] : defaultId;
                             const hasEnteredId = currentId && currentId.trim().length > 0;
                             const isCheckedOut = order.checkOutStatus === 'Completed';
 

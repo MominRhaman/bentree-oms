@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Save, AlertTriangle, Plus, Trash2, XCircle, Zap } from 'lucide-react';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db, appId } from '../firebase';
 import { updateInventoryStock, disableScroll } from '../utils';
+import { CreateOrder } from '../WooAPI/CreateOrder.jsx';
 import { useScanner } from '../hooks/useScanner';
 
 const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
@@ -337,7 +338,20 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
             for (const p of formData.products) {
                 await updateInventoryStock(p.code, p.size, -Number(p.qty), inventory);
             }
-            await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), payload);
+            const docRef = await addDoc(
+                collection(db, 'artifacts', appId, 'public', 'data', 'orders'),
+                payload
+            );
+
+            // Mirror order to WooCommerce for both Online and Store orders.
+            // Tagged _oms_created=true so the webhook skips it (no duplicate).
+            // Pass payload (normalized) — never spread formData over it.
+            CreateOrder(payload)
+                .then(wcOrder => updateDoc(docRef, { wc_order_id: wcOrder.id }))
+                .catch(err => console.warn(
+                    '[WooOrder] Could not create WooCommerce order:',
+                    err?.response?.data || err.message
+                ));
 
             if (orderType === 'Online') setActiveTab('primary');
             else setActiveTab('store-sales');

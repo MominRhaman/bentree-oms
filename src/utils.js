@@ -43,6 +43,13 @@ export const INVENTORY_CATEGORIES = [
 export const LOCATION_TYPES = ['Shelf', 'Bag', 'Carton', 'Display Shelf'];
 export const SIZES = ['XS','S', 'M', 'L', 'XL', '2XL', '3XL'];
 
+// Canonical size map: normalize legacy/alternate keys to OMS standard
+export const SIZE_ALIASES = { 'XXL': '2XL', 'XXXL': '3XL' };
+export const normalizeSize = (s) => {
+    const upper = (s || '').trim().toUpperCase();
+    return SIZE_ALIASES[upper] || upper;
+};
+
 export const EXPENSE_FIELDS = [
     'media', 'salary', 'rent', 'utility', 'vat',
     'codCharge', 'food', 'transport', 'accessories', 'paymentGatewayFees', 'maintenanceRepairs', 'others'
@@ -117,11 +124,11 @@ export const updateInventoryStock = async (productCode, size, qtyChange, invento
 
     try {
         if (product.type === 'Variable') {
-            const sizeKey = size ? size.trim().toUpperCase() : null;
+            const sizeKey = size ? normalizeSize(size) : null;
             if (!sizeKey) return false;
 
-            // Ensure we use the exact case-sensitive key stored in Firestore to prevent field duplication
-            const actualKey = Object.keys(product.stock || {}).find(k => k.toUpperCase() === sizeKey) || sizeKey;
+            // Match by canonical form so "2XL" finds "XXL" keys and vice versa
+            const actualKey = Object.keys(product.stock || {}).find(k => normalizeSize(k) === sizeKey) || sizeKey;
 
             await updateDoc(docRef, {
                 [`stock.${actualKey}`]: increment(qtyChange)

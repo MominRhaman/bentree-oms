@@ -4,8 +4,7 @@ import { Printer, X, ArrowLeft, ChevronLeft, ChevronRight, Settings, Tag } from 
 
 // --- LABEL SIZE PRESETS ---
 const SIZE_PRESETS = [
-    { label: '38mm × 25mm (Default)', width: '38mm', height: '25mm', previewW: 152, previewH: 100 },
-    { label: '50mm × 25mm', width: '50mm', height: '25mm', previewW: 200, previewH: 100 },
+    { label: '50mm × 25mm (Default)', width: '50mm', height: '25mm', previewW: 200, previewH: 100 },
     { label: '50mm × 30mm', width: '50mm', height: '30mm', previewW: 200, previewH: 120 },
     { label: '60mm × 40mm', width: '60mm', height: '40mm', previewW: 240, previewH: 160 },
     { label: 'Custom', width: '', height: '', previewW: 0, previewH: 0 },
@@ -169,7 +168,7 @@ const BarcodePrintView = ({ items, onClose }) => {
         font-weight: bold;
         color: #666;
         text-transform: uppercase;
-        letter-spacing: 0.5pt;
+        letter-spacing: 1pt;
         line-height: 1;
     }
     .product-name {
@@ -198,12 +197,13 @@ const BarcodePrintView = ({ items, onClose }) => {
         display: block;
     }
     .code-text {
-        font-size: 6pt;
-        font-weight: bold;
+        font-size: 12pt;
+        font-weight: 900;
         font-family: monospace;
-        color: #444;
+        color: #333;
         line-height: 1;
-        margin-top: 0.2mm;
+        margin-top: 0.1mm;
+        letter-spacing: 1pt;
     }
     .bottom-row {
         display: flex;
@@ -213,7 +213,7 @@ const BarcodePrintView = ({ items, onClose }) => {
         margin-top: 0.3mm;
     }
     .bottom-row span {
-        font-size: 7pt;
+        font-size: 8pt;
         font-weight: 900;
         color: #000;
         line-height: 1;
@@ -419,7 +419,7 @@ ${labelsHTML}
                                     />
                                 </div>
                                 {/* Code */}
-                                <div style={{ fontSize: Math.max(6, previewH * 0.065) + 'px', fontWeight: 'bold', fontFamily: 'monospace', color: '#555' }}>
+                                <div style={{ fontSize: Math.max(16, previewH * 0.16) + 'px', fontWeight: '900', fontFamily: 'monospace', color: '#555', lineHeight: 0.7, marginTop: '-1px' }}>
                                     {currentItem.code}
                                 </div>
                                 {/* Size & MRP */}

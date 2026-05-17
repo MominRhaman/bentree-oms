@@ -3,6 +3,7 @@ import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { collection, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, arrayUnion, addDoc } from 'firebase/firestore';
 import { auth, db, appId } from './firebase';
 import { getStatusColor, updateInventoryStock } from './utils';
+import { adjustWooStock, wooUpdateOrder } from './WooAPI/wooStock';
 import { useScanner } from './hooks/useScanner';
 import { Menu } from 'lucide-react';
 
@@ -172,14 +173,46 @@ function App() {
         const wasActive = !inactiveStatuses.includes(order.status);
         const isRestoring = !becomingInactive && !wasActive;
 
+        // Inventory flags to sync with Cloud Function tracking
+        let stockFlags = {};
+
         if (becomingInactive && wasActive) {
             for (const p of order.products) {
                 await updateInventoryStock(p.code, p.size, Number(p.qty), inventory);
+            }
+            stockFlags = { stockDeducted: false, deductedProducts: [] };
+            // Orders without a wc_order_id need manual WooCommerce stock restore
+            if (order.type === 'Online' && !order.wc_order_id) {
+                adjustWooStock(order.products, +1).catch(e =>
+                    console.error('[WooStock] Cancel restore failed:', e)
+                );
             }
         }
         if (isRestoring) {
             for (const p of order.products) {
                 await updateInventoryStock(p.code, p.size, -Number(p.qty), inventory);
+            }
+            stockFlags = { stockDeducted: true, deductedProducts: order.products };
+            if (order.type === 'Online') {
+                adjustWooStock(order.products, -1).catch(e =>
+                    console.error('[WooStock] Re-activate deduct failed:', e)
+                );
+            }
+        }
+
+        // Sync OMS status changes → WooCommerce order status
+        if (order.wc_order_id) {
+            const WC_STATUS = {
+                'Delivered':  'completed',
+                'Completed':  'completed', // Store checkout
+                'Cancelled':  'cancelled',
+                'Returned':   'refunded',
+            };
+            const wcStatus = WC_STATUS[newStatus];
+            if (wcStatus) {
+                wooUpdateOrder(order.wc_order_id, wcStatus).catch(e =>
+                    console.error(`[WooOrder] ${newStatus}→${wcStatus} sync failed:`, e)
+                );
             }
         }
 
@@ -196,6 +229,7 @@ function App() {
 
             await updateDoc(orderRef, {
                 ...cleanExtraData,
+                ...stockFlags,
                 status: newStatus,
                 history: arrayUnion(historyEntry)
             });
@@ -214,32 +248,48 @@ function App() {
         }
 
         try {
-            // STEP 1: Restore old stock (Restore if the order was active)
+            const newProducts = updatedData.products || [];
+            const isActiveStatus = !['Cancelled', 'Returned'].includes(newStatus);
+
+            // STEP 1: Restore old stock (if the order was active before the edit)
             if (!['Cancelled', 'Returned'].includes(oldOrder.status)) {
-                const oldProducts = oldOrder.products || [];
-                for (const p of oldProducts) {
+                for (const p of (oldOrder.products || [])) {
                     await updateInventoryStock(p.code, p.size, Number(p.qty), inventory);
                 }
             }
 
-            // STEP 2: Deduct new stock (Deduct if the new status is active)
-            if (!['Cancelled', 'Returned'].includes(newStatus)) {
-                const newProducts = updatedData.products || [];
+            // STEP 2: Deduct new stock (if the resulting status is active)
+            if (isActiveStatus) {
                 for (const p of newProducts) {
                     await updateInventoryStock(p.code, p.size, -Number(p.qty), inventory);
                 }
             }
 
             // STEP 3: Database Operation
-            // We use updateDoc to keep the ID stable so other buttons don't break
             const orderRef = doc(db, 'artifacts', appId, 'public', 'data', 'orders', orderId);
             const { id, ...dataToSave } = updatedData;
 
             await updateDoc(orderRef, {
                 ...dataToSave,
                 status: newStatus,
-                lastEditedBy: user?.displayName || 'Admin'
+                lastEditedBy: user?.displayName || 'Admin',
+                stockDeducted: isActiveStatus,
+                deductedProducts: isActiveStatus ? newProducts : []
             });
+
+            // Sync WooCommerce stock for Online orders (fire-and-forget)
+            if (oldOrder.type === 'Online') {
+                if (!['Cancelled', 'Returned'].includes(oldOrder.status)) {
+                    adjustWooStock(oldOrder.products || [], +1).catch(e =>
+                        console.error('[WooStock] Exchange restore failed:', e)
+                    );
+                }
+                if (isActiveStatus) {
+                    adjustWooStock(newProducts, -1).catch(e =>
+                        console.error('[WooStock] Exchange deduct failed:', e)
+                    );
+                }
+            }
 
             if (newStatus === 'Exchanged') alert("Exchange Successful!");
 
@@ -298,6 +348,18 @@ function App() {
             for (const p of order.products) {
                 await updateInventoryStock(p.code, p.size, Number(p.qty), inventory);
             }
+            // Restore WooCommerce stock for Online orders (fire-and-forget)
+            if (order.type === 'Online') {
+                adjustWooStock(order.products, +1).catch(e =>
+                    console.error('[WooStock] Delete restore failed:', e)
+                );
+            }
+        }
+        // Cancel corresponding WooCommerce order when a store order is deleted
+        if (order && order.type === 'Store' && order.wc_order_id) {
+            wooUpdateOrder(order.wc_order_id, 'cancelled').catch(e =>
+                console.error('[WooOrder] Store delete cancel failed:', e)
+            );
         }
         await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', orderId));
     };

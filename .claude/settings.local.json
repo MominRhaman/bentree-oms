@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(firebase deploy *)",
+      "Bash(findstr /C:\"axios\" \"c:\\\\Users\\\\z b oo k\\\\Desktop\\\\Bentree-OMS\\\\package.json\")",
+      "Bash(npm install *)",
+      "Bash(gcloud run *)",
+      "Bash(dir \"c:\\\\Users\\\\z b oo k\\\\Desktop\\\\Bentree-OMS\\\\functions\" /b)",
+      "WebFetch(domain:bentreebd.com)"
+    ]
+  }
+}

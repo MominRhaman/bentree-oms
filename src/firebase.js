@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
+import { getFunctions } from 'firebase/functions';
 
 // --- Firebase Configuration ---
 const firebaseConfig = {
@@ -15,13 +16,14 @@ const firebaseConfig = {
 export const appId = "1:863146464502:web:ce12de37fc9ba2240148d7";
 
 // Initialize Firebase
-let app, auth, db;
+let app, auth, db, functions;
 try {
     app = initializeApp(firebaseConfig);
     auth = getAuth(app);
     db = getFirestore(app);
+    functions = getFunctions(app);
 } catch (e) {
     console.error("Firebase Initialization Error:", e);
 }
 
-export { auth, db };
+export { auth, db, functions };
