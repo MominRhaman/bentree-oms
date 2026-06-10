@@ -306,6 +306,11 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
         // 1. Create a NEW Order Record specifically for the Returned items (NO delivery charge, NO discount)
         const returnOrderRecord = {
             ...order,
+            // Return orders are OMS-only records; they must NOT inherit the WooCommerce order ID.
+            // If wc_order_id were copied, any handleUpdateStatus call on this return order would
+            // fire wooUpdateOrder() for the ORIGINAL WooCommerce order, triggering the webhook
+            // which then overwrites the original order's Firestore document with all products.
+            wc_order_id: null,
             merchantOrderId: returnOrderId,
             storeOrderId: returnOrderId,
             products: returnedItems,
@@ -339,6 +344,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
             ...editedOrder,
             products: keptItems,
             status: updatedStatus,
+            _oms_partial_return: true,
             history: [
                 ...(order.history || []),
                 {
@@ -824,7 +830,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                                 </div>
                                 {isEditing ?
                                     <input className="w-32 p-1 border rounded text-right bg-white" value={editedOrder.collectedAmount} onChange={e => handleInputChange('collectedAmount', e.target.value)} onWheel={disableScroll} /> :
-                                    <span className="text-emerald-600">৳ {(Number(editedOrder.advanceAmount || 0) + Number(editedOrder.collectedAmount || 0))}</span>
+                                    <span className="text-emerald-600">৳ {(Number(editedOrder.advanceAmount || 0) - Number(editedOrder.collectedAmount || 0))}</span>
                                 }
                             </div>
 

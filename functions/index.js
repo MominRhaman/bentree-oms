@@ -168,6 +168,7 @@ async function syncInventory(oldProducts, newProducts) {
  * @return {object} Firestore-ready order document.
  */
 function mapWooOrder(data) {
+  console.log(data, "Woo payload");
   const billing = data.billing || {};
   const shipping = data.shipping || {};
 
@@ -218,7 +219,7 @@ function mapWooOrder(data) {
 
   let paymentType = "COD";
   const method = data.payment_method || "";
-  if (method === "stripe" || method === "square") {
+  if (method === "stripe" || method === "square" || method === "sslcommerz") {
     paymentType = "Card";
   } else if (method === "bacs") {
     paymentType = "Bank Transfer";
@@ -230,7 +231,27 @@ function mapWooOrder(data) {
     new Date().toISOString().split("T")[0];
 
   const grandTotalNum = Number(data.total || 0);
-  const isCOD = paymentType === "COD";
+  // "cod" is WooCommerce's built-in COD slug; all other gateways are online
+  const isCOD = method.toLowerCase() === "cod";
+  // For non-COD gateways (e.g. sslcommerz), WooCommerce sets status to
+  // "processing" only after payment confirms. date_paid may arrive null
+  // in the webhook payload due to a race condition, so we check both.
+  const wooStatus = (data.status || "").toLowerCase();
+  const isPrepaid = !isCOD && (
+    !!(data.date_paid) ||
+    wooStatus === "processing" ||
+    wooStatus === "completed"
+  );
+
+  logger.info("💳 Payment detection", {
+    orderId: data.id,
+    payment_method: data.payment_method,
+    woo_status: data.status,
+    date_paid: data.date_paid || "null",
+    isCOD,
+    isPrepaid,
+    advanceAmount: isPrepaid ? grandTotalNum : 0,
+  });
 
   return {
     type: "Online",
@@ -244,9 +265,9 @@ function mapWooOrder(data) {
     deliveryCharge: Number(data.shipping_total || 0),
     discountValue: 0,
     discountType: "Fixed",
-    advanceAmount: 0,
-    collectedAmount: isCOD ? 0 : grandTotalNum,
-    dueAmount: isCOD ? grandTotalNum : 0,
+    advanceAmount: isPrepaid ? grandTotalNum : 0,
+    collectedAmount: isPrepaid ? grandTotalNum : 0,
+    dueAmount: isPrepaid ? 0 : grandTotalNum,
     currency: data.currency || "BDT",
     paymentType,
     recipientName,
@@ -341,7 +362,16 @@ exports.woocommerceWebhook = onRequest(async (req, res) => {
     const wasDeducted = existing.stockDeducted === true;
     const deductedProds = existing.deductedProducts || [];
 
-    // ── 4. order.deleted → restore stock + soft-cancel ───────────────────
+    // ── 4a. Guard: OMS partial-return orders ─────────────────────────────
+    // The OMS sets _oms_partial_return: true and trims products to keptItems.
+    // Letting the webhook overwrite with the full WooCommerce payload would
+    // restore all returned items and re-deduct stock incorrectly.
+    if (existing._oms_partial_return === true) {
+      logger.info("Skipping webhook — OMS partial return", {orderId: data.id});
+      return res.status(200).send("OK");
+    }
+
+    // ── 4b. order.deleted → restore stock + soft-cancel ──────────────────
     if (topic === "order.deleted") {
       if (wasDeducted) {
         await restoreInventory(deductedProds);
@@ -554,6 +584,7 @@ exports.wooCreateOrder = onCall(async (request) => {
     "Bank Transfer": "Bank Transfer",
     "MFS": "Mobile Banking (MFS)",
   };
+  console.log(order, "Payment");
   const rawPayment = order.paymentType || order.storePaymentMode || "";
   const payMethod = PAY_METHOD_MAP[rawPayment] || "cod";
   const payTitle = PAY_TITLE_MAP[rawPayment] || "Cash on Delivery";

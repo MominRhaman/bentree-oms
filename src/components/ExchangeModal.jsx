@@ -15,14 +15,6 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
     // --- FIX: Added missing state declaration ---
     const [isSubmitting, setIsSubmitting] = useState(false);
 
-    // Debug: Log props to help identify the issue
-    console.log('ExchangeModal Props:', {
-        hasOnCreate: !!onCreate,
-        hasOnConfirm: !!onConfirm,
-        orderId: order?.merchantOrderId || order?.storeOrderId,
-        isCompleting: isCompletingPartialExchange
-    });
-
     // 1. Initialize with Old Products
     const [newProducts, setNewProducts] = useState(
         order.products.map(p => ({
@@ -419,7 +411,7 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
         };
 
         try {
-            await onConfirm(order.id, 'Exchanged', updatedPayload);
+            await onConfirm(order.id, 'Exchanged', sanitizeForFirebase(updatedPayload));
             onClose();
             alert(`Exchange completed successfully!`);
         } catch (error) {

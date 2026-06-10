@@ -121,7 +121,8 @@ function App() {
         const handleSnapshotError = (err) => console.error("Firestore Error:", err);
 
         const unsubOrders = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), (snap) => {
-            const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            
+                const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
             data.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
             setOrders(data);
             setIsDataReceived(true);
@@ -200,8 +201,12 @@ function App() {
             }
         }
 
-        // Sync OMS status changes → WooCommerce order status
-        if (order.wc_order_id) {
+        // Sync OMS status changes → WooCommerce order status.
+        // Guard: only fire when the status is actually changing. Without this guard,
+        // calling handleUpdateStatus on an already-Returned order (e.g. the return record
+        // created during a partial return) would re-fire wooUpdateOrder for the original
+        // WooCommerce order ID, triggering the webhook and overwriting Firestore data.
+        if (order.wc_order_id && order.status !== newStatus) {
             const WC_STATUS = {
                 'Delivered':  'completed',
                 'Completed':  'completed', // Store checkout
@@ -277,17 +282,16 @@ function App() {
                 deductedProducts: isActiveStatus ? newProducts : []
             });
 
-            // Sync WooCommerce stock for Online orders (fire-and-forget)
+            // Sync WooCommerce stock for Online orders.
+            // Awaited sequentially: both calls read-then-write stock quantities,
+            // so running them concurrently causes a race condition where the second
+            // call overwrites the first (e.g. kept items end up double-deducted).
             if (oldOrder.type === 'Online') {
                 if (!['Cancelled', 'Returned'].includes(oldOrder.status)) {
-                    adjustWooStock(oldOrder.products || [], +1).catch(e =>
-                        console.error('[WooStock] Exchange restore failed:', e)
-                    );
+                    await adjustWooStock(oldOrder.products || [], +1);
                 }
                 if (isActiveStatus) {
-                    adjustWooStock(newProducts, -1).catch(e =>
-                        console.error('[WooStock] Exchange deduct failed:', e)
-                    );
+                    await adjustWooStock(newProducts, -1);
                 }
             }
 
