@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { Calendar, Download, AlertTriangle, CheckCircle, ArrowRightLeft, PauseCircle, Ban, X, RotateCcw, Trash2, Zap, Eye } from 'lucide-react';
+import React, { useState, useMemo, useCallback } from 'react';
+import { Calendar, Download, AlertTriangle, CheckCircle, ArrowRightLeft, PauseCircle, Ban, X, RotateCcw, Trash2, Zap, Eye, ChevronLeft, ChevronRight } from 'lucide-react';
 import OrderDetailsPopup from './OrderDetailsPopup';
 import SearchBar from './SearchBar';
 import ExchangeModal from './ExchangeModal';
@@ -38,16 +38,23 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
 
         Object.values(byPhone).forEach(group => {
             if (group.length < 2) return;
+            // Pre-compute product code sets and amounts for O(1) lookups
+            const codeSets = group.map(o => new Set((o.products || []).map(p => p.code)));
+            const amounts = group.map(o => Number(o.dueAmount));
+
             for (let i = 0; i < group.length; i++) {
                 for (let j = i + 1; j < group.length; j++) {
-                    const a = group[i];
-                    const b = group[j];
-                    const amountMatch = (Number(a.dueAmount) === Number(b.dueAmount));
-                    const productMatch = a.products?.some(ap => b.products?.some(bp => bp.code === ap.code));
+                    const amountMatch = (amounts[i] === amounts[j]);
+                    let productMatch = false;
+                    if (!amountMatch) {
+                        for (const code of codeSets[i]) {
+                            if (codeSets[j].has(code)) { productMatch = true; break; }
+                        }
+                    }
 
                     if (amountMatch || productMatch) {
-                        dupeIds.add(a.id);
-                        dupeIds.add(b.id);
+                        dupeIds.add(group[i].id);
+                        dupeIds.add(group[j].id);
                     }
                 }
             }
@@ -96,6 +103,21 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
         }, 0);
         return { totalOrders, totalAmountExDelivery };
     }, [filteredOrders]);
+
+    // --- Pagination ---
+    const PAGE_SIZE = 50;
+    const [currentPage, setCurrentPage] = useState(0);
+    const totalPages = Math.ceil(filteredOrders.length / PAGE_SIZE);
+    const paginatedOrders = useMemo(() => {
+        const start = currentPage * PAGE_SIZE;
+        return filteredOrders.slice(start, start + PAGE_SIZE);
+    }, [filteredOrders, currentPage]);
+
+    // Reset to first page when filters change
+    const setSearchTermAndReset = useCallback((v) => { setSearchTerm(v); setCurrentPage(0); }, []);
+    const setFilterStatusAndReset = useCallback((v) => { setFilterStatus(v); setCurrentPage(0); }, []);
+    const setStartDateAndReset = useCallback((v) => { setStartDate(v); setCurrentPage(0); }, []);
+    const setEndDateAndReset = useCallback((v) => { setEndDate(v); setCurrentPage(0); }, []);
 
     // --- Handlers ---
     const handleExport = () => {
@@ -204,20 +226,20 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
 
                 <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
                     <div className="w-full md:w-auto">
-                        <SearchBar searchTerm={searchTerm} setSearchTerm={setSearchTerm} placeholder="Search by Phone, Name or Source..." />
+                        <SearchBar searchTerm={searchTerm} setSearchTerm={setSearchTermAndReset} placeholder="Search by Phone, Name or Source..." />
                     </div>
                     
                     {/* Updated Date Range Filter UI */}
                     <div className="flex items-center gap-2 bg-white border rounded p-2 w-full md:w-auto">
                         <Calendar size={18} className="text-slate-500" />
-                        <input type="date" className="bg-transparent text-sm w-full outline-none" onChange={(e) => setStartDate(e.target.value)} />
+                        <input type="date" className="bg-transparent text-sm w-full outline-none" onChange={(e) => setStartDateAndReset(e.target.value)} />
                     </div>
                     <div className="flex items-center gap-2 bg-white border rounded p-2 w-full md:w-auto">
                         <Calendar size={18} className="text-slate-500" />
-                        <input type="date" className="bg-transparent text-sm w-full outline-none" onChange={(e) => setEndDate(e.target.value)} />
+                        <input type="date" className="bg-transparent text-sm w-full outline-none" onChange={(e) => setEndDateAndReset(e.target.value)} />
                     </div>
                     
-                    <select className="p-2 border rounded text-sm bg-white w-full md:w-auto" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+                    <select className="p-2 border rounded text-sm bg-white w-full md:w-auto" value={filterStatus} onChange={(e) => setFilterStatusAndReset(e.target.value)}>
                         <option value="All">All Status</option>
                         <option value="Confirmed">Confirmed</option>
                         <option value="Dispatched">Dispatched</option>
@@ -250,7 +272,7 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                             </tr>
                         </thead>
                         <tbody>
-                            {filteredOrders.map(order => {
+                            {paginatedOrders.map(order => {
                                 const isExpress = order.isExpress === true;
 
                                 // Check if this is a NEW partial return/exchange order (created during split)
@@ -288,7 +310,7 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                                     });
                                 }
                                 // This logic check was added inside the loop (around line 186)
-                                const isCancelDisabled = ['Delivered', 'Dispatched', 'Returned', 'Exchanged'].includes(order.status);
+                                const isCancelDisabled = ['Returned', 'Exchanged'].includes(order.status);
 
                                 return (
                                     <tr
@@ -489,6 +511,28 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                 </div>
             </div>
 
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+                <div className="flex items-center justify-between bg-white p-3 rounded-lg shadow-sm border border-slate-200">
+                    <span className="text-sm text-slate-500">
+                        Showing {currentPage * PAGE_SIZE + 1}–{Math.min((currentPage + 1) * PAGE_SIZE, filteredOrders.length)} of {filteredOrders.length}
+                    </span>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
+                            disabled={currentPage === 0}
+                            className="p-1.5 rounded border text-sm disabled:opacity-30 hover:bg-slate-50"
+                        ><ChevronLeft size={16} /></button>
+                        <span className="text-sm font-medium text-slate-700">Page {currentPage + 1} / {totalPages}</span>
+                        <button
+                            onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
+                            disabled={currentPage >= totalPages - 1}
+                            className="p-1.5 rounded border text-sm disabled:opacity-30 hover:bg-slate-50"
+                        ><ChevronRight size={16} /></button>
+                    </div>
+                </div>
+            )}
+
             {/* --- Modals and Popups --- */}
             {deliveryModal && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -584,4 +628,4 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
     );
 };
 
-export default ConfirmedOrders;
+export default React.memo(ConfirmedOrders);

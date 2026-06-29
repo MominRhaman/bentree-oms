@@ -298,8 +298,6 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
             console.log('Creating partial exchange order...');
             await onCreate(sanitizedExchangeOrder);
 
-            await new Promise(resolve => setTimeout(resolve, 500));
-
             console.log(' Updating original order...');
             const sanitizedOriginalOrder = sanitizeForFirebase(updatedOriginalOrder);
             await onConfirm(order.id, updatedOriginalOrder.status, sanitizedOriginalOrder);

@@ -130,10 +130,28 @@ export const updateInventoryStock = async (productCode, size, qtyChange, invento
             // Match by canonical form so "2XL" finds "XXL" keys and vice versa
             const actualKey = Object.keys(product.stock || {}).find(k => normalizeSize(k) === sizeKey) || sizeKey;
 
+            // Guard: refuse deduction if it would push stock below 0
+            if (qtyChange < 0) {
+                const currentStock = Number(product.stock?.[actualKey] || 0);
+                if (currentStock + qtyChange < 0) {
+                    console.warn(`Stock guard: ${targetCode} (${actualKey}) has ${currentStock}, cannot deduct ${Math.abs(qtyChange)}`);
+                    throw new Error(`Insufficient stock for ${targetCode} (${actualKey}): available ${currentStock}, requested ${Math.abs(qtyChange)}`);
+                }
+            }
+
             await updateDoc(docRef, {
                 [`stock.${actualKey}`]: increment(qtyChange)
             });
         } else {
+            // Guard: refuse deduction if it would push stock below 0
+            if (qtyChange < 0) {
+                const currentStock = Number(product.totalStock || 0);
+                if (currentStock + qtyChange < 0) {
+                    console.warn(`Stock guard: ${targetCode} has ${currentStock}, cannot deduct ${Math.abs(qtyChange)}`);
+                    throw new Error(`Insufficient stock for ${targetCode}: available ${currentStock}, requested ${Math.abs(qtyChange)}`);
+                }
+            }
+
             await updateDoc(docRef, {
                 totalStock: increment(qtyChange)
             });

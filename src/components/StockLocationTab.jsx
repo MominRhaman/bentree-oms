@@ -158,4 +158,4 @@ const StockLocationTab = ({ locations }) => {
     );
 };
 
-export default StockLocationTab;
+export default React.memo(StockLocationTab);

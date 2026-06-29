@@ -154,4 +154,4 @@ const ExchangeTab = ({ orders, onCreate, onEdit, inventory }) => {
     );
 };
 
-export default ExchangeTab;
+export default React.memo(ExchangeTab);

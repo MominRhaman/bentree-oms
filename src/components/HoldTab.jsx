@@ -74,4 +74,4 @@ const HoldTab = ({ orders, onUpdate }) => {
     );
 };
 
-export default HoldTab;
+export default React.memo(HoldTab);

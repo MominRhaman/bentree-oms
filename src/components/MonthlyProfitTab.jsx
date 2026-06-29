@@ -271,4 +271,4 @@ const MonthlyProfitTab = ({ orders, inventory, expenses }) => {
     );
 };
 
-export default MonthlyProfitTab;
+export default React.memo(MonthlyProfitTab);

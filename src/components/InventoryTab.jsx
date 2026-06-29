@@ -54,7 +54,37 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
         return summary;
     }, [inventory]);
 
-    // --- 2. Main Inventory Logic ---
+    // --- 2. Pre-compute sales data keyed by product code ---
+    // Single O(orders) pass instead of O(inventory × orders) nested loop
+    const soldByCode = useMemo(() => {
+        const map = {};
+        orders.forEach(o => {
+            if (o.status === 'Cancelled' || o.status === 'Returned') return;
+            const orderSubtotal = Number(o.subtotal || 0);
+            const orderDiscount = Number(o.totalDiscount || 0);
+
+            (o.products || []).forEach(p => {
+                if (!p.code) return;
+                const code = p.code.toUpperCase();
+                if (!map[code]) map[code] = { soldQty: 0, revenue: 0 };
+
+                const qtySoldInOrder = Number(p.qty || 0);
+                const pricePerUnit = Number(p.price || 0);
+                const lineTotal = pricePerUnit * qtySoldInOrder;
+
+                map[code].soldQty += qtySoldInOrder;
+
+                let proportionalDiscount = 0;
+                if (orderSubtotal > 0) {
+                    proportionalDiscount = (lineTotal / orderSubtotal) * orderDiscount;
+                }
+                map[code].revenue += (lineTotal - proportionalDiscount);
+            });
+        });
+        return map;
+    }, [orders]);
+
+    // --- Main Inventory Logic (now O(inventory) instead of O(inventory × orders)) ---
     const inventoryStats = useMemo(() => {
         let filtered = inventory;
 
@@ -81,7 +111,7 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
             });
         }
 
-        // Map and Calculate Sales Data
+        // Map and Calculate Sales Data — O(1) lookup per item via soldByCode
         return filtered.map(item => {
             const qty = item.type === 'Variable'
                 ? Object.values(item.stock || {}).reduce((a, b) => a + Number(b || 0), 0)
@@ -90,33 +120,10 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
             const totalCost = qty * Number(item.unitCost || 0);
             const totalMrpValue = qty * Number(item.mrp || 0);
 
-            let soldQty = 0;
-            let revenue = 0;
-
             // Cross-reference with Orders to calculate sales performance
-            orders.forEach(o => {
-                if (o.status !== 'Cancelled' && o.status !== 'Returned') {
-                    const orderSubtotal = Number(o.subtotal || 0);
-                    const orderDiscount = Number(o.totalDiscount || 0);
-
-                    (o.products || []).forEach(p => {
-                        if (p.code && p.code.toUpperCase() === item.code.toUpperCase()) {
-                            const qtySoldInOrder = Number(p.qty || 0);
-                            const pricePerUnit = Number(p.price || 0);
-                            const lineTotal = pricePerUnit * qtySoldInOrder;
-
-                            soldQty += qtySoldInOrder;
-
-                            let proportionalDiscount = 0;
-                            if (orderSubtotal > 0) {
-                                proportionalDiscount = (lineTotal / orderSubtotal) * orderDiscount;
-                            }
-
-                            revenue += (lineTotal - proportionalDiscount);
-                        }
-                    });
-                }
-            });
+            const salesData = soldByCode[item.code.toUpperCase()] || { soldQty: 0, revenue: 0 };
+            const soldQty = salesData.soldQty;
+            const revenue = salesData.revenue;
 
             const cogs = soldQty * Number(item.unitCost || 0);
             const deviation = revenue - cogs;
@@ -136,7 +143,7 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
                 stockBreakdown
             };
         });
-    }, [inventory, orders, searchTerm, catFilter, historyStart, historyEnd]);
+    }, [inventory, soldByCode, searchTerm, catFilter, historyStart, historyEnd]);
 
     // --- 3. Grand Totals ---
     const grandTotals = useMemo(() => {
@@ -668,4 +675,4 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
     );
 };
 
-export default InventoryTab;
+export default React.memo(InventoryTab);

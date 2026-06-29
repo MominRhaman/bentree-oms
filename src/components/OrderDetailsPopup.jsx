@@ -368,9 +368,6 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
             await onCreate(sanitizedReturnOrder);
             console.log('Return order created successfully');
 
-            // Small delay to ensure Firebase sync
-            await new Promise(resolve => setTimeout(resolve, 500));
-
             // 3b. UPDATE original order
             console.log('Updating original order...');
             const sanitizedOriginalOrder = sanitizeForFirebase(updatedOriginalOrder);

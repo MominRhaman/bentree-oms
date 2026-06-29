@@ -336,4 +336,4 @@ const PrimaryOrders = ({ orders, onUpdate, onEdit, inventory = [] }) => {
     );
 };
 
-export default PrimaryOrders;
+export default React.memo(PrimaryOrders);

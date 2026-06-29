@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useMemo, useCallback } from 'react';
 import {
     Plus, ClipboardCheck, CheckCircle, Truck, PauseCircle,
     ArrowRightLeft, Ban, Layers, MapPin, Globe, ShoppingBag,
@@ -8,7 +8,7 @@ import {
 const Sidebar = ({ activeTab, setActiveTab, userRole, onLogout, user, setUser, isOpen, onClose }) => {
     const fileInputRef = useRef(null);
 
-    const allItems = [
+    const allItems = useMemo(() => [
         { id: 'new-order', label: 'New Order', icon: Plus, roles: ['master', 'employee', 'qmt'] },
         { id: 'primary', label: 'Primary Orders', icon: ClipboardCheck, roles: ['master', 'employee', 'qmt'] },
         { id: 'confirmed', label: 'Confirmed Orders', icon: CheckCircle, roles: ['master', 'employee', 'qmt'] },
@@ -22,11 +22,11 @@ const Sidebar = ({ activeTab, setActiveTab, userRole, onLogout, user, setUser, i
         { id: 'store-sales', label: 'Store Sales', icon: ShoppingBag, roles: ['master', 'employee'] },
         { id: 'reports', label: 'Sales Reports', icon: BarChart3, roles: ['master'] },
         { id: 'monthly-profit', label: 'Monthly Profit', icon: PieChart, roles: ['master'] },
-    ];
+    ], []);
 
-    const menuItems = allItems.filter(item => item.roles.includes(userRole));
+    const menuItems = useMemo(() => allItems.filter(item => item.roles.includes(userRole)), [allItems, userRole]);
 
-    const handleImageUpload = (e) => {
+    const handleImageUpload = useCallback((e) => {
         const file = e.target.files[0];
         const userName = user?.displayName || 'unknown_user';
         if (file) {
@@ -38,7 +38,7 @@ const Sidebar = ({ activeTab, setActiveTab, userRole, onLogout, user, setUser, i
             };
             reader.readAsDataURL(file);
         }
-    };
+    }, [user, setUser]);
 
     const displayImage = user?.photoURL;
 
@@ -147,4 +147,4 @@ const Sidebar = ({ activeTab, setActiveTab, userRole, onLogout, user, setUser, i
     );
 };
 
-export default Sidebar;
+export default React.memo(Sidebar);

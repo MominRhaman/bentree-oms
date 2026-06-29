@@ -333,4 +333,4 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
     );
 };
 
-export default CancelledOrders;
+export default React.memo(CancelledOrders);

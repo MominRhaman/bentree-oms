@@ -227,4 +227,4 @@ const InvoiceGenerator = ({ orders }) => {
     );
 };
 
-export default InvoiceGenerator;
+export default React.memo(InvoiceGenerator);

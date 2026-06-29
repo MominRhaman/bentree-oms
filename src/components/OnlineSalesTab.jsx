@@ -270,4 +270,4 @@ const OnlineSalesTab = ({ orders, inventory, onEdit, onCreate, onDelete }) => {
     );
 };
 
-export default OnlineSalesTab;
+export default React.memo(OnlineSalesTab);

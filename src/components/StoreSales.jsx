@@ -483,4 +483,4 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
     );
 };
 
-export default StoreSalesTab;
+export default React.memo(StoreSalesTab);

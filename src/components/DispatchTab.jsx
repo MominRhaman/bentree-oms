@@ -161,4 +161,4 @@ const DispatchTab = ({ orders, onUpdate }) => {
     );
 };
 
-export default DispatchTab;
+export default React.memo(DispatchTab);

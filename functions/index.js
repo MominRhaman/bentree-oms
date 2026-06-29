@@ -714,3 +714,4 @@ exports.wooUpdateOrder = onCall(async (request) => {
   logger.info("WooCommerce order status updated", {wcOrderId, status});
   return {ok: true};
 });
+

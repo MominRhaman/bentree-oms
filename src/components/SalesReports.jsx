@@ -382,4 +382,4 @@ const SalesReports = ({ orders, inventory }) => {
     );
 };
 
-export default SalesReports;
+export default React.memo(SalesReports);

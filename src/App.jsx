@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, lazy, Suspense } from 'react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { collection, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, arrayUnion, addDoc } from 'firebase/firestore';
 import { auth, db, appId } from './firebase';
@@ -7,23 +7,26 @@ import { adjustWooStock, wooUpdateOrder } from './WooAPI/wooStock';
 import { useScanner } from './hooks/useScanner';
 import { Menu } from 'lucide-react';
 
-// Component Imports
+// Component Imports — eagerly loaded (always visible)
 import LoginPage from './components/LoginPage';
 import Sidebar from './components/Sidebar';
-import NewOrderForm from './components/NewOrderForm';
-import InventoryTab from './components/InventoryTab';
-import StockLocationTab from './components/StockLocationTab';
-import MonthlyProfitTab from './components/MonthlyProfitTab';
-import PrimaryOrders from './components/PrimaryOrders';
-import ConfirmedOrders from './components/ConfirmedOrders';
-import HoldTab from './components/HoldTab';
-import DispatchTab from './components/DispatchTab';
-import StoreSales from './components/StoreSales';
-import ExchangeTab from './components/ExchangeTab';
-import CancelledOrders from './components/CancelledOrders';
-import OnlineSalesTab from './components/OnlineSalesTab';
-import SalesReports from './components/SalesReports';
-import BarcodePrintView from './components/BarcodePrintView';
+
+// Component Imports — lazy loaded (only one tab is active at a time)
+const NewOrderForm = lazy(() => import('./components/NewOrderForm'));
+const InventoryTab = lazy(() => import('./components/InventoryTab'));
+const StockLocationTab = lazy(() => import('./components/StockLocationTab'));
+const MonthlyProfitTab = lazy(() => import('./components/MonthlyProfitTab'));
+const PrimaryOrders = lazy(() => import('./components/PrimaryOrders'));
+const ConfirmedOrders = lazy(() => import('./components/ConfirmedOrders'));
+const HoldTab = lazy(() => import('./components/HoldTab'));
+const DispatchTab = lazy(() => import('./components/DispatchTab'));
+const StoreSales = lazy(() => import('./components/StoreSales'));
+const ExchangeTab = lazy(() => import('./components/ExchangeTab'));
+const CancelledOrders = lazy(() => import('./components/CancelledOrders'));
+const OnlineSalesTab = lazy(() => import('./components/OnlineSalesTab'));
+const SalesReports = lazy(() => import('./components/SalesReports'));
+const BarcodePrintView = lazy(() => import('./components/BarcodePrintView'));
+const OrderDetailsPopup = lazy(() => import('./components/OrderDetailsPopup'));
 
 function App() {
     const savedRole = localStorage.getItem('bentree_role');
@@ -90,22 +93,22 @@ function App() {
     }, []);
 
     // --- 3. Tab Navigation & URL Sync ---
-    const handleTabChange = (tabId) => {
+    const handleTabChange = useCallback((tabId) => {
         setActiveTab(tabId);
         localStorage.setItem('bentree_tab', tabId);
         const newUrl = `/${tabId}`;
         window.history.pushState({ path: newUrl }, '', newUrl);
-    };
+    }, []);
 
-    const handleLoginSuccess = (firebaseUser, role) => {
+    const handleLoginSuccess = useCallback((firebaseUser, role) => {
         localStorage.setItem('bentree_role', role);
         if (firebaseUser.displayName) localStorage.setItem('bentree_name', firebaseUser.displayName);
         setUser(firebaseUser);
         setUserRole(role);
         setLoading(true);
-    };
+    }, []);
 
-    const handleLogout = async () => {
+    const handleLogout = useCallback(async () => {
         await signOut(auth);
         localStorage.clear();
         setUser(null);
@@ -113,7 +116,7 @@ function App() {
         setOrders([]);
         setInventory([]);
         setLoading(false);
-    };
+    }, []);
 
     // --- 4. Real-time Data Listeners ---
     useEffect(() => {
@@ -152,10 +155,10 @@ function App() {
     });
 
     // Called from InventoryTab when user clicks the printer icon
-    const handleOpenBarcodePrint = (labels) => {
+    const handleOpenBarcodePrint = useCallback((labels) => {
         setBarcodePrintQueue(labels);
         handleTabChange('barcodePrintView');
-    };
+    }, [handleTabChange]);
 
     // --- 5. INVENTORY IMPACT LOGIC: Status Changes (Cancel/Return/Restore) ---
     const handleUpdateStatus = async (orderId, newStatus, extraData = {}) => {
@@ -178,9 +181,9 @@ function App() {
         let stockFlags = {};
 
         if (becomingInactive && wasActive) {
-            for (const p of order.products) {
-                await updateInventoryStock(p.code, p.size, Number(p.qty), inventory);
-            }
+            await Promise.all(order.products.map(p =>
+                updateInventoryStock(p.code, p.size, Number(p.qty), inventory)
+            ));
             stockFlags = { stockDeducted: false, deductedProducts: [] };
             // Orders without a wc_order_id need manual WooCommerce stock restore
             if (order.type === 'Online' && !order.wc_order_id) {
@@ -190,9 +193,9 @@ function App() {
             }
         }
         if (isRestoring) {
-            for (const p of order.products) {
-                await updateInventoryStock(p.code, p.size, -Number(p.qty), inventory);
-            }
+            await Promise.all(order.products.map(p =>
+                updateInventoryStock(p.code, p.size, -Number(p.qty), inventory)
+            ));
             stockFlags = { stockDeducted: true, deductedProducts: order.products };
             if (order.type === 'Online') {
                 adjustWooStock(order.products, -1).catch(e =>
@@ -257,17 +260,19 @@ function App() {
             const isActiveStatus = !['Cancelled', 'Returned'].includes(newStatus);
 
             // STEP 1: Restore old stock (if the order was active before the edit)
+            // Each updateInventoryStock targets a different inventory doc via increment(),
+            // so all calls within a batch can run concurrently.
             if (!['Cancelled', 'Returned'].includes(oldOrder.status)) {
-                for (const p of (oldOrder.products || [])) {
-                    await updateInventoryStock(p.code, p.size, Number(p.qty), inventory);
-                }
+                await Promise.all((oldOrder.products || []).map(p =>
+                    updateInventoryStock(p.code, p.size, Number(p.qty), inventory)
+                ));
             }
 
             // STEP 2: Deduct new stock (if the resulting status is active)
             if (isActiveStatus) {
-                for (const p of newProducts) {
-                    await updateInventoryStock(p.code, p.size, -Number(p.qty), inventory);
-                }
+                await Promise.all(newProducts.map(p =>
+                    updateInventoryStock(p.code, p.size, -Number(p.qty), inventory)
+                ));
             }
 
             // STEP 3: Database Operation
@@ -286,13 +291,17 @@ function App() {
             // Awaited sequentially: both calls read-then-write stock quantities,
             // so running them concurrently causes a race condition where the second
             // call overwrites the first (e.g. kept items end up double-deducted).
+            // Fire-after-commit: Firestore is already saved, so WooCommerce sync
+            // runs without blocking the UI response.
             if (oldOrder.type === 'Online') {
-                if (!['Cancelled', 'Returned'].includes(oldOrder.status)) {
-                    await adjustWooStock(oldOrder.products || [], +1);
-                }
-                if (isActiveStatus) {
-                    await adjustWooStock(newProducts, -1);
-                }
+                (async () => {
+                    if (!['Cancelled', 'Returned'].includes(oldOrder.status)) {
+                        await adjustWooStock(oldOrder.products || [], +1);
+                    }
+                    if (isActiveStatus) {
+                        await adjustWooStock(newProducts, -1);
+                    }
+                })().catch(e => console.error('[WooStock] Background sync failed:', e));
             }
 
             if (newStatus === 'Exchanged') alert("Exchange Successful!");
@@ -315,9 +324,9 @@ function App() {
             if (!['Cancelled', 'Returned'].includes(orderData.status)) {
                 console.log('Deducting inventory for active order...');
                 const products = orderData.products || [];
-                for (const p of products) {
-                    await updateInventoryStock(p.code, p.size, -Number(p.qty), inventory);
-                }
+                await Promise.all(products.map(p =>
+                    updateInventoryStock(p.code, p.size, -Number(p.qty), inventory)
+                ));
             } else {
                 console.log('Skipping inventory deduction for return/cancelled order');
             }
@@ -349,9 +358,9 @@ function App() {
     const handleDeleteOrder = async (orderId) => {
         const order = orders.find(o => o.id === orderId);
         if (order && !['Cancelled', 'Returned'].includes(order.status)) {
-            for (const p of order.products) {
-                await updateInventoryStock(p.code, p.size, Number(p.qty), inventory);
-            }
+            await Promise.all(order.products.map(p =>
+                updateInventoryStock(p.code, p.size, Number(p.qty), inventory)
+            ));
             // Restore WooCommerce stock for Online orders (fire-and-forget)
             if (order.type === 'Online') {
                 adjustWooStock(order.products, +1).catch(e =>
@@ -368,45 +377,66 @@ function App() {
         await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', orderId));
     };
 
-    const handleEditInventory = async (id, updatedData) => {
+    const handleEditInventory = useCallback(async (id, updatedData) => {
         try { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventory', id), updatedData); }
         catch (e) { alert("Inventory update failed"); }
-    };
-    const handleDeleteInventory = async (id) => {
+    }, []);
+    const handleDeleteInventory = useCallback(async (id) => {
         try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventory', id)); }
         catch (e) { alert("Inventory delete failed"); }
-    };
+    }, []);
+
+    // Memoize filtered order subsets so child components only re-render when their slice changes
+    const primaryOrders = useMemo(() => orders.filter(o => o.type === 'Online' && o.status === 'Pending'), [orders]);
+    const confirmedOrders = useMemo(() => orders.filter(o => o.type === 'Online' && ['Confirmed', 'Dispatched', 'Delivered', 'Returned', 'Exchanged', 'Hold'].includes(o.status)), [orders]);
+    const holdOrders = useMemo(() => orders.filter(o => o.type === 'Online' && o.status === 'Hold'), [orders]);
+    const dispatchOrders = useMemo(() => orders.filter(o => o.type === 'Online' && ['Confirmed', 'Dispatched', 'Exchanged'].includes(o.status)), [orders]);
+    const storeOrders = useMemo(() => orders.filter(o => o.type === 'Store'), [orders]);
+    const exchangeOrders = useMemo(() => orders.filter(o => o.type === 'Online' && (o.status === 'Exchanged' || o.exchangeDetails || o.isPartialExchange)), [orders]);
+    const cancelledReturnedOrders = useMemo(() => orders.filter(o => o.type === 'Online' && (o.status === 'Cancelled' || o.status === 'Returned')), [orders]);
+
+    // Pre-index inventory by uppercase code for O(1) lookups in child components
+    const inventoryMap = useMemo(() => {
+        const map = new Map();
+        inventory.forEach(item => { if (item.code) map.set(item.code.toUpperCase(), item); });
+        return map;
+    }, [inventory]);
+
+    // Memoize shared prop objects so child components receive stable references
+    const commonProps = useMemo(() => ({ inventory, locations, orders, user, onEdit: handleEditInventory, onDelete: handleDeleteInventory }), [inventory, locations, orders, user, handleEditInventory, handleDeleteInventory]);
+    const orderProps = useMemo(() => ({
+        orders,
+        onUpdate: handleUpdateStatus,
+        onEdit: handleEditOrderWithStock,
+        onCreate: handleCreateOrder,
+        onDelete: handleDeleteOrder,
+        inventory
+    }), [orders, handleUpdateStatus, handleEditOrderWithStock, handleCreateOrder, handleDeleteOrder, inventory]);
+
+    const handleBarcodeClose = useCallback(() => handleTabChange('inventory'), [handleTabChange]);
+
+    const tabFallback = <div className="flex justify-center items-center h-64 text-slate-400 animate-pulse font-bold tracking-widest uppercase">Loading...</div>;
 
     const renderContent = () => {
         if (loading && !isDataReceived) {
             return <div className="flex justify-center items-center h-64 text-slate-400 animate-pulse font-bold tracking-widest uppercase">Initializing System...</div>;
         }
 
-        const commonProps = { inventory, locations, orders, user, onEdit: handleEditInventory, onDelete: handleDeleteInventory };
-        const orderProps = {
-            orders,
-            onUpdate: handleUpdateStatus,
-            onEdit: handleEditOrderWithStock,
-            onCreate: handleCreateOrder,
-            onDelete: handleDeleteOrder,
-            inventory
-        };
-
         switch (activeTab) {
             case 'new-order': return <NewOrderForm user={user} existingOrders={orders} setActiveTab={handleTabChange} inventory={inventory} />;
             case 'inventory': return ( <InventoryTab {...commonProps} onOpenBarcodePrint={handleOpenBarcodePrint} /> );
             case 'stock-location': return <StockLocationTab locations={locations} />;
             case 'monthly-profit': return userRole === 'master' ? <MonthlyProfitTab orders={orders} inventory={inventory} expenses={expenses} /> : <div className="p-10 text-center text-slate-400">Master access required.</div>;
-            case 'primary': return <PrimaryOrders orders={orders.filter(o => o.type === 'Online' && o.status === 'Pending')} onUpdate={handleUpdateStatus} onEdit={handleEditOrderWithStock} onCreate={handleCreateOrder} inventory={inventory} />;
-            case 'confirmed': return <ConfirmedOrders allOrders={orders} orders={orders.filter(o => o.type === 'Online' && ['Confirmed', 'Dispatched', 'Delivered', 'Returned', 'Exchanged', 'Hold'].includes(o.status))} {...orderProps} userRole={userRole} />;
-            case 'hold': return <HoldTab orders={orders.filter(o => o.type === 'Online' && o.status === 'Hold')} onUpdate={handleUpdateStatus} onCreate={handleCreateOrder} />;
-            case 'dispatch': return <DispatchTab orders={orders.filter(o => o.type === 'Online' && ['Confirmed', 'Dispatched', 'Exchanged'].includes(o.status))} onUpdate={handleUpdateStatus} onCreate={handleCreateOrder} />;
-            case 'store-sales': return <StoreSales orders={orders.filter(o => o.type === 'Store')} {...orderProps} />;
-            case 'exchange': return <ExchangeTab orders={orders.filter(o => o.type === 'Online' && (o.status === 'Exchanged' || o.exchangeDetails || o.isPartialExchange))} onCreate={handleCreateOrder} onEdit={handleEditOrderWithStock} inventory={inventory} />;
-            case 'cancelled': return <CancelledOrders orders={orders.filter(o => o.type === 'Online' && (o.status === 'Cancelled' || o.status === 'Returned'))} onUpdate={handleUpdateStatus} onDelete={handleDeleteOrder} onEdit={handleEditOrderWithStock} onCreate={handleCreateOrder} inventory={inventory} userRole={userRole} />;
+            case 'primary': return <PrimaryOrders orders={primaryOrders} onUpdate={handleUpdateStatus} onEdit={handleEditOrderWithStock} onCreate={handleCreateOrder} inventory={inventory} />;
+            case 'confirmed': return <ConfirmedOrders allOrders={orders} orders={confirmedOrders} {...orderProps} userRole={userRole} />;
+            case 'hold': return <HoldTab orders={holdOrders} onUpdate={handleUpdateStatus} onCreate={handleCreateOrder} />;
+            case 'dispatch': return <DispatchTab orders={dispatchOrders} onUpdate={handleUpdateStatus} onCreate={handleCreateOrder} />;
+            case 'store-sales': return <StoreSales orders={storeOrders} {...orderProps} />;
+            case 'exchange': return <ExchangeTab orders={exchangeOrders} onCreate={handleCreateOrder} onEdit={handleEditOrderWithStock} inventory={inventory} />;
+            case 'cancelled': return <CancelledOrders orders={cancelledReturnedOrders} onUpdate={handleUpdateStatus} onDelete={handleDeleteOrder} onEdit={handleEditOrderWithStock} onCreate={handleCreateOrder} inventory={inventory} userRole={userRole} />;
             case 'online-sales': return <OnlineSalesTab {...orderProps} />;
             case 'reports': return userRole === 'master' ? <SalesReports {...orderProps} /> : <div className="p-10 text-center text-slate-400">Master access required.</div>;
-            case 'barcodePrintView': return (  <BarcodePrintView items={barcodePrintQueue} onClose={() => handleTabChange('inventory')} /> );
+            case 'barcodePrintView': return ( <BarcodePrintView items={barcodePrintQueue} onClose={handleBarcodeClose} /> );
             default: return <div className="p-10 text-center">Invalid Tab Selected</div>;
         }
     };
@@ -424,20 +454,24 @@ function App() {
                     <div className="w-6"></div>
                 </div>
                 <div className="p-4 lg:p-8 min-w-[350px] lg:min-w-[1000px]">
-                    {renderContent()}
+                    <Suspense fallback={tabFallback}>
+                        {renderContent()}
+                    </Suspense>
                 </div>
             </main>
 
             {/* --- GLOBAL SCANNER POPUP --- */}
             {scannedOrder && (
-                <OrderDetailsPopup
-                    order={scannedOrder}
-                    onClose={() => setScannedOrder(null)}
-                    getStatusColor={getStatusColor}
-                    onEdit={handleEditOrderWithStock}
-                    onCreate={handleCreateOrder}
-                    inventory={inventory}
-                />
+                <Suspense fallback={null}>
+                    <OrderDetailsPopup
+                        order={scannedOrder}
+                        onClose={() => setScannedOrder(null)}
+                        getStatusColor={getStatusColor}
+                        onEdit={handleEditOrderWithStock}
+                        onCreate={handleCreateOrder}
+                        inventory={inventory}
+                    />
+                </Suspense>
             )}
         </div>
     );

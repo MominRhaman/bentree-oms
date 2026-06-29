@@ -231,7 +231,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
             if (!p.qty || Number(p.qty) <= 0) rowErrors.qty = "Invalid";
             if (!p.price) rowErrors.price = "Required";
 
-            const stockMsg = getStockError(p);
+            const stockMsg = getStockError(p, formData.products);
             if (stockMsg) rowErrors.stock = stockMsg;
 
             if (Object.keys(rowErrors).length > 0) {
@@ -335,6 +335,33 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         }
 
         try {
+            // Final stock validation before deduction — prevents negative inventory
+            // even if real-time state changed between form fill and submit
+            const stockIssues = [];
+            const qtyMap = {};
+            for (const p of formData.products) {
+                const key = `${p.code.trim().toUpperCase()}|${(p.size || '').trim().toUpperCase()}`;
+                qtyMap[key] = (qtyMap[key] || 0) + Number(p.qty || 0);
+            }
+            for (const [key, totalQty] of Object.entries(qtyMap)) {
+                const [code, size] = key.split('|');
+                const invItem = inventory.find(i => i.code.toUpperCase() === code);
+                if (!invItem) { stockIssues.push(`${code}: not found`); continue; }
+                if (invItem.type === 'Variable') {
+                    const sizeKey = Object.keys(invItem.stock || {}).find(k => k.toUpperCase() === size);
+                    const avail = Number(invItem.stock?.[sizeKey] || 0);
+                    if (totalQty > avail) stockIssues.push(`${code} (${size}): need ${totalQty}, have ${avail}`);
+                } else {
+                    const avail = Number(invItem.totalStock || 0);
+                    if (totalQty > avail) stockIssues.push(`${code}: need ${totalQty}, have ${avail}`);
+                }
+            }
+            if (stockIssues.length > 0) {
+                setGlobalError(`Insufficient Stock: ${stockIssues.join('; ')}`);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+                return;
+            }
+
             for (const p of formData.products) {
                 await updateInventoryStock(p.code, p.size, -Number(p.qty), inventory);
             }
@@ -852,4 +879,4 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
     );
 };
 
-export default NewOrderForm;
+export default React.memo(NewOrderForm);
