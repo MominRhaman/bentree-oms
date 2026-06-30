@@ -3,7 +3,7 @@ import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { collection, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, arrayUnion, addDoc } from 'firebase/firestore';
 import { auth, db, appId } from './firebase';
 import { getStatusColor, updateInventoryStock } from './utils';
-import { adjustWooStock, wooUpdateOrder } from './WooAPI/wooStock';
+import { adjustWooStock, wooUpdateOrder, wooSyncOrder } from './WooAPI/wooStock';
 import { useScanner } from './hooks/useScanner';
 import { Menu } from 'lucide-react';
 
@@ -185,44 +185,26 @@ function App() {
                 updateInventoryStock(p.code, p.size, Number(p.qty), inventory)
             ));
             stockFlags = { stockDeducted: false, deductedProducts: [] };
-            // Orders without a wc_order_id need manual WooCommerce stock restore
-            if (order.type === 'Online' && !order.wc_order_id) {
-                adjustWooStock(order.products, +1).catch(e =>
-                    console.error('[WooStock] Cancel restore failed:', e)
-                );
-            }
         }
         if (isRestoring) {
             await Promise.all(order.products.map(p =>
                 updateInventoryStock(p.code, p.size, -Number(p.qty), inventory)
             ));
             stockFlags = { stockDeducted: true, deductedProducts: order.products };
-            if (order.type === 'Online') {
-                adjustWooStock(order.products, -1).catch(e =>
-                    console.error('[WooStock] Re-activate deduct failed:', e)
-                );
-            }
         }
 
-        // Sync OMS status changes → WooCommerce order status.
-        // Guard: only fire when the status is actually changing. Without this guard,
-        // calling handleUpdateStatus on an already-Returned order (e.g. the return record
-        // created during a partial return) would re-fire wooUpdateOrder for the original
-        // WooCommerce order ID, triggering the webhook and overwriting Firestore data.
-        if (order.wc_order_id && order.status !== newStatus) {
-            const WC_STATUS = {
-                'Delivered':  'completed',
-                'Completed':  'completed', // Store checkout
-                'Cancelled':  'cancelled',
-                'Returned':   'refunded',
-            };
-            const wcStatus = WC_STATUS[newStatus];
-            if (wcStatus) {
-                wooUpdateOrder(order.wc_order_id, wcStatus).catch(e =>
-                    console.error(`[WooOrder] ${newStatus}→${wcStatus} sync failed:`, e)
-                );
-            }
-        }
+        // WooCommerce status to sync to, if this status change is actually changing
+        // (guard prevents re-firing wooUpdateOrder on an already-Returned order, e.g.
+        // the return record created during a partial return, which would overwrite
+        // the original WooCommerce order's Firestore data via its webhook).
+        const WC_STATUS = {
+            'Delivered':  'completed',
+            'Completed':  'completed', // Store checkout
+            'Cancelled':  'cancelled',
+            'Returned':   'cancelled',
+        };
+        const wcStatus = (order.wc_order_id && order.status !== newStatus) ?
+            WC_STATUS[newStatus] : null;
 
         try {
             const orderRef = doc(db, 'artifacts', appId, 'public', 'data', 'orders', activeId);
@@ -235,13 +217,38 @@ function App() {
 
             const { id, createdAt, ...cleanExtraData } = extraData;
 
+            // Stamp BEFORE any background WooCommerce call starts (not after), so
+            // guard 4c in the webhook handler reliably skips the resulting bounce-back.
             await updateDoc(orderRef, {
                 ...cleanExtraData,
                 ...stockFlags,
                 status: newStatus,
-                history: arrayUnion(historyEntry)
+                history: arrayUnion(historyEntry),
+                ...(order.wc_order_id ? { _omsEditedAt: serverTimestamp() } : {})
             });
-        } catch (err) { console.error("Update Status Error:", err); }
+        } catch (err) {
+            console.error("Update Status Error:", err);
+            return;
+        }
+
+        // Background WooCommerce sync — fires only after the Firestore write above
+        // (including the _omsEditedAt stamp) has committed.
+        if (becomingInactive && wasActive && order.type === 'Online' && !order.wc_order_id) {
+            // Orders without a wc_order_id need manual WooCommerce stock restore
+            adjustWooStock(order.products, +1).catch(e =>
+                console.error('[WooStock] Cancel restore failed:', e)
+            );
+        }
+        if (isRestoring && order.type === 'Online') {
+            adjustWooStock(order.products, -1).catch(e =>
+                console.error('[WooStock] Re-activate deduct failed:', e)
+            );
+        }
+        if (wcStatus) {
+            wooUpdateOrder(order.wc_order_id, wcStatus).catch(e =>
+                console.error(`[WooOrder] ${newStatus}→${wcStatus} sync failed:`, e)
+            );
+        }
     };
 
     // --- 6. INVENTORY IMPACT LOGIC: Edits & Exchanges ---
@@ -284,7 +291,17 @@ function App() {
                 status: newStatus,
                 lastEditedBy: user?.displayName || 'Admin',
                 stockDeducted: isActiveStatus,
-                deductedProducts: isActiveStatus ? newProducts : []
+                deductedProducts: isActiveStatus ? newProducts : [],
+                // Stamp BEFORE any background WooCommerce call starts (not inside
+                // wooSyncOrder) so the webhook bounce-back guard is active from the
+                // earliest possible moment. adjustWooStock and wooSyncOrder run
+                // concurrently below — if adjustWooStock's product-stock PUT were
+                // to trigger an order-related webhook before wooSyncOrder reaches
+                // its own stamp, that webhook would arrive unguarded and read the
+                // order's still-stale line items, causing the webhook's
+                // syncInventory to deduct the original product again instead of
+                // restoring it.
+                ...(oldOrder.type === 'Online' ? { _omsEditedAt: serverTimestamp() } : {})
             });
 
             // Sync WooCommerce stock for Online orders.
@@ -294,14 +311,48 @@ function App() {
             // Fire-after-commit: Firestore is already saved, so WooCommerce sync
             // runs without blocking the UI response.
             if (oldOrder.type === 'Online') {
+                // Will the status-sync call below transition this order to
+                // Cancelled/Returned on WooCommerce? If so, WooCommerce's own
+                // built-in stock restoration fires automatically for that
+                // transition (same reason handleUpdateStatus skips its manual
+                // restore when wc_order_id is set). Explicitly restoring via
+                // adjustWooStock as well would double the website stock.
+                const wooWillAutoRestock = !!oldOrder.wc_order_id &&
+                    oldOrder.status !== newStatus &&
+                    ['Cancelled', 'Returned'].includes(newStatus);
+
                 (async () => {
-                    if (!['Cancelled', 'Returned'].includes(oldOrder.status)) {
+                    if (!['Cancelled', 'Returned'].includes(oldOrder.status) && !wooWillAutoRestock) {
                         await adjustWooStock(oldOrder.products || [], +1);
                     }
                     if (isActiveStatus) {
                         await adjustWooStock(newProducts, -1);
                     }
                 })().catch(e => console.error('[WooStock] Background sync failed:', e));
+
+                // Sync order details to WooCommerce (non-blocking)
+                wooSyncOrder({
+                    ...updatedData,
+                    wc_order_id: oldOrder.wc_order_id,
+                    products: newProducts
+                }).catch(e => console.error('[WooSync] Background sync failed:', e));
+
+                // Sync status to WooCommerce when transitioning to Cancelled/Returned
+                // (e.g. the "Full Return" action, which goes through this function
+                // rather than handleUpdateStatus). Both OMS statuses map to the
+                // website's Cancelled status.
+                if (wooWillAutoRestock) {
+                    const WC_STATUS_FOR_EDIT = {
+                        'Cancelled': 'cancelled',
+                        'Returned': 'cancelled',
+                    };
+                    const wcStatus = WC_STATUS_FOR_EDIT[newStatus];
+                    if (wcStatus) {
+                        wooUpdateOrder(oldOrder.wc_order_id, wcStatus).catch(e =>
+                            console.error(`[WooOrder] ${newStatus}→${wcStatus} sync failed:`, e)
+                        );
+                    }
+                }
             }
 
             if (newStatus === 'Exchanged') alert("Exchange Successful!");

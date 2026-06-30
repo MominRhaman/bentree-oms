@@ -341,23 +341,63 @@ exports.woocommerceWebhook = onRequest(async (req, res) => {
 
     logger.info("WooCommerce webhook received", {orderId: data.id, topic});
 
-    // Skip orders that were created from the OMS itself.
-    // wooOrders.js sets meta_data._oms_created=true when creating orders
-    // via the WooCommerce API, so the webhook doesn't create a duplicate
-    // Firestore document for orders already saved by NewOrderForm.
+    // Skip ORDER CREATION webhooks for orders that were created from
+    // the OMS itself. wooOrders.js sets meta_data._oms_created=true
+    // when creating orders via the WooCommerce API, so the webhook
+    // doesn't create a duplicate Firestore document for orders already
+    // saved by NewOrderForm.
+    // IMPORTANT: this only applies to order.created. order.updated and
+    // order.deleted must always be processed — otherwise a product
+    // replaced directly on the website for an OMS-originated order
+    // would never sync back into the OMS (the order keeps the
+    // _oms_created tag forever, so it would silently skip every future
+    // edit too).
     const meta = data.meta_data || [];
     const isOmsOrder = meta.some(
         (m) => m.key === "_oms_created" && m.value === "true",
     );
-    if (isOmsOrder) {
-      logger.info("Skipping OMS-created order", {orderId: data.id});
+
+    // WooCommerce frequently fires a second order.updated webhook
+    // within ~1s of order.created (an internal recalculation echo —
+    // e.g. attribution/meta processing). The OMS already deducted
+    // inventory for this order at creation time via its own flow
+    // (e.g. NewOrderForm), but the Firestore doc isn't tagged with
+    // stockDeducted/deductedProducts yet at that point. Without this
+    // guard, that echo update gets treated as "previously cancelled,
+    // now reactivated" and deducts stock a second time. Treat any
+    // update/delete arriving within 60s of the order's own creation
+    // as part of the same creation event and skip it too.
+    const createdGmt = data.date_created_gmt ?
+      new Date(data.date_created_gmt + "Z") : null;
+    const sinceCreateMs = createdGmt ?
+      Date.now() - createdGmt.getTime() : Infinity;
+    const isCreationEcho = isOmsOrder && sinceCreateMs < 60000;
+
+    if (isOmsOrder && (topic === "order.created" || isCreationEcho)) {
+      logger.info("Skipping OMS-created order",
+          {orderId: data.id, topic, sinceCreateMs});
       return res.status(200).send("OK");
     }
 
-    const docId = String(data.id);
+    // Resolve the Firestore document for this WooCommerce order.
+    // Webhook-originated orders live at orders/{wcId}. OMS-originated
+    // orders live at an auto-generated doc ID with wc_order_id stored
+    // as a field. Without this lookup, an order.updated/deleted webhook
+    // for an OMS-created order would create a duplicate document at
+    // orders/{wcId} instead of updating the OMS's real document.
+    let docId = String(data.id);
 
     // ── 3. Fetch existing order state (for inventory sync) ────────────────
-    const existingSnap = await ordersCol().doc(docId).get();
+    let existingSnap = await ordersCol().doc(docId).get();
+    if (!existingSnap.exists) {
+      const altQuery = await ordersCol()
+          .where("wc_order_id", "==", data.id)
+          .limit(1).get();
+      if (!altQuery.empty) {
+        docId = altQuery.docs[0].id;
+        existingSnap = altQuery.docs[0];
+      }
+    }
     const existing = existingSnap.exists ? existingSnap.data() : {};
     const wasDeducted = existing.stockDeducted === true;
     const deductedProds = existing.deductedProducts || [];
@@ -367,8 +407,26 @@ exports.woocommerceWebhook = onRequest(async (req, res) => {
     // Letting the webhook overwrite with the full WooCommerce payload would
     // restore all returned items and re-deduct stock incorrectly.
     if (existing._oms_partial_return === true) {
-      logger.info("Skipping webhook — OMS partial return", {orderId: data.id});
+      logger.info("Skipping webhook — OMS partial return",
+          {orderId: data.id});
       return res.status(200).send("OK");
+    }
+
+    // ── 4c. Guard: bounce-back from OMS→Woo sync ───────────
+    // handleEditOrderWithStock stamps _omsEditedAt synchronously, before
+    // any background WooCommerce call (adjustWooStock / wooSyncOrder)
+    // starts, so any webhook resulting from those calls is covered.
+    // Window widened to 90s to absorb slower webhook delivery.
+    if (existing._omsEditedAt) {
+      const raw = existing._omsEditedAt;
+      const editedAt = raw.toDate ?
+        raw.toDate() : new Date(raw);
+      const ageMs = Date.now() - editedAt.getTime();
+      if (ageMs < 90000) {
+        logger.info("Skipping webhook — OMS sync bounce",
+            {orderId: data.id, ageMs});
+        return res.status(200).send("OK");
+      }
     }
 
     // ── 4b. order.deleted → restore stock + soft-cancel ──────────────────
@@ -391,7 +449,36 @@ exports.woocommerceWebhook = onRequest(async (req, res) => {
 
     // ── 5. Save / update order document ──────────────────────────────────
     const orderData = mapWooOrder(data);
-    await ordersCol().doc(docId).set(orderData, {merge: true});
+
+    if (isOmsOrder) {
+      // This order originated in the OMS. A full merge of mapWooOrder's
+      // output would clobber OMS-only bookkeeping fields (merchantOrderId,
+      // orderSource, remarks, createdAt) with generic WooCommerce values.
+      // Only sync the fields the website is genuinely authoritative for:
+      // customer info, products/pricing, delivery charge, notes, status.
+      // dueAmount is recalculated using the OMS's existing advance/
+      // collected amounts so OMS payment tracking stays consistent.
+      const advance = Number(existing.advanceAmount || 0);
+      const collected = Number(existing.collectedAmount || 0);
+      const scopedUpdate = {
+        recipientName: orderData.recipientName,
+        recipientPhone: orderData.recipientPhone,
+        recipientAddress: orderData.recipientAddress,
+        recipientCity: orderData.recipientCity,
+        recipientZone: orderData.recipientZone,
+        products: orderData.products,
+        subtotal: orderData.subtotal,
+        grandTotal: orderData.grandTotal,
+        deliveryCharge: orderData.deliveryCharge,
+        dueAmount: orderData.grandTotal - advance - collected,
+        specialInstructions: orderData.specialInstructions,
+        status: orderData.status,
+        updatedAt: orderData.updatedAt,
+      };
+      await ordersCol().doc(docId).set(scopedUpdate, {merge: true});
+    } else {
+      await ordersCol().doc(docId).set(orderData, {merge: true});
+    }
     logger.info("Order saved", {
       orderId: data.id, status: orderData.status,
     });
@@ -711,7 +798,133 @@ exports.wooUpdateOrder = onCall(async (request) => {
   if (!wcOrderId) return {ok: false, reason: "missing wcOrderId"};
   const api = makeWooApi();
   await api.put(`/orders/${wcOrderId}`, {status});
-  logger.info("WooCommerce order status updated", {wcOrderId, status});
+  logger.info("WooCommerce order status updated",
+      {wcOrderId, status});
+  return {ok: true};
+});
+
+// ── wooSyncOrder onCall ─────────────────────────────────────────
+
+/**
+ * Push OMS order edits to WooCommerce.
+ * Sets _omsEditedAt on the Firestore doc so the resulting
+ * webhook bounce-back is skipped (see guard 4c above).
+ */
+exports.wooSyncOrder = onCall(async (request) => {
+  const order = request.data || {};
+  const wcId = order.wc_order_id;
+  if (!wcId) return {ok: false, reason: "no wc_order_id"};
+
+  const api = makeWooApi();
+  const payload = {};
+
+  // ── Customer / shipping info ────────────────────────────────
+  const name = (order.recipientName || "").trim();
+  if (name) {
+    const parts = name.split(" ");
+    const first = parts[0] || "";
+    const last = parts.slice(1).join(" ") || "";
+    payload.billing = {
+      first_name: first,
+      last_name: last,
+      phone: order.recipientPhone || "",
+      address_1: order.recipientAddress || "",
+      city: order.recipientCity || "",
+      state: order.recipientZone || "",
+    };
+    payload.shipping = {
+      first_name: first,
+      last_name: last,
+      address_1: order.recipientAddress || "",
+      city: order.recipientCity || "",
+      state: order.recipientZone || "",
+    };
+  }
+
+  // ── Notes ───────────────────────────────────────────────────
+  if (order.specialInstructions !== undefined ||
+      order.remarks !== undefined) {
+    payload.customer_note =
+      order.specialInstructions ||
+      order.remarks || "";
+  }
+
+  // ── Shipping total ──────────────────────────────────────────
+  if (order.deliveryCharge !== undefined) {
+    payload.shipping_lines = [{
+      method_title: "Shipping",
+      method_id: "flat_rate",
+      total: String(Number(order.deliveryCharge || 0)),
+    }];
+  }
+
+  // ── Products → line_items ───────────────────────────────────
+  // Woo PUT keeps old items and appends new ones. To replace:
+  // 1) Fetch current order for existing line_item IDs
+  // 2) Reuse IDs for updated items (overwrites in place)
+  // 3) Zero out any excess old items
+  // 4) Add extra new items without an ID (appended)
+  if (order.products && order.products.length > 0) {
+    const {data: wcOrder} = await api.get(`/orders/${wcId}`);
+    const oldItems = wcOrder.line_items || [];
+    const newItems =
+      await resolveWooLineItems(api, order.products);
+
+    const merged = [];
+    // Overwrite old slots with new product data
+    for (let i = 0; i < Math.max(oldItems.length, newItems.length); i++) {
+      if (i < newItems.length && i < oldItems.length) {
+        // Reuse existing line_item ID → in-place update
+        merged.push({id: oldItems[i].id, ...newItems[i]});
+      } else if (i < newItems.length) {
+        // More new items than old → append (no id)
+        merged.push(newItems[i]);
+      } else {
+        // More old items than new → zero out excess
+        merged.push({
+          id: oldItems[i].id,
+          product_id: oldItems[i].product_id,
+          quantity: 0, subtotal: "0", total: "0",
+        });
+      }
+    }
+    payload.line_items = merged;
+  }
+
+  if (Object.keys(payload).length === 0) {
+    return {ok: true, reason: "nothing to sync"};
+  }
+
+  // Stamp Firestore BEFORE pushing so the bounce-back
+  // webhook is skipped by guard 4c.
+  // Try direct doc path first (webhook-created orders),
+  // then query by wc_order_id (OMS-created orders).
+  try {
+    const directDoc = ordersCol().doc(String(wcId));
+    const snap = await directDoc.get();
+    if (snap.exists) {
+      await directDoc.update({
+        _omsEditedAt: FieldValue.serverTimestamp(),
+      });
+    } else {
+      const q = await ordersCol()
+          .where("wc_order_id", "==", Number(wcId))
+          .limit(1).get();
+      if (!q.empty) {
+        await q.docs[0].ref.update({
+          _omsEditedAt: FieldValue.serverTimestamp(),
+        });
+      }
+    }
+  } catch (stampErr) {
+    logger.warn("Could not stamp _omsEditedAt",
+        {wcId, err: stampErr.message});
+  }
+
+  await api.put(`/orders/${wcId}`, payload);
+  logger.info("Woo order synced from OMS", {
+    wcId, fields: Object.keys(payload),
+  });
   return {ok: true};
 });
 

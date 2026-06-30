@@ -36,3 +36,20 @@ export async function wooUpdateOrder(wcOrderId, status) {
     }
 }
 
+/**
+ * Sync OMS order edits (customer, products, notes, shipping)
+ * to WooCommerce. Fire-and-forget safe.
+ *
+ * @param {object} orderData - OMS order (must include wc_order_id)
+ */
+export async function wooSyncOrder(orderData) {
+    if (!orderData?.wc_order_id) return;
+    const fn = httpsCallable(functions, 'wooSyncOrder');
+    try {
+        await fn(orderData);
+        console.log(`[WooSync] Order ${orderData.wc_order_id} synced`);
+    } catch (err) {
+        console.error('[WooSync] Failed:', err?.message || err);
+    }
+}
+

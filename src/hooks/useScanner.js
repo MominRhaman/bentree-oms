@@ -18,7 +18,7 @@ export const useScanner = (onScan) => {
                     onScan(buffer.current);
                     buffer.current = ''; // Clear after successful scan
                 }
-            } else if (e.key.length === 1) {
+            } else if (e.key && e.key.length === 1) {
                 // Add character to buffer
                 buffer.current += e.key;
             }
