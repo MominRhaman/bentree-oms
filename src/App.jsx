@@ -25,6 +25,7 @@ const ExchangeTab = lazy(() => import('./components/ExchangeTab'));
 const CancelledOrders = lazy(() => import('./components/CancelledOrders'));
 const OnlineSalesTab = lazy(() => import('./components/OnlineSalesTab'));
 const SalesReports = lazy(() => import('./components/SalesReports'));
+const SalesInventoryReport = lazy(() => import('./components/SalesInventoryReport'));
 const BarcodePrintView = lazy(() => import('./components/BarcodePrintView'));
 const OrderDetailsPopup = lazy(() => import('./components/OrderDetailsPopup'));
 
@@ -54,6 +55,7 @@ function App() {
     const [inventory, setInventory] = useState([]);
     const [locations, setLocations] = useState([]);
     const [expenses, setExpenses] = useState([]);
+    const [inventoryAdjustments, setInventoryAdjustments] = useState([]);
 
     // --- 2. Authentication Observer ---
     useEffect(() => {
@@ -134,8 +136,9 @@ function App() {
         const unsubInv = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'inventory'), (snap) => setInventory(snap.docs.map(d => ({ id: d.id, ...d.data() }))), handleSnapshotError);
         const unsubLoc = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'locations'), (snap) => setLocations(snap.docs.map(d => ({ id: d.id, ...d.data() }))), handleSnapshotError);
         const unsubExp = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'expenses'), (snap) => setExpenses(snap.docs.map(d => ({ id: d.id, ...d.data() }))), handleSnapshotError);
+        const unsubAdj = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'inventoryAdjustments'), (snap) => setInventoryAdjustments(snap.docs.map(d => ({ id: d.id, ...d.data() }))), handleSnapshotError);
 
-        return () => { unsubOrders(); unsubInv(); unsubLoc(); unsubExp(); };
+        return () => { unsubOrders(); unsubInv(); unsubLoc(); unsubExp(); unsubAdj(); };
     }, [user]);
 
     // --- SCANNER INTEGRATION ---
@@ -275,10 +278,32 @@ function App() {
                 ));
             }
 
-            // STEP 2: Deduct new stock (if the resulting status is active)
+            // STEP 2: Deduct new stock (if the resulting status is active).
+            // React state lags behind the Firestore increments done in STEP 1, so build
+            // an effectiveInventory that reflects those restorations for the guard check.
             if (isActiveStatus) {
+                const wasActiveBeforeEdit = !['Cancelled', 'Returned'].includes(oldOrder.status);
+                const restoredProducts = wasActiveBeforeEdit ? (oldOrder.products || []) : [];
+                const effectiveInventory = restoredProducts.length === 0
+                    ? inventory
+                    : inventory.map(item => {
+                        const code = (item.code || '').toUpperCase();
+                        const toRestore = restoredProducts.filter(p => (p.code || '').toUpperCase() === code);
+                        if (toRestore.length === 0) return item;
+                        if (item.type === 'Variable') {
+                            const newStock = { ...item.stock };
+                            toRestore.forEach(p => {
+                                const sz = (p.size || '').toUpperCase();
+                                const key = Object.keys(newStock).find(k => k.toUpperCase() === sz) || sz;
+                                newStock[key] = Number(newStock[key] || 0) + Number(p.qty || 0);
+                            });
+                            return { ...item, stock: newStock };
+                        }
+                        const addedQty = toRestore.reduce((s, p) => s + Number(p.qty || 0), 0);
+                        return { ...item, totalStock: Number(item.totalStock || 0) + addedQty };
+                    });
                 await Promise.all(newProducts.map(p =>
-                    updateInventoryStock(p.code, p.size, -Number(p.qty), inventory)
+                    updateInventoryStock(p.code, p.size, -Number(p.qty), effectiveInventory)
                 ));
             }
 
@@ -429,9 +454,56 @@ function App() {
     };
 
     const handleEditInventory = useCallback(async (id, updatedData) => {
-        try { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventory', id), updatedData); }
-        catch (e) { alert("Inventory update failed"); }
-    }, []);
+        try {
+            const oldItem = inventory.find(i => i.id === id);
+            await updateDoc(
+                doc(db, 'artifacts', appId, 'public', 'data', 'inventory', id),
+                updatedData
+            );
+            if (!oldItem) return;
+
+            const code = (updatedData.code || oldItem.code || '').toUpperCase();
+            const adjCol = collection(db, 'artifacts', appId, 'public', 'data', 'inventoryAdjustments');
+            const dateStr = new Date().toISOString().split('T')[0];
+            const adjustedBy = user?.displayName || 'Admin';
+
+            const logAndSync = async (size, oldQty, newQty) => {
+                const diff = newQty - oldQty;
+                if (diff === 0) return;
+                const adjustmentType = diff > 0 ? 'Add' : 'Minus';
+                await addDoc(adjCol, {
+                    productCode: code,
+                    productName: updatedData.productName || oldItem.productName || '',
+                    category: updatedData.category || oldItem.category || '',
+                    size,
+                    previousQty: oldQty,
+                    newQty,
+                    change: diff,
+                    adjustmentType,
+                    adjustedBy,
+                    date: dateStr,
+                    timestamp: serverTimestamp()
+                });
+                adjustWooStock(
+                    [{ code, size: size === 'Free' ? '' : size, qty: Math.abs(diff) }],
+                    diff > 0 ? +1 : -1
+                ).catch(e => console.error('[WooStock] Inventory adj failed:', e));
+            };
+
+            if (oldItem.type === 'Variable' && updatedData.type === 'Variable') {
+                const oldStock = oldItem.stock || {};
+                const newStock = updatedData.stock || {};
+                const sizes = new Set([...Object.keys(oldStock), ...Object.keys(newStock)]);
+                for (const size of sizes) {
+                    await logAndSync(size, Number(oldStock[size] || 0), Number(newStock[size] || 0));
+                }
+            } else if (oldItem.type === 'Single') {
+                await logAndSync('Free', Number(oldItem.totalStock || 0), Number(updatedData.totalStock || 0));
+            }
+        } catch (e) {
+            alert("Inventory update failed");
+        }
+    }, [inventory, user]);
     const handleDeleteInventory = useCallback(async (id) => {
         try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventory', id)); }
         catch (e) { alert("Inventory delete failed"); }
@@ -454,7 +526,7 @@ function App() {
     }, [inventory]);
 
     // Memoize shared prop objects so child components receive stable references
-    const commonProps = useMemo(() => ({ inventory, locations, orders, user, onEdit: handleEditInventory, onDelete: handleDeleteInventory }), [inventory, locations, orders, user, handleEditInventory, handleDeleteInventory]);
+    const commonProps = useMemo(() => ({ inventory, locations, orders, user, onEdit: handleEditInventory, onDelete: handleDeleteInventory, adjustments: inventoryAdjustments }), [inventory, locations, orders, user, handleEditInventory, handleDeleteInventory, inventoryAdjustments]);
     const orderProps = useMemo(() => ({
         orders,
         onUpdate: handleUpdateStatus,
@@ -486,6 +558,7 @@ function App() {
             case 'exchange': return <ExchangeTab orders={exchangeOrders} onCreate={handleCreateOrder} onEdit={handleEditOrderWithStock} inventory={inventory} />;
             case 'cancelled': return <CancelledOrders orders={cancelledReturnedOrders} onUpdate={handleUpdateStatus} onDelete={handleDeleteOrder} onEdit={handleEditOrderWithStock} onCreate={handleCreateOrder} inventory={inventory} userRole={userRole} />;
             case 'online-sales': return <OnlineSalesTab {...orderProps} />;
+            case 'sales-inventory-report': return <SalesInventoryReport orders={orders} inventory={inventory} adjustments={inventoryAdjustments} />;
             case 'reports': return userRole === 'master' ? <SalesReports {...orderProps} /> : <div className="p-10 text-center text-slate-400">Master access required.</div>;
             case 'barcodePrintView': return ( <BarcodePrintView items={barcodePrintQueue} onClose={handleBarcodeClose} /> );
             default: return <div className="p-10 text-center">Invalid Tab Selected</div>;

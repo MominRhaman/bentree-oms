@@ -2,7 +2,7 @@ import React, { useRef, useMemo, useCallback } from 'react';
 import {
     Plus, ClipboardCheck, CheckCircle, Truck, PauseCircle,
     ArrowRightLeft, Ban, Layers, MapPin, Globe, ShoppingBag,
-    BarChart3, PieChart, LogOut, Camera, X
+    BarChart3, PieChart, FileBarChart2, LogOut, Camera, X
 } from 'lucide-react';
 
 const Sidebar = ({ activeTab, setActiveTab, userRole, onLogout, user, setUser, isOpen, onClose }) => {
@@ -20,6 +20,7 @@ const Sidebar = ({ activeTab, setActiveTab, userRole, onLogout, user, setUser, i
         { id: 'stock-location', label: 'Stock Location', icon: MapPin, roles: ['master', 'employee'] },
         { id: 'online-sales', label: 'Online Sales', icon: Globe, roles: ['master', 'employee'] },
         { id: 'store-sales', label: 'Store Sales', icon: ShoppingBag, roles: ['master', 'employee'] },
+        { id: 'sales-inventory-report', label: 'Sales & Inventory', icon: FileBarChart2, roles: ['master', 'employee', 'qmt'] },
         { id: 'reports', label: 'Sales Reports', icon: BarChart3, roles: ['master'] },
         { id: 'monthly-profit', label: 'Monthly Profit', icon: PieChart, roles: ['master'] },
     ], []);

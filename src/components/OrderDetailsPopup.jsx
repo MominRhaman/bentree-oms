@@ -227,7 +227,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
     const addProduct = () => {
         setEditedOrder(prev => ({
             ...prev,
-            products: [...prev.products, { code: '', size: '', qty: 1, price: 0 }]
+            products: [...prev.products, { code: '', size: '', qty: 1, price: 0, discountType: 'Fixed', discountValue: 0 }]
         }));
     };
 
@@ -601,9 +601,9 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                             </h3>
                             {isEditing ? (
                                 <div className="space-y-2">
-                                    <input className="w-full p-2 border rounded text-sm" value={editedOrder.recipientName} onChange={e => handleInputChange('recipientName', e.target.value)} placeholder="Name" />
-                                    <input className="w-full p-2 border rounded text-sm" value={editedOrder.recipientPhone} onChange={e => handleInputChange('recipientPhone', e.target.value)} placeholder="Phone" />
-                                    <textarea className="w-full p-2 border rounded text-sm" rows="3" value={editedOrder.recipientAddress} onChange={e => handleInputChange('recipientAddress', e.target.value)} placeholder="Address" />
+                                    <input className="w-full p-2 border rounded text-sm" value={editedOrder.recipientName || ''} onChange={e => handleInputChange('recipientName', e.target.value)} placeholder="Name" />
+                                    <input className="w-full p-2 border rounded text-sm" value={editedOrder.recipientPhone || ''} onChange={e => handleInputChange('recipientPhone', e.target.value)} placeholder="Phone" />
+                                    <textarea className="w-full p-2 border rounded text-sm" rows="3" value={editedOrder.recipientAddress || ''} onChange={e => handleInputChange('recipientAddress', e.target.value)} placeholder="Address" />
                                 </div>
                             ) : (
                                 <div className="text-sm space-y-1">
@@ -680,7 +680,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                                                     <input
                                                         ref={el => productRefs.current[i] = el}
                                                         className={`w-full p-2 border rounded text-sm bg-white ${hasError ? 'border-red-500 bg-red-50' : ''}`}
-                                                        value={p.code}
+                                                        value={p.code || ''}
                                                         onChange={e => handleProductChange(i, 'code', e.target.value)}
                                                         onBlur={() => handleCodeBlur(i)}
                                                         autoComplete="off"
@@ -714,16 +714,16 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                                                 <div className="flex gap-2 items-center">
                                                     <div className="w-20">
                                                         {availableSizes.length > 0 ? (
-                                                            <select className="w-full p-2 border rounded text-sm bg-white" value={p.size} onChange={e => handleProductChange(i, 'size', e.target.value)}>
-                                                                {!availableSizes.includes(p.size) && <option value={p.size}>{p.size}</option>}
+                                                            <select className="w-full p-2 border rounded text-sm bg-white" value={p.size || ''} onChange={e => handleProductChange(i, 'size', e.target.value)}>
+                                                                {!availableSizes.includes(p.size) && <option value={p.size || ''}>{p.size || ''}</option>}
                                                                 {availableSizes.map(sz => <option key={sz} value={sz}>{sz}</option>)}
                                                             </select>
                                                         ) : (
-                                                            <input className="w-full p-2 border rounded text-sm bg-white" value={p.size} onChange={e => handleProductChange(i, 'size', e.target.value)} placeholder="Size" />
+                                                            <input className="w-full p-2 border rounded text-sm bg-white" value={p.size || ''} onChange={e => handleProductChange(i, 'size', e.target.value)} placeholder="Size" />
                                                         )}
                                                     </div>
-                                                    <div className="w-20"><input type="number" className="w-full p-2 border rounded text-sm bg-white" value={p.qty} onChange={e => handleProductChange(i, 'qty', e.target.value)} onWheel={disableScroll} /></div>
-                                                    <div className="w-24"><input type="number" className="w-full p-2 border rounded text-sm bg-white" value={p.price} onChange={e => handleProductChange(i, 'price', e.target.value)} onWheel={disableScroll} /></div>
+                                                    <div className="w-20"><input type="number" className="w-full p-2 border rounded text-sm bg-white" value={p.qty ?? ''} onChange={e => handleProductChange(i, 'qty', e.target.value)} onWheel={disableScroll} /></div>
+                                                    <div className="w-24"><input type="number" className="w-full p-2 border rounded text-sm bg-white" value={p.price ?? 0} onChange={e => handleProductChange(i, 'price', e.target.value)} onWheel={disableScroll} /></div>
 
                                                     {/* Added after the Price input in the items map */}
                                                     <div className="flex gap-1 w-32 bg-white border rounded">
@@ -731,12 +731,12 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                                                             type="number"
                                                             className="w-full p-1 text-sm border-0 focus:ring-0"
                                                             placeholder="Disc"
-                                                            value={p.discountValue}
+                                                            value={p.discountValue ?? ''}
                                                             onChange={e => handleProductChange(i, 'discountValue', e.target.value)}
                                                         />
                                                         <select
                                                             className="p-1 text-[10px] bg-slate-100 border-l border-slate-200"
-                                                            value={p.discountType}
+                                                            value={p.discountType || 'Fixed'}
                                                             onChange={e => handleProductChange(i, 'discountType', e.target.value)}
                                                         >
                                                             <option value="Fixed">৳</option>
@@ -790,11 +790,11 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                                 <span className="text-slate-500">Global Discount</span>
                                 {isEditing ?
                                     <div className="flex gap-2">
-                                        <select className="p-1 text-xs border rounded" value={editedOrder.discountType} onChange={e => handleInputChange('discountType', e.target.value)}>
+                                        <select className="p-1 text-xs border rounded" value={editedOrder.discountType || 'Fixed'} onChange={e => handleInputChange('discountType', e.target.value)}>
                                             <option value="Fixed">৳</option>
                                             <option value="Percent">%</option>
                                         </select>
-                                        <input className="w-24 p-1 border rounded text-right" value={editedOrder.discountValue} onChange={e => handleInputChange('discountValue', e.target.value)} onWheel={disableScroll} />
+                                        <input className="w-24 p-1 border rounded text-right" value={editedOrder.discountValue ?? ''} onChange={e => handleInputChange('discountValue', e.target.value)} onWheel={disableScroll} />
                                     </div> :
                                     <span className="text-red-500">- ৳ {order.discountType === 'Percent' ? (order.subtotal * (order.discountValue / 100)) : order.discountValue}</span>
                                 }
@@ -802,7 +802,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
 
                             <div className="flex justify-between text-sm items-center">
                                 <span className="text-slate-500">Delivery Charge</span>
-                                {isEditing ? <input className="w-24 p-1 border rounded text-right" value={editedOrder.deliveryCharge} onChange={e => handleInputChange('deliveryCharge', e.target.value)} onWheel={disableScroll} /> : <span>৳ {editedOrder.deliveryCharge}</span>}
+                                {isEditing ? <input className="w-24 p-1 border rounded text-right" value={editedOrder.deliveryCharge ?? ''} onChange={e => handleInputChange('deliveryCharge', e.target.value)} onWheel={disableScroll} /> : <span>৳ {editedOrder.deliveryCharge}</span>}
                             </div>
 
                             <div className="border-t pt-2 mt-2 flex justify-between font-bold text-base text-slate-900">
@@ -826,7 +826,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                                     {order.status === 'Delivered' && <span className="text-[10px] text-emerald-600 italic leading-none">(Showing received amount)</span>}
                                 </div>
                                 {isEditing ?
-                                    <input className="w-32 p-1 border rounded text-right bg-white" value={editedOrder.collectedAmount} onChange={e => handleInputChange('collectedAmount', e.target.value)} onWheel={disableScroll} /> :
+                                    <input className="w-32 p-1 border rounded text-right bg-white" value={editedOrder.collectedAmount ?? ''} onChange={e => handleInputChange('collectedAmount', e.target.value)} onWheel={disableScroll} /> :
                                     <span className="text-emerald-600">৳ {(Number(editedOrder.advanceAmount || 0) - Number(editedOrder.collectedAmount || 0))}</span>
                                 }
                             </div>

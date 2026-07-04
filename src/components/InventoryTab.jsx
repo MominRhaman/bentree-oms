@@ -6,7 +6,7 @@ import { INVENTORY_CATEGORIES, SIZES, downloadCSV } from '../utils';
 import SearchBar from './SearchBar';
 
 // NEW: Accept onOpenBarcodePrint prop instead of managing print state locally
-const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, onOpenBarcodePrint }) => {
+const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, onOpenBarcodePrint, adjustments = [] }) => {
     // --- Form State ---
     const [form, setForm] = useState({
         id: '',
@@ -671,6 +671,70 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
                     </table>
                 </div>
             </div>
+
+        {/* Inventory Adjustment Log */}
+        {adjustments.length > 0 && (
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                <div className="p-4 border-b bg-slate-50">
+                    <h2 className="text-lg font-bold text-slate-800">Inventory Adjustment Log</h2>
+                    <p className="text-xs text-slate-500">Manual stock changes synced to the website</p>
+                </div>
+                <div className="overflow-x-auto max-h-[400px] relative">
+                    <table className="w-full text-sm text-left min-w-[700px]">
+                        <thead className="bg-white text-slate-600 font-bold border-b sticky top-0 z-10 shadow-sm">
+                            <tr>
+                                <th className="p-3">Date & Time</th>
+                                <th className="p-3">Product Code</th>
+                                <th className="p-3">Product Name</th>
+                                <th className="p-3">Size</th>
+                                <th className="p-3 text-center">Type</th>
+                                <th className="p-3 text-center">Change</th>
+                                <th className="p-3 text-right">Prev Qty</th>
+                                <th className="p-3 text-right">New Qty</th>
+                                <th className="p-3">Adjusted By</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {[...adjustments]
+                                .sort((a, b) => {
+                                    const aT = a.timestamp?.toDate ? a.timestamp.toDate().getTime() : 0;
+                                    const bT = b.timestamp?.toDate ? b.timestamp.toDate().getTime() : 0;
+                                    return bT - aT;
+                                })
+                                .slice(0, 100)
+                                .map(adj => {
+                                    const ts = adj.timestamp?.toDate ? adj.timestamp.toDate() : null;
+                                    return (
+                                        <tr key={adj.id} className="hover:bg-slate-50 transition-colors">
+                                            <td className="p-3 text-xs text-slate-500 whitespace-nowrap">
+                                                {ts ? ts.toLocaleDateString() + ' ' + ts.toLocaleTimeString() : adj.date || '—'}
+                                            </td>
+                                            <td className="p-3 font-mono text-xs font-bold text-slate-700">{adj.productCode}</td>
+                                            <td className="p-3 text-xs text-slate-600 truncate max-w-[120px]" title={adj.productName}>{adj.productName || '—'}</td>
+                                            <td className="p-3 text-xs text-slate-500">{adj.size || '—'}</td>
+                                            <td className="p-3 text-center">
+                                                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                                                    adj.adjustmentType === 'Add'
+                                                        ? 'bg-emerald-100 text-emerald-700'
+                                                        : 'bg-red-100 text-red-700'
+                                                }`}>
+                                                    {adj.adjustmentType}
+                                                </span>
+                                            </td>
+                                            <td className={`p-3 text-center font-bold ${adj.change > 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                                {adj.change > 0 ? `+${adj.change}` : adj.change}
+                                            </td>
+                                            <td className="p-3 text-right text-xs text-slate-500">{adj.previousQty ?? '—'}</td>
+                                            <td className="p-3 text-right text-xs text-slate-500">{adj.newQty ?? '—'}</td>
+                                            <td className="p-3 text-xs text-slate-500">{adj.adjustedBy || '—'}</td>
+                                        </tr>
+                                    );
+                                })}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        )}
         </div>
     );
 };
