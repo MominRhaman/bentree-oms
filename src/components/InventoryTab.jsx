@@ -6,7 +6,7 @@ import { INVENTORY_CATEGORIES, SIZES, downloadCSV } from '../utils';
 import SearchBar from './SearchBar';
 
 // NEW: Accept onOpenBarcodePrint prop instead of managing print state locally
-const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, onOpenBarcodePrint, adjustments = [] }) => {
+const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, onAdd, onOpenBarcodePrint, adjustments = [] }) => {
     // --- Form State ---
     const [form, setForm] = useState({
         id: '',
@@ -273,6 +273,7 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
                 addedBy: user?.displayName || 'Unknown',
                 createdAt: serverTimestamp()
             });
+            if (onAdd) onAdd(payload);
         }
         resetFormView();
     };

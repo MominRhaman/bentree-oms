@@ -1,4 +1,4 @@
-import { doc, updateDoc, increment } from 'firebase/firestore';
+import { doc, updateDoc, increment, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db, appId } from './firebase';
 
 // --- User Access Configuration ---
@@ -161,5 +161,70 @@ export const updateInventoryStock = async (productCode, size, qtyChange, invento
         console.error("CRITICAL: updateInventoryStock failed:", err);
         // We throw the error so the calling function (App.jsx) knows to stop the DB swap
         throw err;
+    }
+};
+
+// Returns an array of current-stock values (one per product entry) snapshotted
+// BEFORE any inventory operation runs. Tracks a running balance per CODE|SIZE
+// so multiple rows with the same product chain sequentially.
+export const computeStockBefores = (products, inventoryList) => {
+    const running = new Map();
+    return (products || []).map(p => {
+        const code = (p.code || '').toUpperCase();
+        const sizeNorm = normalizeSize(p.size || '');
+        const key = `${code}|${sizeNorm}`;
+        if (!running.has(key)) {
+            const item = (inventoryList || []).find(i => (i.code || '').toUpperCase() === code);
+            let stock = null;
+            if (item) {
+                if (item.type === 'Variable') {
+                    const actualKey = Object.keys(item.stock || {})
+                        .find(k => normalizeSize(k) === sizeNorm);
+                    stock = actualKey !== undefined ? Number(item.stock[actualKey] || 0) : null;
+                } else {
+                    stock = Number(item.totalStock || 0);
+                }
+            }
+            running.set(key, stock);
+        }
+        const sb = running.get(key);
+        const qty = Number(p.qty || 0);
+        if (typeof sb === 'number') running.set(key, sb - qty);
+        return sb;
+    });
+};
+
+// Writes one Firestore entry per call (qtyChange = ±1 per unit) with source:'order'
+// so buildAllMovements can deduplicate against the order-derived fallback.
+export const logInventoryMovement = ({
+    productCode, productName, size,
+    qtyChange, stockBefore, actionType, reference, user,
+}) => {
+    try {
+        const adjustedBy = typeof user === 'string'
+            ? user
+            : user?.displayName
+                || (typeof localStorage !== 'undefined' ? localStorage.getItem('bentree_name') : null)
+                || user?.email?.split('@')[0]
+                || 'Unknown';
+        const stockAfter = typeof stockBefore === 'number' ? stockBefore + qtyChange : null;
+        const adjCol = collection(db, 'artifacts', appId, 'public', 'data', 'inventoryAdjustments');
+        addDoc(adjCol, {
+            productCode: (productCode || '').toUpperCase(),
+            productName: productName || '',
+            size: size || 'Free',
+            previousQty: stockBefore ?? null,
+            newQty: stockAfter,
+            change: qtyChange,
+            adjustmentType: qtyChange > 0 ? 'Add' : 'Minus',
+            actionType,
+            adjustedBy,
+            reference: reference || '—',
+            date: new Date().toISOString().split('T')[0],
+            timestamp: serverTimestamp(),
+            source: 'order',
+        }).catch(e => console.error('[logInventoryMovement] failed:', e));
+    } catch (e) {
+        console.error('[logInventoryMovement] failed:', e);
     }
 };

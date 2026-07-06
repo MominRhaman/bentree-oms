@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, lazy, Suspense } from
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { collection, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, arrayUnion, addDoc } from 'firebase/firestore';
 import { auth, db, appId } from './firebase';
-import { getStatusColor, updateInventoryStock } from './utils';
+import { getStatusColor, updateInventoryStock, computeStockBefores, logInventoryMovement } from './utils';
 import { adjustWooStock, wooUpdateOrder, wooSyncOrder } from './WooAPI/wooStock';
 import { useScanner } from './hooks/useScanner';
 import { Menu } from 'lucide-react';
@@ -184,16 +184,35 @@ function App() {
         let stockFlags = {};
 
         if (becomingInactive && wasActive) {
+            const s0 = computeStockBefores(order.products, inventory);
             await Promise.all(order.products.map(p =>
                 updateInventoryStock(p.code, p.size, Number(p.qty), inventory)
             ));
             stockFlags = { stockDeducted: false, deductedProducts: [] };
+            const aType = newStatus === 'Cancelled' ? 'Cancel' : 'Full Return';
+            const ref0  = order.merchantOrderId || order.storeOrderId || activeId;
+            order.products.forEach((p, i) => {
+                let sb = s0[i]; const qty = Number(p.qty || 0);
+                for (let u = 0; u < qty; u++) {
+                    logInventoryMovement({ productCode: p.code, productName: p.name || p.code, size: p.size, qtyChange: +1, stockBefore: sb, actionType: aType, reference: ref0, user });
+                    if (typeof sb === 'number') sb += 1;
+                }
+            });
         }
         if (isRestoring) {
+            const s1 = computeStockBefores(order.products, inventory);
             await Promise.all(order.products.map(p =>
                 updateInventoryStock(p.code, p.size, -Number(p.qty), inventory)
             ));
             stockFlags = { stockDeducted: true, deductedProducts: order.products };
+            const ref1 = order.merchantOrderId || order.storeOrderId || activeId;
+            order.products.forEach((p, i) => {
+                let sb = s1[i]; const qty = Number(p.qty || 0);
+                for (let u = 0; u < qty; u++) {
+                    logInventoryMovement({ productCode: p.code, productName: p.name || p.code, size: p.size, qtyChange: -1, stockBefore: sb, actionType: 'Restore', reference: ref1, user });
+                    if (typeof sb === 'number') sb -= 1;
+                }
+            });
         }
 
         // WooCommerce status to sync to, if this status change is actually changing
@@ -269,13 +288,36 @@ function App() {
             const newProducts = updatedData.products || [];
             const isActiveStatus = !['Cancelled', 'Returned'].includes(newStatus);
 
+            // Determine semantic action types from the updated data / new status
+            const logHint = updatedData._logActionType;
+            const editRef  = oldOrder.merchantOrderId || oldOrder.storeOrderId || orderId;
+            const step1ActionType = logHint
+                || (newStatus === 'Returned'
+                    ? (updatedData._oms_partial_return ? 'Partial Return' : 'Full Return')
+                    : newStatus === 'Cancelled' ? 'Cancel'
+                    : newStatus === 'Exchanged'
+                        ? (updatedData.isPartialExchange ? 'Partial Exchange' : 'Full Exchange')
+                    : 'Order Edit');
+            const step2ActionType = logHint
+                || (newStatus === 'Exchanged'
+                    ? (updatedData.isPartialExchange ? 'Partial Exchange' : 'Full Exchange')
+                    : 'Order Edit');
+
             // STEP 1: Restore old stock (if the order was active before the edit)
             // Each updateInventoryStock targets a different inventory doc via increment(),
             // so all calls within a batch can run concurrently.
             if (!['Cancelled', 'Returned'].includes(oldOrder.status)) {
+                const s1 = computeStockBefores(oldOrder.products || [], inventory);
                 await Promise.all((oldOrder.products || []).map(p =>
                     updateInventoryStock(p.code, p.size, Number(p.qty), inventory)
                 ));
+                (oldOrder.products || []).forEach((p, i) => {
+                    let sb = s1[i]; const qty = Number(p.qty || 0);
+                    for (let u = 0; u < qty; u++) {
+                        logInventoryMovement({ productCode: p.code, productName: p.name || p.code, size: p.size, qtyChange: +1, stockBefore: sb, actionType: step1ActionType, reference: editRef, user });
+                        if (typeof sb === 'number') sb += 1;
+                    }
+                });
             }
 
             // STEP 2: Deduct new stock (if the resulting status is active).
@@ -302,14 +344,23 @@ function App() {
                         const addedQty = toRestore.reduce((s, p) => s + Number(p.qty || 0), 0);
                         return { ...item, totalStock: Number(item.totalStock || 0) + addedQty };
                     });
+                const s2 = computeStockBefores(newProducts, effectiveInventory);
                 await Promise.all(newProducts.map(p =>
                     updateInventoryStock(p.code, p.size, -Number(p.qty), effectiveInventory)
                 ));
+                newProducts.forEach((p, i) => {
+                    let sb = s2[i]; const qty = Number(p.qty || 0);
+                    for (let u = 0; u < qty; u++) {
+                        logInventoryMovement({ productCode: p.code, productName: p.name || p.code, size: p.size, qtyChange: -1, stockBefore: sb, actionType: step2ActionType, reference: editRef, user });
+                        if (typeof sb === 'number') sb -= 1;
+                    }
+                });
             }
 
             // STEP 3: Database Operation
             const orderRef = doc(db, 'artifacts', appId, 'public', 'data', 'orders', orderId);
-            const { id, ...dataToSave } = updatedData;
+            // eslint-disable-next-line no-unused-vars
+            const { id, _logActionType, createdAt, ...dataToSave } = updatedData;
 
             await updateDoc(orderRef, {
                 ...dataToSave,
@@ -434,9 +485,18 @@ function App() {
     const handleDeleteOrder = async (orderId) => {
         const order = orders.find(o => o.id === orderId);
         if (order && !['Cancelled', 'Returned'].includes(order.status)) {
+            const delRef = order.merchantOrderId || order.storeOrderId || orderId;
+            const delBefore = computeStockBefores(order.products, inventory);
             await Promise.all(order.products.map(p =>
                 updateInventoryStock(p.code, p.size, Number(p.qty), inventory)
             ));
+            order.products.forEach((p, i) => {
+                let sb = delBefore[i]; const qty = Number(p.qty || 0);
+                for (let u = 0; u < qty; u++) {
+                    logInventoryMovement({ productCode: p.code, productName: p.name || p.code, size: p.size, qtyChange: +1, stockBefore: sb, actionType: 'Order Delete', reference: delRef, user });
+                    if (typeof sb === 'number') sb += 1;
+                }
+            });
             // Restore WooCommerce stock for Online orders (fire-and-forget)
             if (order.type === 'Online') {
                 adjustWooStock(order.products, +1).catch(e =>
@@ -509,6 +569,40 @@ function App() {
         catch (e) { alert("Inventory delete failed"); }
     }, []);
 
+    // Logs initial stock when a brand-new product is added to inventory
+    const handleAddInventory = useCallback(async (payload) => {
+        const code = (payload.code || '').toUpperCase();
+        const adjCol = collection(db, 'artifacts', appId, 'public', 'data', 'inventoryAdjustments');
+        const dateStr = new Date().toISOString().split('T')[0];
+        const adjustedBy = user?.displayName || localStorage.getItem('bentree_name') || 'Unknown';
+        try {
+            if (payload.type === 'Variable') {
+                for (const [size, qty] of Object.entries(payload.stock || {})) {
+                    if (Number(qty) > 0) {
+                        await addDoc(adjCol, {
+                            productCode: code, productName: payload.productName || '',
+                            category: payload.category || '', size,
+                            previousQty: 0, newQty: Number(qty), change: Number(qty),
+                            adjustmentType: 'Add', actionType: 'Manual Stock Add',
+                            adjustedBy, date: dateStr, timestamp: serverTimestamp(),
+                        });
+                    }
+                }
+            } else {
+                const qty = Number(payload.totalStock || 0);
+                if (qty > 0) {
+                    await addDoc(adjCol, {
+                        productCode: code, productName: payload.productName || '',
+                        category: payload.category || '', size: 'Free',
+                        previousQty: 0, newQty: qty, change: qty,
+                        adjustmentType: 'Add', actionType: 'Manual Stock Add',
+                        adjustedBy, date: dateStr, timestamp: serverTimestamp(),
+                    });
+                }
+            }
+        } catch (e) { console.error('[AddInventory] Failed to log initial stock:', e); }
+    }, [user]);
+
     // Memoize filtered order subsets so child components only re-render when their slice changes
     const primaryOrders = useMemo(() => orders.filter(o => o.type === 'Online' && o.status === 'Pending'), [orders]);
     const confirmedOrders = useMemo(() => orders.filter(o => o.type === 'Online' && ['Confirmed', 'Dispatched', 'Delivered', 'Returned', 'Exchanged', 'Hold'].includes(o.status)), [orders]);
@@ -526,7 +620,7 @@ function App() {
     }, [inventory]);
 
     // Memoize shared prop objects so child components receive stable references
-    const commonProps = useMemo(() => ({ inventory, locations, orders, user, onEdit: handleEditInventory, onDelete: handleDeleteInventory, adjustments: inventoryAdjustments }), [inventory, locations, orders, user, handleEditInventory, handleDeleteInventory, inventoryAdjustments]);
+    const commonProps = useMemo(() => ({ inventory, locations, orders, user, onEdit: handleEditInventory, onDelete: handleDeleteInventory, onAdd: handleAddInventory, adjustments: inventoryAdjustments }), [inventory, locations, orders, user, handleEditInventory, handleDeleteInventory, handleAddInventory, inventoryAdjustments]);
     const orderProps = useMemo(() => ({
         orders,
         onUpdate: handleUpdateStatus,

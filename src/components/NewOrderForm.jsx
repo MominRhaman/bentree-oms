@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Save, AlertTriangle, Plus, Trash2, XCircle, Zap } from 'lucide-react';
 import { collection, addDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db, appId } from '../firebase';
-import { updateInventoryStock, disableScroll } from '../utils';
+import { updateInventoryStock, disableScroll, computeStockBefores, logInventoryMovement } from '../utils';
 import { CreateOrder } from '../WooAPI/CreateOrder.jsx';
 import { useScanner } from '../hooks/useScanner';
 
@@ -362,6 +362,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                 return;
             }
 
+            const stocksBefore = computeStockBefores(formData.products, inventory);
             for (const p of formData.products) {
                 await updateInventoryStock(p.code, p.size, -Number(p.qty), inventory);
             }
@@ -369,6 +370,16 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                 collection(db, 'artifacts', appId, 'public', 'data', 'orders'),
                 payload
             );
+            const newRef = payload.merchantOrderId || payload.storeOrderId || docRef.id;
+            const aType = orderType === 'Store' ? 'Store Sale' : 'Online Order';
+            formData.products.forEach((p, i) => {
+                let sb = stocksBefore[i];
+                const qty = Number(p.qty || 0);
+                for (let u = 0; u < qty; u++) {
+                    logInventoryMovement({ productCode: p.code, productName: p.name || p.code, size: p.size, qtyChange: -1, stockBefore: sb, actionType: aType, reference: newRef, user });
+                    if (typeof sb === 'number') sb -= 1;
+                }
+            });
 
             // Mirror order to WooCommerce for both Online and Store orders.
             // Tagged _oms_created=true so the webhook skips it (no duplicate).

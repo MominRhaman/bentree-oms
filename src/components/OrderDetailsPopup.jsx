@@ -330,7 +330,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                 status: 'Returned',
                 timestamp: new Date().toISOString(),
                 note: `Partial Return processed. ${returnedItems.length} item(s) returned. Return Order ID: ${returnOrderId}`,
-                updatedBy: 'Admin'
+                updatedBy: localStorage.getItem('bentree_name') || 'Unknown'
             }]
         };
 
@@ -345,13 +345,14 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
             products: keptItems,
             status: updatedStatus,
             _oms_partial_return: true,
+            _logActionType: 'Partial Return',
             history: [
                 ...(order.history || []),
                 {
                     status: updatedStatus,
                     timestamp: new Date().toISOString(),
                     note: `Partial Return processed. ${returnedItems.length} item(s) returned. Return Order ID: ${returnOrderId}`,
-                    updatedBy: 'Admin'
+                    updatedBy: localStorage.getItem('bentree_name') || 'Unknown'
                 }
             ]
         });

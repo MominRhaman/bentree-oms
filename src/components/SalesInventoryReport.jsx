@@ -1,16 +1,14 @@
 import React, { useState, useMemo, useRef } from 'react';
 import {
     Search, Download, FileText, X,
-    Package, TrendingUp, ArrowUpDown, ChevronRight
+    Package, TrendingUp, ArrowUpDown, ChevronRight, Filter, DollarSign
 } from 'lucide-react';
-import { downloadCSV } from '../utils';
+import { downloadCSV, INVENTORY_CATEGORIES } from '../utils';
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
 const PERIODS = [
     { id: 'today',     label: 'Today' },
-    { id: 'yesterday', label: 'Yesterday' },
-    { id: 'week',      label: 'This Week' },
     { id: 'month',     label: 'This Month' },
     { id: 'custom',    label: 'Custom' },
 ];
@@ -60,10 +58,17 @@ const ACTION_BADGE = {
     'Online Order':       'bg-blue-100 text-blue-700',
     'Store Sale':         'bg-indigo-100 text-indigo-700',
     'Exchange':           'bg-yellow-100 text-yellow-700',
+    'Full Exchange':      'bg-yellow-100 text-yellow-700',
     'Partial Exchange':   'bg-orange-100 text-orange-700',
     'Return':             'bg-red-100 text-red-700',
+    'Full Return':        'bg-red-100 text-red-700',
     'Partial Return':     'bg-rose-100 text-rose-700',
     'Cancel':             'bg-slate-100 text-slate-600',
+    'Order Delete':       'bg-red-100 text-red-700',
+    'Order Edit':         'bg-sky-100 text-sky-700',
+    'Restore':            'bg-emerald-100 text-emerald-700',
+    'Edit Restore':       'bg-emerald-100 text-emerald-700',
+    'Edit Deduct':        'bg-orange-100 text-orange-700',
     'Manual Stock Add':   'bg-emerald-100 text-emerald-700',
     'Manual Stock Minus': 'bg-red-100 text-red-700',
 };
@@ -89,24 +94,53 @@ tr:nth-child(even) td{background:#fafafa}</style></head>
 
 function buildAllMovements(orders, adjustments, inventoryMap) {
     const entries = [];
+    const loggedOrderKeys = new Set();
 
-    // 1. Manual stock adjustments
+    // 1. source:'order' logged entries — authoritative with real Before/After values
     adjustments.forEach(adj => {
-        const ts = adj.timestamp?.toDate ? adj.timestamp.toDate() : new Date(adj.date || 0);
+        if (adj.source !== 'order') return;
+        const ts   = adj.timestamp?.toDate ? adj.timestamp.toDate() : new Date(adj.date || 0);
+        const code = (adj.productCode || '').toUpperCase();
+        const inv  = inventoryMap.get(code);
+        const key  = `${code}:${adj.reference || '—'}:${adj.actionType || ''}`;
+        loggedOrderKeys.add(key);
         entries.push({
             date:        ts,
-            productCode: (adj.productCode || '').toUpperCase(),
-            productName: adj.productName || '—',
-            actionType:  adj.adjustmentType === 'Add' ? 'Manual Stock Add' : 'Manual Stock Minus',
+            productCode: code,
+            productName: adj.productName || inv?.productName || code,
+            size:        adj.size || 'Free',
+            category:    adj.category || inv?.category || '—',
+            actionType:  adj.actionType || (adj.adjustmentType === 'Add' ? 'Manual Stock Add' : 'Manual Stock Minus'),
             change:      Number(adj.change || 0),
-            reference:   '—',
+            reference:   adj.reference || '—',
             stockBefore: adj.previousQty ?? '—',
             stockAfter:  adj.newQty      ?? '—',
             user:        adj.adjustedBy  || '—',
         });
     });
 
-    // 2. Order-derived movements
+    // 2. Manual adjustments (no source field)
+    adjustments.forEach(adj => {
+        if (adj.source === 'order') return;
+        const ts   = adj.timestamp?.toDate ? adj.timestamp.toDate() : new Date(adj.date || 0);
+        const code = (adj.productCode || '').toUpperCase();
+        const inv  = inventoryMap.get(code);
+        entries.push({
+            date:        ts,
+            productCode: code,
+            productName: adj.productName || inv?.productName || code,
+            size:        adj.size || 'Free',
+            category:    adj.category || inv?.category || '—',
+            actionType:  adj.actionType || (adj.adjustmentType === 'Add' ? 'Manual Stock Add' : 'Manual Stock Minus'),
+            change:      Number(adj.change || 0),
+            reference:   adj.reference || '—',
+            stockBefore: adj.previousQty ?? '—',
+            stockAfter:  adj.newQty      ?? '—',
+            user:        adj.adjustedBy  || '—',
+        });
+    });
+
+    // 3. Order-derived fallback — only if not already covered by a logged entry
     orders.forEach(order => {
         const reference = order.merchantOrderId || order.storeOrderId || order.id;
         const createdAt = order.createdAt?.toDate
@@ -121,42 +155,50 @@ function buildAllMovements(orders, adjustments, inventoryMap) {
             const qty = Number(mp.qty || 0);
             if (qty === 0) return;
 
-            // Resolve product name: prefer inventory, fallback to order product name
-            const productName = inventoryMap.get(code)?.productName || mp.name || code;
+            const inv         = inventoryMap.get(code);
+            const productName = inv?.productName || mp.name || code;
+            const category    = inv?.category || '—';
+            const size        = mp.size || 'Free';
 
             if (wasActive) {
-                entries.push({
-                    date:        createdAt,
-                    productCode: code,
-                    productName,
-                    actionType:  getSaleType(order),
-                    change:      -qty,
-                    reference,
-                    stockBefore: '—',
-                    stockAfter:  '—',
-                    user:        order.addedBy || order.createdBy || '—',
-                });
+                const aType = getSaleType(order);
+                const key   = `${code}:${reference}:${aType}`;
+                if (!loggedOrderKeys.has(key)) {
+                    entries.push({
+                        date: createdAt, productCode: code, productName,
+                        size, category, actionType: aType, change: -qty,
+                        reference, stockBefore: '—', stockAfter: '—',
+                        user: order.addedBy || order.createdBy || '—',
+                    });
+                }
             }
 
             (order.history || []).forEach(h => {
                 if (!h.timestamp) return;
                 const d = new Date(h.timestamp);
                 if (h.status === 'Cancelled') {
-                    entries.push({
-                        date: d, productCode: code, productName,
-                        actionType: 'Cancel', change: +qty,
-                        reference, stockBefore: '—', stockAfter: '—',
-                        user: h.updatedBy || '—',
-                    });
+                    const aType = 'Cancel';
+                    const key   = `${code}:${reference}:${aType}`;
+                    if (!loggedOrderKeys.has(key)) {
+                        entries.push({
+                            date: d, productCode: code, productName,
+                            size, category, actionType: aType, change: +qty,
+                            reference, stockBefore: '—', stockAfter: '—',
+                            user: h.updatedBy || '—',
+                        });
+                    }
                 }
                 if (h.status === 'Returned') {
-                    entries.push({
-                        date: d, productCode: code, productName,
-                        actionType: order._oms_partial_return ? 'Partial Return' : 'Return',
-                        change: +qty,
-                        reference, stockBefore: '—', stockAfter: '—',
-                        user: h.updatedBy || '—',
-                    });
+                    const aType = order._oms_partial_return ? 'Partial Return' : 'Full Return';
+                    const key   = `${code}:${reference}:${aType}`;
+                    if (!loggedOrderKeys.has(key)) {
+                        entries.push({
+                            date: d, productCode: code, productName,
+                            size, category, actionType: aType, change: +qty,
+                            reference, stockBefore: '—', stockAfter: '—',
+                            user: h.updatedBy || '—',
+                        });
+                    }
                 }
             });
         });
@@ -169,10 +211,11 @@ function buildAllMovements(orders, adjustments, inventoryMap) {
 
 const SalesInventoryReport = ({ orders, inventory, adjustments }) => {
     // Shared filter state
-    const [period,      setPeriod]      = useState('week');
-    const [customStart, setCustomStart] = useState('');
-    const [customEnd,   setCustomEnd]   = useState('');
-    const [search,      setSearch]      = useState('');
+    const [period,         setPeriod]         = useState('today');
+    const [customStart,    setCustomStart]    = useState('');
+    const [customEnd,      setCustomEnd]      = useState('');
+    const [search,         setSearch]         = useState('');
+    const [categoryFilter, setCategoryFilter] = useState('');
 
     // Top-level view
     const [topTab, setTopTab] = useState('sales'); // 'sales' | 'movement'
@@ -247,10 +290,13 @@ const SalesInventoryReport = ({ orders, inventory, adjustments }) => {
         [orders, adjustments, inventoryMap]
     );
 
-    // Movements filtered by date + search (top-level Movement Log tab)
+    // Movements filtered by date + search + category (top-level Movement Log tab)
     const filteredMovements = useMemo(() => {
         const { start, end } = dateRange;
         let list = allMovements.filter(e => e.date >= start && e.date <= end);
+        if (categoryFilter) {
+            list = list.filter(e => e.category === categoryFilter);
+        }
         if (search) {
             const q = search.toLowerCase();
             list = list.filter(e =>
@@ -259,37 +305,64 @@ const SalesInventoryReport = ({ orders, inventory, adjustments }) => {
             );
         }
         return [...list].sort((a, b) => b.date - a.date);
-    }, [allMovements, dateRange, search]);
+    }, [allMovements, dateRange, search, categoryFilter]);
 
-    // ── Sales table filtered by search ────────────────────────────────────────
+    // Grouped movements: one row per product for the Movement Log table
+    const groupedMovements = useMemo(() => {
+        const groups = {};
+        filteredMovements.forEach(e => {
+            if (!groups[e.productCode]) {
+                groups[e.productCode] = {
+                    code: e.productCode,
+                    productName: e.productName,
+                    category: e.category,
+                    entries: [],
+                    lastActivity: null,
+                    latestAction: null,
+                };
+            }
+            const g = groups[e.productCode];
+            g.entries.push(e);
+            if (!g.lastActivity || e.date > g.lastActivity) {
+                g.lastActivity = e.date;
+                g.latestAction = e.actionType;
+            }
+        });
+        return Object.values(groups).sort((a, b) => b.lastActivity - a.lastActivity);
+    }, [filteredMovements]);
+
+    // ── Sales table filtered by search + category ─────────────────────────────
     const displayProducts = useMemo(() => {
-        if (!search) return productSales;
-        const q = search.toLowerCase();
-        return productSales.filter(r =>
-            r.code.toLowerCase().includes(q) ||
-            r.productName.toLowerCase().includes(q)
-        );
-    }, [productSales, search]);
+        let list = productSales;
+        if (categoryFilter) list = list.filter(r => r.category === categoryFilter);
+        if (search) {
+            const q = search.toLowerCase();
+            list = list.filter(r =>
+                r.code.toLowerCase().includes(q) ||
+                r.productName.toLowerCase().includes(q)
+            );
+        }
+        return list;
+    }, [productSales, search, categoryFilter]);
 
     // ── Summary ───────────────────────────────────────────────────────────────
     const summary = useMemo(() => {
         const { start, end } = dateRange;
-        const orderIds = new Set(
-            orders
-                .filter(o => !['Cancelled', 'Returned'].includes(o.status))
-                .filter(o => {
-                    const d = o.createdAt?.toDate ? o.createdAt.toDate() : new Date(o.date || 0);
-                    return d >= start && d <= end;
-                })
-                .map(o => o.id)
-        );
+        const ordersInPeriod = orders
+            .filter(o => !['Cancelled', 'Returned'].includes(o.status))
+            .filter(o => {
+                const d = o.createdAt?.toDate ? o.createdAt.toDate() : new Date(o.date || 0);
+                return d >= start && d <= end;
+            });
+        const totalMRPValue = ordersInPeriod.reduce((sum, o) => sum + Number(o.grandTotal || 0), 0);
         return {
-            products:     displayProducts.length,
-            totalOrders:  orderIds.size,
-            totalQtySold: displayProducts.reduce((s, r) => s + r.soldQty, 0),
-            movements:    filteredMovements.length,
+            products:        displayProducts.length,
+            totalOrders:     ordersInPeriod.length,
+            totalQtySold:    displayProducts.reduce((s, r) => s + r.soldQty, 0),
+            productsTracked: groupedMovements.length,
+            totalMRPValue,
         };
-    }, [displayProducts, orders, dateRange, filteredMovements]);
+    }, [displayProducts, orders, dateRange, groupedMovements]);
 
     // ── Per-product detail ────────────────────────────────────────────────────
     const detailDateRange = useMemo(
@@ -342,6 +415,8 @@ const SalesInventoryReport = ({ orders, inventory, adjustments }) => {
             'Date & Time':   e.date.toLocaleString(),
             'Product Code':  e.productCode,
             'Product Name':  e.productName,
+            'Size':          e.size || 'Free',
+            'Category':      e.category || '—',
             'Action Type':   e.actionType,
             'Reference':     e.reference,
             'Stock Before':  e.stockBefore,
@@ -353,10 +428,10 @@ const SalesInventoryReport = ({ orders, inventory, adjustments }) => {
     };
 
     const exportMovementExcel = () => {
-        const headers = ['Date & Time','Product Code','Product Name','Action Type','Reference','Stock Before','Change','Stock After','User'];
+        const headers = ['Date & Time','Product Code','Product Name','Size','Category','Action Type','Reference','Stock Before','Change','Stock After','User'];
         const rows = filteredMovements.map(e => [
-            e.date.toLocaleString(), e.productCode, e.productName, e.actionType,
-            e.reference, e.stockBefore,
+            e.date.toLocaleString(), e.productCode, e.productName, e.size || 'Free', e.category || '—',
+            e.actionType, e.reference, e.stockBefore,
             e.change > 0 ? `+${e.change}` : `${e.change}`,
             e.stockAfter, e.user,
         ]);
@@ -398,11 +473,14 @@ const SalesInventoryReport = ({ orders, inventory, adjustments }) => {
             downloadCSV(data, `sales_${name}_${new Date().toISOString().split('T')[0]}.csv`);
         } else {
             const data = productMovements.map(e => ({
-                'Date & Time': e.date.toLocaleString(),
-                'Action Type': e.actionType, 'Reference': e.reference,
+                'Date & Time':  e.date.toLocaleString(),
+                'Size':         e.size || 'Free',
+                'Action Type':  e.actionType,
+                'Reference':    e.reference,
                 'Stock Before': e.stockBefore,
-                'Change': e.change > 0 ? `+${e.change}` : `${e.change}`,
-                'Stock After': e.stockAfter, 'User': e.user,
+                'Change':       e.change > 0 ? `+${e.change}` : `${e.change}`,
+                'Stock After':  e.stockAfter,
+                'User':         e.user,
             }));
             downloadCSV(data, `movement_${name}_${new Date().toISOString().split('T')[0]}.csv`);
         }
@@ -464,6 +542,17 @@ const SalesInventoryReport = ({ orders, inventory, adjustments }) => {
                             <input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)} className="text-xs border rounded-lg px-2 py-1.5 outline-none focus:border-blue-400" />
                         </div>
                     )}
+                    {/* Category filter */}
+                    <div className="relative">
+                        <Filter size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}
+                            className="pl-7 pr-6 py-1.5 text-xs border rounded-lg outline-none focus:border-blue-400 bg-white appearance-none cursor-pointer min-w-[140px]">
+                            <option value="">All Categories</option>
+                            {INVENTORY_CATEGORIES.map(c => (
+                                <option key={c} value={c}>{c}</option>
+                            ))}
+                        </select>
+                    </div>
                     <div className="relative ml-auto">
                         <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
                         <input type="text" placeholder="Search by name or SKU…" value={search} onChange={e => setSearch(e.target.value)}
@@ -473,12 +562,13 @@ const SalesInventoryReport = ({ orders, inventory, adjustments }) => {
             </div>
 
             {/* ── Summary cards ────────────────────────────────────────────── */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                 {[
-                    { label: 'Products Sold',    value: summary.products,     color: 'text-blue-700',    icon: <Package size={22} className="text-blue-200" /> },
-                    { label: 'Total Orders',     value: summary.totalOrders,  color: 'text-slate-700',   icon: <ArrowUpDown size={22} className="text-slate-200" /> },
-                    { label: 'Units Sold',       value: summary.totalQtySold, color: 'text-emerald-700', icon: <TrendingUp size={22} className="text-emerald-200" /> },
-                    { label: 'Movement Entries', value: summary.movements,    color: 'text-purple-700',  icon: <ArrowUpDown size={22} className="text-purple-200" /> },
+                
+                    { label: 'Total Orders',     value: summary.totalOrders,     color: 'text-slate-700',   icon: <ArrowUpDown size={22} className="text-slate-200" /> },
+                    { label: 'Units Sold',       value: summary.totalQtySold,    color: 'text-emerald-700', icon: <TrendingUp size={22} className="text-emerald-200" /> },
+                    { label: 'MRP Value',        value: `৳${summary.totalMRPValue.toLocaleString()}`, color: 'text-rose-700', icon: <DollarSign size={22} className="text-rose-200" /> },
+                    { label: 'Inventory Movement', value: summary.productsTracked, color: 'text-purple-700',  icon: <ArrowUpDown size={22} className="text-purple-200" /> },
                 ].map(c => (
                     <div key={c.label} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
                         <div>
@@ -508,9 +598,9 @@ const SalesInventoryReport = ({ orders, inventory, adjustments }) => {
                     className={`px-5 py-2 text-sm font-bold rounded-lg transition-colors ${topTab === 'movement' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                 >
                     Inventory Movement Log
-                    {filteredMovements.length > 0 && (
+                    {groupedMovements.length > 0 && (
                         <span className="ml-2 bg-purple-100 text-purple-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">
-                            {filteredMovements.length}
+                            {groupedMovements.length}
                         </span>
                     )}
                 </button>
@@ -574,47 +664,46 @@ const SalesInventoryReport = ({ orders, inventory, adjustments }) => {
             {topTab === 'movement' && (
                 <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                     <div className="overflow-x-auto max-h-[600px] relative">
-                        <table ref={mainMovementRef} className="w-full text-sm text-left min-w-[900px]">
+                        <table ref={mainMovementRef} className="w-full text-sm text-left min-w-[700px]">
                             <thead className="bg-white text-slate-600 font-bold border-b sticky top-0 z-10 shadow-sm">
                                 <tr>
-                                    <th className="p-3">Date & Time</th>
-                                    <th className="p-3">Product Code</th>
                                     <th className="p-3">Product Name</th>
-                                    <th className="p-3 text-center">Action Type</th>
-                                    <th className="p-3">Reference</th>
-                                    <th className="p-3 text-right">Stock Before</th>
-                                    <th className="p-3 text-center">Change</th>
-                                    <th className="p-3 text-right">Stock After</th>
-                                    <th className="p-3">User</th>
+                                    <th className="p-3">SKU</th>
+                                    <th className="p-3">Category</th>
+                                    <th className="p-3 text-center">Movements</th>
+                                    <th className="p-3">Last Activity</th>
+                                    <th className="p-3 text-center">Latest Action</th>
+                                    <th className="p-3 text-center">Details</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
-                                {filteredMovements.map((entry, i) => (
-                                    <tr key={i} className="hover:bg-slate-50 transition-colors">
+                                {groupedMovements.map((g) => (
+                                    <tr key={g.code} className="hover:bg-slate-50 transition-colors">
+                                        <td className="p-3 font-medium text-slate-800">{g.productName}</td>
+                                        <td className="p-3 font-mono text-xs text-slate-500">{g.code}</td>
+                                        <td className="p-3 text-xs text-slate-500">{g.category}</td>
+                                        <td className="p-3 text-center font-bold text-purple-700">{g.entries.length}</td>
                                         <td className="p-3 text-xs text-slate-500 whitespace-nowrap">
-                                            {entry.date.toLocaleDateString()} {entry.date.toLocaleTimeString()}
-                                        </td>
-                                        <td className="p-3 font-mono text-xs font-bold text-slate-700">{entry.productCode}</td>
-                                        <td className="p-3 text-xs text-slate-600 max-w-[140px] truncate" title={entry.productName}>
-                                            {entry.productName}
+                                            {g.lastActivity ? `${g.lastActivity.toLocaleDateString()} ${g.lastActivity.toLocaleTimeString()}` : '—'}
                                         </td>
                                         <td className="p-3 text-center">
-                                            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${ACTION_BADGE[entry.actionType] || 'bg-slate-100 text-slate-600'}`}>
-                                                {entry.actionType}
+                                            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${ACTION_BADGE[g.latestAction] || 'bg-slate-100 text-slate-600'}`}>
+                                                {g.latestAction || '—'}
                                             </span>
                                         </td>
-                                        <td className="p-3 font-mono text-xs text-slate-600">{entry.reference}</td>
-                                        <td className="p-3 text-right text-xs text-slate-500">{entry.stockBefore}</td>
-                                        <td className={`p-3 text-center font-bold ${Number(entry.change) > 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                                            {Number(entry.change) > 0 ? `+${entry.change}` : entry.change}
+                                        <td className="p-3 text-center">
+                                            <button
+                                                onClick={() => { setSelected({ code: g.code, productName: g.productName }); setDetailTab('movement'); setDetailPeriod('all'); }}
+                                                className="inline-flex items-center gap-1 text-xs font-bold text-purple-600 hover:text-purple-800 hover:bg-purple-50 px-2 py-1 rounded-lg transition-colors"
+                                            >
+                                                View <ChevronRight size={13} />
+                                            </button>
                                         </td>
-                                        <td className="p-3 text-right text-xs text-slate-500">{entry.stockAfter}</td>
-                                        <td className="p-3 text-xs text-slate-500">{entry.user}</td>
                                     </tr>
                                 ))}
-                                {filteredMovements.length === 0 && (
+                                {groupedMovements.length === 0 && (
                                     <tr>
-                                        <td colSpan="9" className="p-12 text-center text-slate-400">
+                                        <td colSpan="7" className="p-12 text-center text-slate-400">
                                             No inventory movements found for this period.
                                         </td>
                                     </tr>
@@ -637,6 +726,24 @@ const SalesInventoryReport = ({ orders, inventory, adjustments }) => {
                                 <p className="text-[10px] text-slate-400 uppercase font-bold tracking-wide mb-0.5">Product Details</p>
                                 <h3 className="text-lg font-bold text-slate-800">{selected.productName}</h3>
                                 <p className="text-xs text-slate-500 font-mono mt-0.5">SKU: {selected.code}</p>
+                                {/* Size chips for Variable products */}
+                                {(() => {
+                                    const inv = inventoryMap.get(selected.code);
+                                    if (inv?.type !== 'Variable') return null;
+                                    const total = Object.values(inv.stock || {}).reduce((a, b) => a + Number(b || 0), 0);
+                                    return (
+                                        <div className="flex flex-wrap gap-1 mt-2">
+                                            {Object.entries(inv.stock || {}).map(([size, qty]) => (
+                                                <span key={size} className="text-[10px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
+                                                    {size}:{qty}
+                                                </span>
+                                            ))}
+                                            <span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">
+                                                Total: {total}
+                                            </span>
+                                        </div>
+                                    );
+                                })()}
                             </div>
                             <div className="flex items-center gap-2">
                                 <button onClick={exportDetailCSV} className="flex items-center gap-1 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1.5 rounded-lg border border-emerald-200 transition-colors">
@@ -733,10 +840,11 @@ const SalesInventoryReport = ({ orders, inventory, adjustments }) => {
                             )}
 
                             {detailTab === 'movement' && (
-                                <table ref={detailRef} className="w-full text-sm text-left min-w-[700px]">
+                                <table ref={detailRef} className="w-full text-sm text-left min-w-[750px]">
                                     <thead className="bg-white text-slate-600 font-bold border-b sticky top-0 z-10 shadow-sm">
                                         <tr>
                                             <th className="p-3">Date & Time</th>
+                                            <th className="p-3">Size</th>
                                             <th className="p-3 text-center">Action Type</th>
                                             <th className="p-3">Reference</th>
                                             <th className="p-3 text-right">Stock Before</th>
@@ -751,6 +859,7 @@ const SalesInventoryReport = ({ orders, inventory, adjustments }) => {
                                                 <td className="p-3 text-xs text-slate-500 whitespace-nowrap">
                                                     {entry.date.toLocaleDateString()} {entry.date.toLocaleTimeString()}
                                                 </td>
+                                                <td className="p-3 text-xs font-bold text-slate-600">{entry.size || 'Free'}</td>
                                                 <td className="p-3 text-center">
                                                     <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${ACTION_BADGE[entry.actionType] || 'bg-slate-100 text-slate-600'}`}>
                                                         {entry.actionType}
@@ -766,7 +875,7 @@ const SalesInventoryReport = ({ orders, inventory, adjustments }) => {
                                             </tr>
                                         ))}
                                         {productMovements.length === 0 && (
-                                            <tr><td colSpan="7" className="p-10 text-center text-slate-400">No movement records found.</td></tr>
+                                            <tr><td colSpan="8" className="p-10 text-center text-slate-400">No movement records found.</td></tr>
                                         )}
                                     </tbody>
                                 </table>
