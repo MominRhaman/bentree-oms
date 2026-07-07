@@ -212,7 +212,7 @@ function App() {
                 updateInventoryStock(p.code, p.size, Number(p.qty), inventory)
             ));
             stockFlags = { stockDeducted: false, deductedProducts: [] };
-            const aType = newStatus === 'Cancelled' ? 'Cancel' : 'Full Return';
+            const aType = newStatus === 'Cancelled' ? (order.type === 'Store' ? 'Store Order Cancel' : 'Cancel') : 'Full Return';
             const ref0  = order.merchantOrderId || order.storeOrderId || activeId;
             order.products.forEach((p, i) => {
                 let sb = s0[i]; const qty = Number(p.qty || 0);
@@ -633,7 +633,7 @@ function App() {
     const dispatchOrders = useMemo(() => orders.filter(o => o.type === 'Online' && ['Confirmed', 'Dispatched', 'Exchanged'].includes(o.status)), [orders]);
     const storeOrders = useMemo(() => orders.filter(o => o.type === 'Store'), [orders]);
     const exchangeOrders = useMemo(() => orders.filter(o => o.type === 'Online' && (o.status === 'Exchanged' || o.exchangeDetails || o.isPartialExchange)), [orders]);
-    const cancelledReturnedOrders = useMemo(() => orders.filter(o => o.type === 'Online' && (o.status === 'Cancelled' || o.status === 'Returned')), [orders]);
+    const cancelledReturnedOrders = useMemo(() => orders.filter(o => o.status === 'Cancelled' || o.status === 'Returned'), [orders]);
 
     // Pre-index inventory by uppercase code for O(1) lookups in child components
     const inventoryMap = useMemo(() => {

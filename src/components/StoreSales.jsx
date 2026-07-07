@@ -26,7 +26,8 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
         const term = checkoutSearch.toLowerCase();
         return orders.filter(o =>
             o.type === 'Store' &&
-            o.status === 'Pending' &&
+            o.checkOutStatus !== 'Completed' &&
+            o.status !== 'Cancelled' &&
             (
                 (o.storeOrderId && o.storeOrderId.toLowerCase().includes(term)) ||
                 (o.recipientPhone && o.recipientPhone.includes(term))
@@ -277,10 +278,11 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
                                                             )}
 
                                                             <button
-                                                                onClick={() => { if (confirm('Cancel order?')) onDelete(order.id); }}
+                                                                onClick={() => { if (confirm('Cancel this Store Order? Stock will be restored and recorded in Movement Log.')) onUpdate(order.id, 'Cancelled'); }}
                                                                 className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                                                                title="Cancel Order"
                                                             >
-                                                                <Trash2 size={20} />
+                                                                <XCircle size={20} />
                                                             </button>
                                                         </div>
                                                     </td>
@@ -400,7 +402,12 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
                                                             onChange={(e) => handleIdChange(row.id, e.target.value)}
                                                             onKeyDown={(e) => {
                                                                 if (e.key === 'Enter' && hasEnteredIdHistory) {
-                                                                    onUpdate(row.id, row.originalOrder.status, { storeOrderId: currentIdHistory });
+                                                                    onUpdate(row.id, row.originalOrder.status, {
+                                                                        storeOrderId: currentIdHistory,
+                                                                        checkOutStatus: 'Completed',
+                                                                        collectedAmount: Number(row.originalOrder.grandTotal),
+                                                                        dueAmount: 0
+                                                                    });
                                                                     // Clear input after save
                                                                     setTempIds(prev => { const n = { ...prev }; delete n[row.id]; return n; });
                                                                 }
@@ -412,7 +419,7 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
                                                     {row.originalOrder.storeOrderId || hasEnteredIdHistory ? (
                                                         <button
                                                             onClick={() => onUpdate(row.id, row.originalOrder.status, {
-                                                                storeOrderId: row.originalOrder.storeOrderId || currentIdHistory,
+                                                                storeOrderId: currentIdHistory || row.originalOrder.storeOrderId,
                                                                 checkOutStatus: row.checkOutStatus === 'Completed' ? 'Pending' : 'Completed',
                                                                 collectedAmount: row.checkOutStatus !== 'Completed' ? Number(row.originalOrder.grandTotal) : 0
                                                             })}
@@ -442,6 +449,10 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
                                             <td className="p-3 text-xs text-slate-500">{row.addedBy}</td>
                                             <td className="p-3 text-center flex justify-center gap-2">
                                                 <button onClick={(e) => { e.stopPropagation(); setSelectedOrder(row.originalOrder); }} className="text-blue-500 hover:bg-blue-50 p-1 rounded"><Edit size={16} /></button>
+                                                <button onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    if (confirm('Cancel this Store Order? Stock will be restored and recorded in Movement Log.')) onUpdate(row.id, 'Cancelled');
+                                                }} className="text-orange-500 hover:bg-orange-50 p-1 rounded" title="Cancel Order"><XCircle size={16} /></button>
                                                 <button onClick={(e) => {
                                                     e.stopPropagation();
                                                     if (confirm('Delete this sale? Stock will be returned.')) onDelete(row.id);
