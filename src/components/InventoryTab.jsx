@@ -27,6 +27,7 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
     const [showAddForm, setShowAddForm] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
     const [setAsInitialStock, setSetAsInitialStock] = useState(false);
+    const [initialStockInputs, setInitialStockInputs] = useState({});
 
     // --- Filter States ---
     const [searchTerm, setSearchTerm] = useState('');
@@ -194,6 +195,7 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
         setIsEditing(true);
         setShowAddForm(true);
         setSetAsInitialStock(false);
+        setInitialStockInputs({});
 
         // Normalise legacy size aliases (e.g. XXL→2XL) so all keys map to SIZES
         const SIZE_ALIASES = { 'XXL': '2XL', 'XXXL': '3XL' };
@@ -227,6 +229,7 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
         setIsEditing(false);
         setShowAddForm(false);
         setSetAsInitialStock(false);
+        setInitialStockInputs({});
         setForm({
             id: '',
             date: new Date().toISOString().split('T')[0],
@@ -234,6 +237,14 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
             stock: {'XS': '',  S: '', M: '', L: '', XL: '', '2XL': '', '3XL': '' },
             totalStock: '', unitCost: '', mrp: '', locationId: '', shelfRow: ''
         });
+    };
+
+    const handleResetInitialStock = async () => {
+        if (!confirm('Reset Initial Stock to 0? This will not affect the current stock.')) return;
+        const resetValue = form.type === 'Variable' ? {} : 0;
+        await onEdit(form.id, { initialStock: resetValue, initialStockDate: null });
+        setSetAsInitialStock(false);
+        setInitialStockInputs({});
     };
 
     const handleAddOrUpdate = async (e) => {
@@ -270,9 +281,22 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
 
         if (isEditing) {
             if (setAsInitialStock) {
-                payload.initialStock = form.type === 'Variable'
-                    ? { ...variableStock }
-                    : Number(form.totalStock || 0);
+                const existingItem = inventory.find(i => i.id === form.id);
+                if (form.type === 'Variable') {
+                    const base = (existingItem?.initialStock && typeof existingItem.initialStock === 'object')
+                        ? { ...existingItem.initialStock }
+                        : {};
+                    Object.entries(initialStockInputs).forEach(([size, qty]) => {
+                        const n = Number(qty || 0);
+                        if (n > 0) base[size] = Number(base[size] || 0) + n;
+                    });
+                    payload.initialStock = base;
+                } else {
+                    const addQty = Number(initialStockInputs._total || 0);
+                    const existing = typeof existingItem?.initialStock === 'number'
+                        ? existingItem.initialStock : 0;
+                    payload.initialStock = existing + addQty;
+                }
                 payload.initialStockDate = form.date;
             }
             await onEdit(form.id, payload);
@@ -555,12 +579,59 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
                                         <input
                                             type="checkbox"
                                             checked={setAsInitialStock}
-                                            onChange={e => setSetAsInitialStock(e.target.checked)}
+                                            onChange={e => { setSetAsInitialStock(e.target.checked); if (!e.target.checked) setInitialStockInputs({}); }}
                                             className="w-3.5 h-3.5 accent-amber-600"
                                         />
                                         <span className="text-xs font-medium text-slate-700">Set as Initial Stock</span>
-                                        <span className="text-[10px] text-slate-400 ml-1">(saves current quantity as the permanent baseline)</span>
+                                        <span className="text-[10px] text-slate-400 ml-1">(adds entered quantities to the existing initial stock)</span>
                                     </label>
+                                    {setAsInitialStock && (
+                                        <div className="mt-3">
+                                            <label className="text-xs font-bold text-amber-600 mb-2 block">Qty to Add to Initial Stock</label>
+                                            {form.type === 'Variable' ? (
+                                                <div className="flex flex-wrap gap-4">
+                                                    {SIZES.map(sz => (
+                                                        <div key={sz} className="flex items-center gap-1">
+                                                            <span className="text-sm w-8 font-medium">{sz}</span>
+                                                            <input
+                                                                type="number" min="0"
+                                                                className="w-20 p-2 border border-amber-300 rounded bg-amber-50"
+                                                                value={initialStockInputs[sz] ?? ''}
+                                                                onChange={e => {
+                                                                    const newInputs = { ...initialStockInputs, [sz]: e.target.value };
+                                                                    setInitialStockInputs(newInputs);
+                                                                    const existingItem = inventory.find(i => i.id === form.id);
+                                                                    const existingInit = (existingItem?.initialStock && typeof existingItem.initialStock === 'object') ? existingItem.initialStock : {};
+                                                                    const newQty = Number(existingInit[sz] || 0) + Number(e.target.value || 0);
+                                                                    setForm(f => ({ ...f, stock: { ...f.stock, [sz]: newQty } }));
+                                                                }}
+                                                            />
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <input
+                                                    type="number" min="0" placeholder="Qty to add"
+                                                    className="w-full sm:w-40 p-2 border border-amber-300 rounded bg-amber-50"
+                                                    value={initialStockInputs._total ?? ''}
+                                                    onChange={e => {
+                                                        setInitialStockInputs({ ...initialStockInputs, _total: e.target.value });
+                                                        const existingItem = inventory.find(i => i.id === form.id);
+                                                        const existingInit = typeof existingItem?.initialStock === 'number' ? existingItem.initialStock : 0;
+                                                        const newQty = existingInit + Number(e.target.value || 0);
+                                                        setForm(f => ({ ...f, totalStock: String(newQty) }));
+                                                    }}
+                                                />
+                                            )}
+                                        </div>
+                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={handleResetInitialStock}
+                                        className="mt-3 text-xs text-red-500 hover:text-red-700 underline"
+                                    >
+                                        Reset Initial Stock to 0
+                                    </button>
                                 </div>
                             )}
                         </div>
