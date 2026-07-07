@@ -717,7 +717,8 @@ const SalesInventoryReport = ({ orders, inventory, adjustments }) => {
                                 <p className="text-[10px] text-slate-400 uppercase font-bold tracking-wide mb-0.5">Product Details</p>
                                 <h3 className="text-lg font-bold text-slate-800">{selected.productName}</h3>
                                 <p className="text-xs text-slate-500 font-mono mt-0.5">SKU: {selected.code}</p>
-                                {/* Size chips for Variable products */}
+                                
+                                {/* Current stock chips for Variable products */}
                                 {(() => {
                                     const inv = inventoryMap.get(selected.code);
                                     if (inv?.type !== 'Variable') return null;
@@ -731,6 +732,43 @@ const SalesInventoryReport = ({ orders, inventory, adjustments }) => {
                                             ))}
                                             <span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">
                                                 Total: {total}
+                                            </span>
+                                        </div>
+                                    );
+                                })()}
+                                {/* Initial Stock section */}
+                                {(() => {
+                                    const inv = inventoryMap.get(selected.code);
+                                    if (!inv || inv.initialStock == null) return null;
+                                    const dateStr = inv.initialStockDate
+                                        || (inv.createdAt?.toDate ? inv.createdAt.toDate().toLocaleDateString() : null);
+                                    if (inv.type === 'Variable' && typeof inv.initialStock === 'object') {
+                                        const totalInit = Object.values(inv.initialStock).reduce((a, b) => a + Number(b || 0), 0);
+                                        return (
+                                            <div className="mt-2">
+                                                <p className="text-[10px] text-slate-400 uppercase font-bold tracking-wide mb-1">
+                                                    Initial Stock{dateStr ? ` — ${dateStr}` : ''}
+                                                </p>
+                                                <div className="flex flex-wrap gap-1">
+                                                    {Object.entries(inv.initialStock).map(([size, qty]) => (
+                                                        <span key={size} className="text-[10px] font-bold bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded">
+                                                            {size}:{qty}
+                                                        </span>
+                                                    ))}
+                                                    <span className="text-[10px] font-bold bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">
+                                                        Total: {totalInit}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        );
+                                    }
+                                    return (
+                                        <div className="mt-2">
+                                            <p className="text-[10px] text-slate-400 uppercase font-bold tracking-wide mb-1">
+                                                Initial Stock{dateStr ? ` — ${dateStr}` : ''}
+                                            </p>
+                                            <span className="text-[10px] font-bold bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded">
+                                                {inv.initialStock} pcs
                                             </span>
                                         </div>
                                     );

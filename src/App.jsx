@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { collection, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, arrayUnion, addDoc } from 'firebase/firestore';
 import { auth, db, appId } from './firebase';
@@ -140,6 +140,29 @@ function App() {
 
         return () => { unsubOrders(); unsubInv(); unsubLoc(); unsubExp(); unsubAdj(); };
     }, [user]);
+
+    // --- ONE-TIME INITIAL STOCK MIGRATION ---
+    // Runs once per session. Sets initialStock + initialStockDate on any existing
+    // product that was created before this feature was added.
+    const initialStockMigrated = useRef(false);
+    useEffect(() => {
+        if (initialStockMigrated.current || inventory.length === 0) return;
+        const unmigrated = inventory.filter(item => item.initialStock == null);
+        initialStockMigrated.current = true;
+        if (unmigrated.length === 0) return;
+        unmigrated.forEach(item => {
+            const initialStockData = item.type === 'Variable'
+                ? { ...item.stock }
+                : Number(item.totalStock || 0);
+            const dateStr = item.createdAt?.toDate
+                ? item.createdAt.toDate().toISOString().split('T')[0]
+                : (item.date || new Date().toISOString().split('T')[0]);
+            updateDoc(
+                doc(db, 'artifacts', appId, 'public', 'data', 'inventory', item.id),
+                { initialStock: initialStockData, initialStockDate: dateStr }
+            ).catch(e => console.error('[InitialStock Migration]', item.code, e));
+        });
+    }, [inventory]);
 
     // --- SCANNER INTEGRATION ---
     useScanner((code) => {

@@ -1,4 +1,4 @@
-const {setGlobalOptions} = require("firebase-functions");
+﻿const {setGlobalOptions} = require("firebase-functions");
 const {onRequest, onCall} = require("firebase-functions/https");
 const logger = require("firebase-functions/logger");
 const crypto = require("crypto");
@@ -31,6 +31,11 @@ const inventoryCol = () =>
       .collection("public").doc("data")
       .collection("inventory");
 
+const adjustmentsCol = () =>
+  db.collection("artifacts").doc(APP_ID)
+      .collection("public").doc("data")
+      .collection("inventoryAdjustments");
+
 // WooCommerce order status → Bentree OMS status
 const STATUS_MAP = {
   "pending": "Pending",
@@ -52,8 +57,9 @@ const RESTORE_STATUSES = new Set(["Cancelled", "Returned"]);
  * qty > 0 restores stock; qty < 0 deducts stock.
  * @param {object} p - Product with {code, size}.
  * @param {number} qty - Amount to add (positive) or remove (negative).
+ * @param {object} [logCtx] - Optional movement log context.
  */
-async function applyStockChange(p, qty) {
+async function applyStockChange(p, qty, logCtx) {
   const code = (p.code || "").toUpperCase();
   if (!code || qty === 0) return;
 
@@ -69,6 +75,7 @@ async function applyStockChange(p, qty) {
 
   const invDoc = snap.docs[0];
   const item = invDoc.data();
+  let stockBefore = null;
 
   if (item.type === "Variable") {
     const stockKeys = Object.keys(item.stock || {});
@@ -83,10 +90,12 @@ async function applyStockChange(p, qty) {
       });
       return;
     }
+    stockBefore = Number((item.stock || {})[actualKey] || 0);
     await invDoc.ref.update({
       [`stock.${actualKey}`]: FieldValue.increment(qty),
     });
   } else {
+    stockBefore = Number(item.totalStock || 0);
     await invDoc.ref.update({
       totalStock: FieldValue.increment(qty),
     });
@@ -96,25 +105,67 @@ async function applyStockChange(p, qty) {
   logger.info("Stock " + action, {
     code, size: p.size || "—", qty: Math.abs(qty),
   });
+
+  if (logCtx) {
+    await writeMovementLog(p, stockBefore, qty, logCtx);
+  }
+}
+
+/**
+ * Write per-unit movement log entries to inventoryAdjustments.
+ * @param {object} p - product ref {code, name, size}
+ * @param {number|null} stockBefore - stock level before this change
+ * @param {number} qty - signed qty (negative = deduct, positive = restore)
+ * @param {{actionType:string, reference:string, date:string}} ctx
+ */
+async function writeMovementLog(p, stockBefore, qty, ctx) {
+  const {actionType, reference, date} = ctx;
+  const units = Math.abs(qty);
+  const qtyChange = qty < 0 ? -1 : 1;
+  const col = adjustmentsCol();
+  const writes = [];
+  let sb = stockBefore;
+  for (let u = 0; u < units; u++) {
+    const stockAfter = typeof sb === "number" ? sb + qtyChange : null;
+    writes.push(col.add({
+      productCode: (p.code || "").toUpperCase(),
+      productName: p.name || "",
+      size: p.size || "Free",
+      previousQty: sb !== null ? sb : null,
+      newQty: stockAfter,
+      change: qtyChange,
+      adjustmentType: qtyChange > 0 ? "Add" : "Minus",
+      actionType,
+      adjustedBy: "Website",
+      reference: reference || "—",
+      date: date || new Date().toISOString().split("T")[0],
+      timestamp: FieldValue.serverTimestamp(),
+      source: "order",
+    }));
+    if (typeof sb === "number") sb = stockAfter;
+  }
+  await Promise.all(writes);
 }
 
 /**
  * Deduct stock for every product in the list.
  * @param {Array} products
+ * @param {object} [logCtx] - optional logging context
  */
-async function deductInventory(products) {
+async function deductInventory(products, logCtx) {
   for (const p of (products || [])) {
-    await applyStockChange(p, -Number(p.qty || 0));
+    await applyStockChange(p, -Number(p.qty || 0), logCtx);
   }
 }
 
 /**
  * Restore stock for every product in the list.
  * @param {Array} products
+ * @param {object} [logCtx] - optional logging context
  */
-async function restoreInventory(products) {
+async function restoreInventory(products, logCtx) {
   for (const p of (products || [])) {
-    await applyStockChange(p, Number(p.qty || 0));
+    await applyStockChange(p, Number(p.qty || 0), logCtx);
   }
 }
 
@@ -139,8 +190,9 @@ function buildQtyMap(products) {
  * Restores stock for removed/reduced items; deducts for added/increased ones.
  * @param {Array} oldProducts - Previously deducted products.
  * @param {Array} newProducts - Current order products.
+ * @param {object} [logCtx] - optional logging context
  */
-async function syncInventory(oldProducts, newProducts) {
+async function syncInventory(oldProducts, newProducts, logCtx) {
   const oldMap = buildQtyMap(oldProducts);
   const newMap = buildQtyMap(newProducts);
   const allKeys = new Set(
@@ -156,7 +208,7 @@ async function syncInventory(oldProducts, newProducts) {
     if (diff === 0) continue;
     const ref = newEntry ? newEntry.p : oldEntry.p;
     // Negate diff: more ordered → deduct (negative), fewer → restore (positive)
-    await applyStockChange(ref, -diff);
+    await applyStockChange(ref, -diff, logCtx);
   }
 }
 
@@ -432,7 +484,12 @@ exports.woocommerceWebhook = onRequest(async (req, res) => {
     // ── 4b. order.deleted → restore stock + soft-cancel ──────────────────
     if (topic === "order.deleted") {
       if (wasDeducted) {
-        await restoreInventory(deductedProds);
+        const today = new Date().toISOString().split("T")[0];
+        await restoreInventory(deductedProds, {
+          actionType: "Order Delete",
+          reference: existing.merchantOrderId || `WC-${data.id}`,
+          date: today,
+        });
         logger.info("Stock restored on delete", {orderId: data.id});
       }
       await ordersCol().doc(docId).set(
@@ -484,10 +541,15 @@ exports.woocommerceWebhook = onRequest(async (req, res) => {
     });
 
     // ── 6. Inventory management ───────────────────────────────────────────
+    const logDate = new Date().toISOString().split("T")[0];
     if (topic === "order.created") {
       // Deduct once; flag prevents double-deduction on webhook retries.
       if (!wasDeducted) {
-        await deductInventory(orderData.products);
+        await deductInventory(orderData.products, {
+          actionType: "Online Order",
+          reference: orderData.merchantOrderId || `WC-${data.id}`,
+          date: logDate,
+        });
         await ordersCol().doc(docId).update({
           stockDeducted: true,
           deductedProducts: orderData.products,
@@ -498,7 +560,13 @@ exports.woocommerceWebhook = onRequest(async (req, res) => {
       if (RESTORE_STATUSES.has(orderData.status)) {
         // ── Cancelled / Returned: give stock back ───────────────────────
         if (wasDeducted) {
-          await restoreInventory(deductedProds);
+          const restoreType = orderData.status === "Returned" ?
+            "Full Return" : "Cancel";
+          await restoreInventory(deductedProds, {
+            actionType: restoreType,
+            reference: existing.merchantOrderId || `WC-${data.id}`,
+            date: logDate,
+          });
           await ordersCol().doc(docId).update({
             stockDeducted: false,
             deductedProducts: [],
@@ -511,11 +579,20 @@ exports.woocommerceWebhook = onRequest(async (req, res) => {
         // ── Active status (Pending / Hold / Confirmed / Delivered) ──────
         if (wasDeducted) {
           // Sync differences — handles exchanges and qty changes
-          await syncInventory(deductedProds, orderData.products);
+          await syncInventory(deductedProds, orderData.products, {
+            actionType: "Order Edit",
+            reference: existing.merchantOrderId || `WC-${data.id}`,
+            date: logDate,
+          });
           logger.info("Stock synced on update", {orderId: data.id});
         } else {
           // Previously cancelled/returned, now reactivated → fresh deduct
-          await deductInventory(orderData.products);
+          await deductInventory(orderData.products, {
+            actionType: "Online Order",
+            reference: existing.merchantOrderId ||
+              orderData.merchantOrderId || `WC-${data.id}`,
+            date: logDate,
+          });
           logger.info("Stock deducted on reactivation", {
             orderId: data.id,
           });

@@ -26,6 +26,7 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
     // --- UI States ---
     const [showAddForm, setShowAddForm] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
+    const [setAsInitialStock, setSetAsInitialStock] = useState(false);
 
     // --- Filter States ---
     const [searchTerm, setSearchTerm] = useState('');
@@ -192,6 +193,7 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
     const handleEditClick = (item) => {
         setIsEditing(true);
         setShowAddForm(true);
+        setSetAsInitialStock(false);
 
         // Normalise legacy size aliases (e.g. XXL→2XL) so all keys map to SIZES
         const SIZE_ALIASES = { 'XXL': '2XL', 'XXXL': '3XL' };
@@ -224,6 +226,7 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
     const resetFormView = () => {
         setIsEditing(false);
         setShowAddForm(false);
+        setSetAsInitialStock(false);
         setForm({
             id: '',
             date: new Date().toISOString().split('T')[0],
@@ -266,10 +269,21 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
         };
 
         if (isEditing) {
+            if (setAsInitialStock) {
+                payload.initialStock = form.type === 'Variable'
+                    ? { ...variableStock }
+                    : Number(form.totalStock || 0);
+                payload.initialStockDate = form.date;
+            }
             await onEdit(form.id, payload);
         } else {
+            const initialStockSnapshot = form.type === 'Variable'
+                ? { ...variableStock }
+                : Number(form.totalStock || 0);
             await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'inventory'), {
                 ...payload,
+                initialStock: initialStockSnapshot,
+                initialStockDate: form.date,
                 addedBy: user?.displayName || 'Unknown',
                 createdAt: serverTimestamp()
             });
@@ -361,8 +375,12 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
                     totalStockNum = idxStock > -1 ? Number(clean(row[idxStock])) || 0 : 0;
                 }
 
+                const csvDate = idxDate > -1 ? clean(row[idxDate]) : new Date().toISOString().split('T')[0];
+                const csvInitialStock = itemType === 'Variable'
+                    ? { ...parsedStock }
+                    : totalStockNum;
                 const newItem = {
-                    date: idxDate > -1 ? clean(row[idxDate]) : new Date().toISOString().split('T')[0],
+                    date: csvDate,
                     code: code.toUpperCase(),
                     category: idxCat > -1 ? clean(row[idxCat]) : 'Uncategorized',
                     type: itemType,
@@ -372,6 +390,8 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
                     mrp: idxMrp > -1 ? Number(clean(row[idxMrp])) || 0 : 0,
                     locationId: '',
                     shelfRow: '',
+                    initialStock: csvInitialStock,
+                    initialStockDate: csvDate,
                     addedBy: user?.displayName || 'Import',
                     createdAt: serverTimestamp()
                 };
@@ -528,6 +548,20 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
                                     value={form.totalStock}
                                     onChange={e => setForm({ ...form, totalStock: e.target.value })}
                                 />
+                            )}
+                            {isEditing && (
+                                <div className="mt-3 pt-3 border-t border-slate-200">
+                                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                                        <input
+                                            type="checkbox"
+                                            checked={setAsInitialStock}
+                                            onChange={e => setSetAsInitialStock(e.target.checked)}
+                                            className="w-3.5 h-3.5 accent-amber-600"
+                                        />
+                                        <span className="text-xs font-medium text-slate-700">Set as Initial Stock</span>
+                                        <span className="text-[10px] text-slate-400 ml-1">(saves current quantity as the permanent baseline)</span>
+                                    </label>
+                                </div>
                             )}
                         </div>
 
