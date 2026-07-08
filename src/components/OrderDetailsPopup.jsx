@@ -610,7 +610,21 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                                 <div className="text-sm space-y-1">
                                     <p><span className="font-medium">Name:</span> {order.recipientName || 'Walk-in Customer'}</p>
                                     <p><span className="font-medium">Phone:</span> {order.recipientPhone}</p>
-                                    {order.recipientAddress && <p className="flex gap-1"><MapPin size={14} className="mt-1 flex-shrink-0" /> {order.recipientAddress}</p>}
+                                    {order.email && <p><span className="font-medium">Email:</span> {order.email}</p>}
+                                    {(order.recipientAddress || order.recipientCity || order.recipientZone || order.recipientPostcode || order.recipientCountry) && (
+                                        <p className="flex gap-1">
+                                            <MapPin size={14} className="mt-1 flex-shrink-0" />
+                                            <span>
+                                                {[
+                                                    order.recipientAddress,
+                                                    order.recipientCity,
+                                                    order.recipientZone,
+                                                    order.recipientPostcode,
+                                                    order.recipientCountry,
+                                                ].filter(Boolean).join(', ')}
+                                            </span>
+                                        </p>
+                                    )}
                                 </div>
                             )}
                         </div>

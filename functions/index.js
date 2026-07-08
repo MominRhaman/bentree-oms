@@ -229,7 +229,10 @@ function mapWooOrder(data) {
     shipping.last_name || billing.last_name || "",
   ].join(" ").trim();
 
-  const recipientPhone = billing.phone || shipping.phone || "";
+  const rawPhone = billing.phone || shipping.phone || "";
+  const recipientPhone = rawPhone.replace(/^\+88/, "");
+
+  const email = billing.email || "";
 
   const recipientAddress = [
     shipping.address_1 || billing.address_1 || "",
@@ -238,6 +241,8 @@ function mapWooOrder(data) {
 
   const recipientCity = shipping.city || billing.city || "";
   const recipientZone = shipping.state || billing.state || "";
+  const recipientPostcode = shipping.postcode || billing.postcode || "";
+  const recipientCountry = shipping.country || billing.country || "";
 
   const products = (data.line_items || []).map((item) => {
     const sizeMeta = (item.meta_data || []).find(
@@ -324,9 +329,12 @@ function mapWooOrder(data) {
     paymentType,
     recipientName,
     recipientPhone,
+    email,
     recipientAddress,
     recipientCity,
     recipientZone,
+    recipientPostcode,
+    recipientCountry,
     recipientArea: "",
     products,
     specialInstructions: data.customer_note || "",
@@ -520,9 +528,12 @@ exports.woocommerceWebhook = onRequest(async (req, res) => {
       const scopedUpdate = {
         recipientName: orderData.recipientName,
         recipientPhone: orderData.recipientPhone,
+        email: orderData.email,
         recipientAddress: orderData.recipientAddress,
         recipientCity: orderData.recipientCity,
         recipientZone: orderData.recipientZone,
+        recipientPostcode: orderData.recipientPostcode,
+        recipientCountry: orderData.recipientCountry,
         products: orderData.products,
         subtotal: orderData.subtotal,
         grandTotal: orderData.grandTotal,
