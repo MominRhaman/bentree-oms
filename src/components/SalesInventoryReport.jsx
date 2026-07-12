@@ -718,20 +718,29 @@ const SalesInventoryReport = ({ orders, inventory, adjustments }) => {
                                 <h3 className="text-lg font-bold text-slate-800">{selected.productName}</h3>
                                 <p className="text-xs text-slate-500 font-mono mt-0.5">SKU: {selected.code}</p>
                                 
-                                {/* Current stock chips for Variable products */}
+                                {/* Current stock chips */}
                                 {(() => {
                                     const inv = inventoryMap.get(selected.code);
-                                    if (inv?.type !== 'Variable') return null;
-                                    const total = Object.values(inv.stock || {}).reduce((a, b) => a + Number(b || 0), 0);
+                                    if (!inv) return null;
+                                    if (inv.type === 'Variable') {
+                                        const total = Object.values(inv.stock || {}).reduce((a, b) => a + Number(b || 0), 0);
+                                        return (
+                                            <div className="flex flex-wrap gap-1 mt-2">
+                                                {Object.entries(inv.stock || {}).map(([size, qty]) => (
+                                                    <span key={size} className="text-[10px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
+                                                        {size}:{qty}
+                                                    </span>
+                                                ))}
+                                                <span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">
+                                                    Total: {total}
+                                                </span>
+                                            </div>
+                                        );
+                                    }
                                     return (
                                         <div className="flex flex-wrap gap-1 mt-2">
-                                            {Object.entries(inv.stock || {}).map(([size, qty]) => (
-                                                <span key={size} className="text-[10px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
-                                                    {size}:{qty}
-                                                </span>
-                                            ))}
                                             <span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">
-                                                Total: {total}
+                                                Stock: {Number(inv.totalStock || 0)}
                                             </span>
                                         </div>
                                     );

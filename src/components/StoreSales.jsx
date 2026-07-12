@@ -4,6 +4,8 @@ import SearchBar from './SearchBar';
 import OrderDetailsPopup from './OrderDetailsPopup';
 import { INVENTORY_CATEGORIES, downloadCSV } from '../utils';
 
+const CANCEL_ORDER_CONFIRM = CANCEL_ORDER_CONFIRM;
+
 const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete }) => {
     // --- States ---
     const [isCheckoutMode, setIsCheckoutMode] = useState(false);
@@ -278,7 +280,7 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
                                                             )}
 
                                                             <button
-                                                                onClick={() => { if (confirm('Cancel this Store Order? Stock will be restored and recorded in Movement Log.')) onUpdate(order.id, 'Cancelled'); }}
+                                                                onClick={() => { if (confirm(CANCEL_ORDER_CONFIRM)) onUpdate(order.id, 'Cancelled'); }}
                                                                 className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
                                                                 title="Cancel Order"
                                                             >
@@ -451,7 +453,7 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
                                                 <button onClick={(e) => { e.stopPropagation(); setSelectedOrder(row.originalOrder); }} className="text-blue-500 hover:bg-blue-50 p-1 rounded"><Edit size={16} /></button>
                                                 <button onClick={(e) => {
                                                     e.stopPropagation();
-                                                    if (confirm('Cancel this Store Order? Stock will be restored and recorded in Movement Log.')) onUpdate(row.id, 'Cancelled');
+                                                    if (confirm(CANCEL_ORDER_CONFIRM)) onUpdate(row.id, 'Cancelled');
                                                 }} className="text-orange-500 hover:bg-orange-50 p-1 rounded" title="Cancel Order"><XCircle size={16} /></button>
                                                 <button onClick={(e) => {
                                                     e.stopPropagation();

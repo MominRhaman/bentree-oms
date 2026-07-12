@@ -156,6 +156,12 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
         }, { totalQty: 0, totalValue: 0 });
     }, [inventoryStats]);
 
+    // Currently-edited item — avoids repeated O(n) inventory.find calls
+    const editingInventoryItem = useMemo(
+        () => inventory.find(i => i.id === form.id),
+        [inventory, form.id]
+    );
+
     // --- Prepare Barcode Print Logic based on Stock Qty ---
     // Now calls onOpenBarcodePrint prop to navigate to the print page
     const handlePreparePrint = (item) => {
@@ -281,10 +287,9 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
 
         if (isEditing) {
             if (setAsInitialStock) {
-                const existingItem = inventory.find(i => i.id === form.id);
                 if (form.type === 'Variable') {
-                    const base = (existingItem?.initialStock && typeof existingItem.initialStock === 'object')
-                        ? { ...existingItem.initialStock }
+                    const base = (editingInventoryItem?.initialStock && typeof editingInventoryItem.initialStock === 'object')
+                        ? { ...editingInventoryItem.initialStock }
                         : {};
                     Object.entries(initialStockInputs).forEach(([size, qty]) => {
                         const n = Number(qty || 0);
@@ -293,8 +298,8 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
                     payload.initialStock = base;
                 } else {
                     const addQty = Number(initialStockInputs._total || 0);
-                    const existing = typeof existingItem?.initialStock === 'number'
-                        ? existingItem.initialStock : 0;
+                    const existing = typeof editingInventoryItem?.initialStock === 'number'
+                        ? editingInventoryItem.initialStock : 0;
                     payload.initialStock = existing + addQty;
                 }
                 payload.initialStockDate = form.date;
@@ -600,9 +605,8 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
                                                                 onChange={e => {
                                                                     const newInputs = { ...initialStockInputs, [sz]: e.target.value };
                                                                     setInitialStockInputs(newInputs);
-                                                                    const existingItem = inventory.find(i => i.id === form.id);
-                                                                    const existingInit = (existingItem?.initialStock && typeof existingItem.initialStock === 'object') ? existingItem.initialStock : {};
-                                                                    const newQty = Number(existingInit[sz] || 0) + Number(e.target.value || 0);
+                                                                    const existingInit = (editingInventoryItem?.initialStock && typeof editingInventoryItem.initialStock === 'object') ? editingInventoryItem.initialStock : {};
+                                                                    const newQty = Number(existingInit[sz] || 0) + Number(newInputs[sz] || 0);
                                                                     setForm(f => ({ ...f, stock: { ...f.stock, [sz]: newQty } }));
                                                                 }}
                                                             />
@@ -616,8 +620,7 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
                                                     value={initialStockInputs._total ?? ''}
                                                     onChange={e => {
                                                         setInitialStockInputs({ ...initialStockInputs, _total: e.target.value });
-                                                        const existingItem = inventory.find(i => i.id === form.id);
-                                                        const existingInit = typeof existingItem?.initialStock === 'number' ? existingItem.initialStock : 0;
+                                                        const existingInit = typeof editingInventoryItem?.initialStock === 'number' ? editingInventoryItem.initialStock : 0;
                                                         const newQty = existingInit + Number(e.target.value || 0);
                                                         setForm(f => ({ ...f, totalStock: String(newQty) }));
                                                     }}

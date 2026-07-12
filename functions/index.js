@@ -123,15 +123,15 @@ async function writeMovementLog(p, stockBefore, qty, ctx) {
   const units = Math.abs(qty);
   const qtyChange = qty < 0 ? -1 : 1;
   const col = adjustmentsCol();
-  const writes = [];
+  const batch = db.batch();
   let sb = stockBefore;
   for (let u = 0; u < units; u++) {
     const stockAfter = typeof sb === "number" ? sb + qtyChange : null;
-    writes.push(col.add({
+    batch.set(col.doc(), {
       productCode: (p.code || "").toUpperCase(),
       productName: p.name || "",
       size: p.size || "Free",
-      previousQty: sb !== null ? sb : null,
+      previousQty: sb,
       newQty: stockAfter,
       change: qtyChange,
       adjustmentType: qtyChange > 0 ? "Add" : "Minus",
@@ -141,10 +141,10 @@ async function writeMovementLog(p, stockBefore, qty, ctx) {
       date: date || new Date().toISOString().split("T")[0],
       timestamp: FieldValue.serverTimestamp(),
       source: "order",
-    }));
-    if (typeof sb === "number") sb = stockAfter;
+    });
+    sb = stockAfter;
   }
-  await Promise.all(writes);
+  await batch.commit();
 }
 
 /**
@@ -153,9 +153,7 @@ async function writeMovementLog(p, stockBefore, qty, ctx) {
  * @param {object} [logCtx] - optional logging context
  */
 async function deductInventory(products, logCtx) {
-  for (const p of (products || [])) {
-    await applyStockChange(p, -Number(p.qty || 0), logCtx);
-  }
+  await Promise.all((products || []).map(p => applyStockChange(p, -Number(p.qty || 0), logCtx)));
 }
 
 /**
@@ -164,9 +162,7 @@ async function deductInventory(products, logCtx) {
  * @param {object} [logCtx] - optional logging context
  */
 async function restoreInventory(products, logCtx) {
-  for (const p of (products || [])) {
-    await applyStockChange(p, Number(p.qty || 0), logCtx);
-  }
+  await Promise.all((products || []).map(p => applyStockChange(p, Number(p.qty || 0), logCtx)));
 }
 
 /**
