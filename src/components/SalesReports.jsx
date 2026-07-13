@@ -86,7 +86,10 @@ const SalesReports = ({ orders, inventory }) => {
             // Add both standard discount AND manual deduction to the total stat
             totalDiscount += (orderDiscount + revenueAdjustment);
 
-            const totalDeductions = orderDiscount + revenueAdjustment;
+            // Actual product revenue = what customer paid, excluding delivery
+            const orderRevenue = safeNum(order.grandTotal) - safeNum(order.deliveryCharge) + safeNum(order.revenueAdjustment);
+            let grossOrderRevenue = 0;
+            (order.products || []).forEach(p => { grossOrderRevenue += safeNum(p.price) * safeNum(p.qty); });
 
             (order.products || []).forEach(prod => {
                 const invItem = inventory.find(i => i.code.toUpperCase() === (prod.code || '').toUpperCase());
@@ -104,14 +107,11 @@ const SalesReports = ({ orders, inventory }) => {
                     }
                 }
 
-                const salePrice = safeNum(prod.price);
                 const qty = safeNum(prod.qty);
+                const grossItemRevenue = safeNum(prod.price) * qty;
+                const ratio = grossOrderRevenue > 0 ? grossItemRevenue / grossOrderRevenue : 0;
 
-                const grossItemRevenue = salePrice * qty;
-                const ratio = orderSubtotal > 0 ? (grossItemRevenue / orderSubtotal) : 0;
-                const itemDeductionShare = totalDeductions * ratio;
-
-                const netRevenue = grossItemRevenue - itemDeductionShare;
+                const netRevenue = orderRevenue * ratio;
                 const costOfSold = unitCost * qty;
                 const profitLoss = netRevenue - costOfSold;
                 const totalAssetValue = unitCost * currentStock;
@@ -261,6 +261,7 @@ const SalesReports = ({ orders, inventory }) => {
                             >
                                 <option value="">All Platforms</option>
                                 <option value="Store">Store Sales</option>
+                                <option value="WooCommerce">WooCommerce</option>
                                 <option value="Facebook">Facebook</option>
                                 <option value="Instagram">Instagram</option>
                                 <option value="Whatsapp">Whatsapp</option>

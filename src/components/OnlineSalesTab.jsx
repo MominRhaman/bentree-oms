@@ -44,17 +44,10 @@ const OnlineSalesTab = ({ orders, inventory, onEdit, onCreate, onDelete }) => {
             const receiver = order.recipientName || '-';
             const checkOutStatus = order.checkOutStatus || 'Pending';
 
-            // Discount & Adjustment Calculations
-            const orderSubtotal = safeNum(order.subtotal);
-
-            // Handle Percentage Discount
-            let orderDiscount = safeNum(order.discountValue);
-            if (order.discountType === 'Percent') {
-                orderDiscount = orderSubtotal * (orderDiscount / 100);
-            }
-
-            const orderAdj = safeNum(order.revenueAdjustment);
-            const totalDeduction = orderDiscount + Math.abs(orderAdj);
+            // Actual product revenue = what customer paid, excluding delivery
+            const orderRevenue = safeNum(order.grandTotal) - safeNum(order.deliveryCharge) + safeNum(order.revenueAdjustment);
+            let grossOrderRevenue = 0;
+            (order.products || []).forEach(p => { grossOrderRevenue += safeNum(p.price) * safeNum(p.qty); });
 
             (order.products || []).forEach(prod => {
                 const invItem = inventory.find(i => i.code.toUpperCase() === (prod.code || '').toUpperCase());
@@ -72,13 +65,12 @@ const OnlineSalesTab = ({ orders, inventory, onEdit, onCreate, onDelete }) => {
                     }
                 }
 
-                const salePrice = safeNum(prod.price);
                 const qty = safeNum(prod.qty);
+                const grossItemRevenue = safeNum(prod.price) * qty;
+                const ratio = grossOrderRevenue > 0 ? grossItemRevenue / grossOrderRevenue : 0;
 
                 // Net Revenue Calculation
-                const grossItemRevenue = salePrice * qty;
-                const ratio = orderSubtotal > 0 ? (grossItemRevenue / orderSubtotal) : 0;
-                const netRevenue = grossItemRevenue - (totalDeduction * ratio);
+                const netRevenue = orderRevenue * ratio;
 
                 const profitLoss = netRevenue - (unitCost * qty);
 

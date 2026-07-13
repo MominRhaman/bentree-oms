@@ -99,7 +99,7 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
     const footerStats = useMemo(() => {
         const totalOrders = filteredOrders.length;
         const totalAmountExDelivery = filteredOrders.reduce((sum, o) => {
-            return sum + (Number(o.grandTotal || 0) - Number(o.deliveryCharge || 0));
+            return sum + (Number(o.grandTotal || 0) - Number(o.deliveryCharge || 0) + Number(o.revenueAdjustment || 0));
         }, 0);
         return { totalOrders, totalAmountExDelivery };
     }, [filteredOrders]);

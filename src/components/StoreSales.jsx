@@ -4,7 +4,7 @@ import SearchBar from './SearchBar';
 import OrderDetailsPopup from './OrderDetailsPopup';
 import { INVENTORY_CATEGORIES, downloadCSV } from '../utils';
 
-const CANCEL_ORDER_CONFIRM = CANCEL_ORDER_CONFIRM;
+const CANCEL_ORDER_CONFIRM = 'Cancel this Store Order? Stock will be restored and recorded in Movement Log.';
 
 const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete }) => {
     // --- States ---
@@ -72,10 +72,10 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
             const addedBy = order.addedBy || 'System';
             const phone = order.recipientPhone || '-';
             const checkOutStatus = order.checkOutStatus || 'Pending';
-            const orderSubtotal = safeNum(order.subtotal);
-
-            let orderDiscount = safeNum(order.discountValue);
-            if (order.discountType === 'Percent') orderDiscount = orderSubtotal * (orderDiscount / 100);
+            // Actual product revenue = what customer paid, excluding delivery
+            const orderRevenue = safeNum(order.grandTotal) - safeNum(order.deliveryCharge) + safeNum(order.revenueAdjustment);
+            let grossOrderRevenue = 0;
+            (order.products || []).forEach(p => { grossOrderRevenue += safeNum(p.price) * safeNum(p.qty); });
 
             (order.products || []).forEach(prod => {
                 const invItem = inventory.find(i => i.code.toUpperCase() === (prod.code || '').toUpperCase());
@@ -90,12 +90,10 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
                         : safeNum(invItem.totalStock);
                 }
 
-                const salePrice = safeNum(prod.price);
                 const qty = safeNum(prod.qty);
-                const grossItemRevenue = salePrice * qty;
-                const ratio = orderSubtotal > 0 ? (grossItemRevenue / orderSubtotal) : 0;
-                const itemDiscountShare = orderDiscount * ratio;
-                const netRevenue = grossItemRevenue - itemDiscountShare;
+                const grossItemRevenue = safeNum(prod.price) * qty;
+                const ratio = grossOrderRevenue > 0 ? grossItemRevenue / grossOrderRevenue : 0;
+                const netRevenue = orderRevenue * ratio;
                 const costOfSold = unitCost * qty;
                 const profitLoss = netRevenue - costOfSold;
 

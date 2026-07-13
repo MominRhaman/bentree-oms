@@ -100,17 +100,21 @@ const MonthlyProfitTab = ({ orders, inventory, expenses }) => {
         const onlineNetSales = revenueOrders
             .filter(o => o.type === 'Online')
             .reduce((acc, o) => {
-                const subtotal = Number(o.subtotal) || 0;
-                let discount = Number(o.discountValue) || 0;
-                if (o.discountType === 'Percent') discount = subtotal * (discount / 100);
-                const adj = Math.abs(Number(o.revenueAdjustment) || 0);
-                return acc + (subtotal - discount - adj);
+                const grandTotal = Number(o.grandTotal) || 0;
+                const deliveryCharge = Number(o.deliveryCharge) || 0;
+                const adj = Number(o.revenueAdjustment) || 0;
+                return acc + (grandTotal - deliveryCharge + adj);
             }, 0);
 
         // 4. Calculate Store Sales
         const storeSales = revenueOrders
             .filter(o => o.type === 'Store')
-            .reduce((acc, o) => acc + (Number(o.grandTotal) || 0), 0);
+            .reduce((acc, o) => {
+                const grandTotal = Number(o.grandTotal) || 0;
+                const deliveryCharge = Number(o.deliveryCharge) || 0;
+                const adj = Number(o.revenueAdjustment) || 0;
+                return acc + (grandTotal - deliveryCharge + adj);
+            }, 0);
 
         // 5. Calculate Return Delivery Loss
         const returnLoss = returnOrders.reduce((acc, o) => {
