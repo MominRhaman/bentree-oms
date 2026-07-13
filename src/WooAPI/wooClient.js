@@ -1,11 +1,11 @@
 import axios from 'axios';
 
-export const WOO_BASE = 'https://bentreebd.com/wp-json/wc/v3';
+export const WOO_BASE = 'https://www.bentreebd.com/wp-json/wc/v3';
 
 export const wooApi = axios.create({
     baseURL: WOO_BASE,
     auth: {
-        username: 'ck_651b90a834145227aba5a90b36bd12a29bb41bc9',
-        password: 'cs_dde1553303d86acfdd56564e7be16c5cc496bd85',
+        username: 'ck_a7c1c5b6f012681cdcfe6c4abb15e9806efa0a1c',
+        password: 'cs_4920499d93f53ca3197d7e98dd06e14459c8cb31',
     },
 });

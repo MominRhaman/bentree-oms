@@ -153,7 +153,9 @@ async function writeMovementLog(p, stockBefore, qty, ctx) {
  * @param {object} [logCtx] - optional logging context
  */
 async function deductInventory(products, logCtx) {
-  await Promise.all((products || []).map(p => applyStockChange(p, -Number(p.qty || 0), logCtx)));
+  await Promise.all((products || []).map((p) =>
+    applyStockChange(p, -Number(p.qty || 0), logCtx),
+  ));
 }
 
 /**
@@ -162,7 +164,9 @@ async function deductInventory(products, logCtx) {
  * @param {object} [logCtx] - optional logging context
  */
 async function restoreInventory(products, logCtx) {
-  await Promise.all((products || []).map(p => applyStockChange(p, Number(p.qty || 0), logCtx)));
+  await Promise.all((products || []).map((p) =>
+    applyStockChange(p, Number(p.qty || 0), logCtx),
+  ));
 }
 
 /**
@@ -764,38 +768,55 @@ exports.wooCreateOrder = onCall(async (request) => {
   const wcStatus = isStore ? "completed" : "processing";
   const setPaid = isStore;
 
-  const resp = await api.post("/orders", {
-    payment_method: payMethod,
-    payment_method_title: payTitle,
-    set_paid: setPaid,
-    status: wcStatus,
-    billing: {
-      first_name: firstName,
-      last_name: lastName,
-      phone: order.recipientPhone || "",
-      address_1: order.recipientAddress || "",
-      city: order.recipientCity || "",
-      state: order.recipientZone || "",
-      country: "BD",
-      email: order.email || "noreply@bentreebd.com",
-    },
-    shipping: {
-      first_name: firstName,
-      last_name: lastName,
-      address_1: order.recipientAddress || "",
-      city: order.recipientCity || "",
-      state: order.recipientZone || "",
-      country: "BD",
-    },
-    line_items: lineItems,
-    customer_note: order.specialInstructions ||
-      order.remarks ||
-      (isStore ? `Store sale by: ${order.salesByName || "—"}` : ""),
-    meta_data: [
-      {key: "_oms_created", value: "true"},
-      {key: "_oms_order_type", value: order.type || "Online"},
-    ],
+  logger.info("wooCreateOrder: lineItems resolved", {
+    count: lineItems.length,
   });
+  if (lineItems.length === 0) {
+    logger.warn(
+        "wooCreateOrder: 0 line items — SKUs may be missing in WooCommerce",
+    );
+  }
+
+  let resp;
+  try {
+    resp = await api.post("/orders", {
+      payment_method: payMethod,
+      payment_method_title: payTitle,
+      set_paid: setPaid,
+      status: wcStatus,
+      billing: {
+        first_name: firstName,
+        last_name: lastName,
+        phone: order.recipientPhone || "",
+        address_1: order.recipientAddress || "",
+        city: order.recipientCity || "",
+        state: order.recipientZone || "",
+        country: "BD",
+        email: order.email || "noreply@bentreebd.com",
+      },
+      shipping: {
+        first_name: firstName,
+        last_name: lastName,
+        address_1: order.recipientAddress || "",
+        city: order.recipientCity || "",
+        state: order.recipientZone || "",
+        country: "BD",
+      },
+      line_items: lineItems,
+      customer_note: order.specialInstructions ||
+        order.remarks ||
+        (isStore ? `Store sale by: ${order.salesByName || "—"}` : ""),
+      meta_data: [
+        {key: "_oms_created", value: "true"},
+        {key: "_oms_order_type", value: order.type || "Online"},
+      ],
+    });
+  } catch (err) {
+    const wcData = (err.response && err.response.data) || {};
+    const httpCode = (err.response && err.response.status) || 0;
+    logger.error("wooCreateOrder POST /orders failed", {httpCode, wcData});
+    throw err;
+  }
 
   logger.info("WooCommerce order created via OMS", {
     wcId: resp.data.id,
