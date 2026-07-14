@@ -205,6 +205,7 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
 
     // --- Access Control Robust Check ---
     const isMasterUser = String(userRole || '').trim().toLowerCase() === 'master';
+    const isQMTUser = String(userRole || '').trim().toLowerCase() === 'qmt';
 
     // --- Source Label Mapping ---
     const getSourceLabel = (source) => {
@@ -499,14 +500,16 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                             })}
                         </tbody>
                         {/* FOOTER SECTION */}
-                        <tfoot className="bg-slate-800 text-white font-bold border-t sticky bottom-0 z-20 shadow-[0_-2px_10px_rgba(0,0,0,0.1)]">
-                            <tr>
-                                <td colSpan="2" className="p-3 text-center border-r border-slate-700">Total Order Count</td>
-                                <td colSpan="1" className="p-3 text-center text-emerald-400 border-r border-slate-700 text-lg">{footerStats.totalOrders}</td>
-                                <td colSpan="5" className="p-3 text-right border-r border-slate-700 text-slate-300 font-medium">Total Revenue (Ex. Delivery):</td>
-                                <td colSpan="1" className="p-3 text-center text-emerald-400 text-lg">৳{footerStats.totalAmountExDelivery.toLocaleString()}</td>
-                            </tr>
-                        </tfoot>
+                        {!isQMTUser && (
+                            <tfoot className="bg-slate-800 text-white font-bold border-t sticky bottom-0 z-20 shadow-[0_-2px_10px_rgba(0,0,0,0.1)]">
+                                <tr>
+                                    <td colSpan="2" className="p-3 text-center border-r border-slate-700">Total Order Count</td>
+                                    <td colSpan="1" className="p-3 text-center text-emerald-400 border-r border-slate-700 text-lg">{footerStats.totalOrders}</td>
+                                    <td colSpan="5" className="p-3 text-right border-r border-slate-700 text-slate-300 font-medium">Total Revenue (Ex. Delivery):</td>
+                                    <td colSpan="1" className="p-3 text-center text-emerald-400 text-lg">৳{footerStats.totalAmountExDelivery.toLocaleString()}</td>
+                                </tr>
+                            </tfoot>
+                        )}
                     </table>
                 </div>
             </div>

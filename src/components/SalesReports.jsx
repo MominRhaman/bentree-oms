@@ -80,6 +80,23 @@ const SalesReports = ({ orders, inventory }) => {
                 orderDiscount = orderSubtotal * (orderDiscount / 100);
             }
 
+            // WooCommerce sale-price orders store prod.price = sale price and prod.discountValue = 0.
+            // Derive the actual discount the same way OrderDetailsPopup does: (mrp - price) × qty.
+            if (order.orderSource === 'WooCommerce' || order.source === 'WooCommerce') {
+                (order.products || []).forEach(p => {
+                    let prodDiscount = safeNum(p.discountValue);
+                    if (!prodDiscount) {
+                        const invItem = inventory.find(i => i.code.toUpperCase() === (p.code || '').toUpperCase());
+                        const mrp = invItem ? safeNum(invItem.mrp) : 0;
+                        const price = safeNum(p.price);
+                        if (mrp > price && price > 0) {
+                            prodDiscount = (mrp - price) * safeNum(p.qty);
+                        }
+                    }
+                    orderDiscount += prodDiscount;
+                });
+            }
+
             // --- UPDATED: Include Deductions in Total Discount ---
             const revenueAdjustment = Math.abs(safeNum(order.revenueAdjustment));
 
