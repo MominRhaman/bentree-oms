@@ -37,7 +37,8 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         storeCheckoutStatus: 'Pending',
         // NEW FIELDS
         salesByName: '',
-        storeReceivedAmount: ''
+        storeReceivedAmount: '',
+        deliveryZone: ''
     });
 
     const [errors, setErrors] = useState({});
@@ -218,6 +219,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         if (orderType === 'Online') {
             if (!formData.recipientName) { newErrors.recipientName = "Name is required"; isValid = false; }
             if (!formData.recipientAddress) { newErrors.recipientAddress = "Address is required"; isValid = false; }
+            if (!formData.deliveryZone) { newErrors.deliveryZone = "Delivery location is required"; isValid = false; }
         } else {
             // Store Specific Validation
             if (!formData.salesByName) { newErrors.salesByName = "Sales By is required"; isValid = false; }
@@ -313,6 +315,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                 itemDescription: totals.productDesc,
                 merchantOrderId: formData.merchantOrderId,
                 recipientAddress: formData.recipientAddress,
+                deliveryZone: formData.deliveryZone,
                 recipientCity: formData.recipientCity,
                 recipientZone: formData.recipientZone,
                 recipientArea: formData.recipientArea,
@@ -794,6 +797,20 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                                 <div><input placeholder="Phone Number (11 digits) *" className={`w-full p-2 border rounded ${errors.recipientPhone ? 'border-red-500 bg-red-50' : ''}`} value={formData.recipientPhone} onChange={e => { const val = e.target.value.replace(/\D/g, ''); if (val.length <= 11) setFormData({ ...formData, recipientPhone: val }); }} />{errors.recipientPhone && <p className="text-xs text-red-500 mt-1">{errors.recipientPhone}</p>}</div>
                                 <div><textarea placeholder="Address *" className={`w-full p-2 border rounded h-20 ${errors.recipientAddress ? 'border-red-500 bg-red-50' : ''}`} value={formData.recipientAddress} onChange={e => setFormData({ ...formData, recipientAddress: e.target.value })} />{errors.recipientAddress && <p className="text-xs text-red-500 mt-1">{errors.recipientAddress}</p>}</div>
                                 <div className="grid grid-cols-3 gap-2"><input placeholder="City" className="w-full p-2 border rounded" value={formData.recipientCity} onChange={e => setFormData({ ...formData, recipientCity: e.target.value })} /><input placeholder="Zone" className="w-full p-2 border rounded" value={formData.recipientZone} onChange={e => setFormData({ ...formData, recipientZone: e.target.value })} /><input placeholder="Area" className="w-full p-2 border rounded" value={formData.recipientArea} onChange={e => setFormData({ ...formData, recipientArea: e.target.value })} /></div>
+                                <div className={`flex flex-col gap-1.5 p-3 rounded-lg border ${errors.deliveryZone ? 'border-red-400 bg-red-50' : 'border-emerald-200 bg-white'}`}>
+                                    <p className="text-xs font-semibold text-emerald-700">Delivery Location *</p>
+                                    <div className="flex gap-6">
+                                        <label className="flex items-center gap-2 cursor-pointer">
+                                            <input type="radio" name="deliveryZone" value="Inside Dhaka" checked={formData.deliveryZone === 'Inside Dhaka'} onChange={e => setFormData({ ...formData, deliveryZone: e.target.value })} className="accent-emerald-600" />
+                                            <span className="text-sm font-medium text-slate-700">Inside Dhaka</span>
+                                        </label>
+                                        <label className="flex items-center gap-2 cursor-pointer">
+                                            <input type="radio" name="deliveryZone" value="Outside Dhaka" checked={formData.deliveryZone === 'Outside Dhaka'} onChange={e => setFormData({ ...formData, deliveryZone: e.target.value })} className="accent-emerald-600" />
+                                            <span className="text-sm font-medium text-slate-700">Outside Dhaka</span>
+                                        </label>
+                                    </div>
+                                    {errors.deliveryZone && <p className="text-xs text-red-500">{errors.deliveryZone}</p>}
+                                </div>
                             </div>
 
                             <div className="space-y-4">

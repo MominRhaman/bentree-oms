@@ -240,6 +240,10 @@ function mapWooOrder(data) {
   ].filter(Boolean).join(", ");
 
   const recipientCity = shipping.city || billing.city || "";
+  const deliveryZone =
+    (recipientCity || "").toLowerCase().trim() === "dhaka" ?
+      "Inside Dhaka" :
+      "Outside Dhaka";
   const recipientZone = shipping.state || billing.state || "";
   const recipientPostcode = shipping.postcode || billing.postcode || "";
   const recipientCountry = shipping.country || billing.country || "";
@@ -331,6 +335,7 @@ function mapWooOrder(data) {
     recipientPhone,
     email,
     recipientAddress,
+    deliveryZone,
     recipientCity,
     recipientZone,
     recipientPostcode,

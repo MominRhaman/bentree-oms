@@ -72,41 +72,37 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
             const addedBy = order.addedBy || 'System';
             const phone = order.recipientPhone || '-';
             const checkOutStatus = order.checkOutStatus || 'Pending';
-            // Actual product revenue = what customer paid, excluding delivery
-            const orderRevenue = safeNum(order.grandTotal) - safeNum(order.deliveryCharge) + safeNum(order.revenueAdjustment);
-            let grossOrderRevenue = 0;
-            (order.products || []).forEach(p => { grossOrderRevenue += safeNum(p.price) * safeNum(p.qty); });
+            // Category filter: include order if any product matches
+            if (catFilter && catFilter !== "") {
+                const hasMatch = (order.products || []).some(p => {
+                    const inv = inventory.find(i => i.code.toUpperCase() === (p.code || '').toUpperCase());
+                    return (inv ? inv.category : 'N/A') === catFilter;
+                });
+                if (!hasMatch) return;
+            }
 
+            // Order-level revenue and COGS
+            const orderNetRevenue = safeNum(order.grandTotal) - safeNum(order.deliveryCharge) + safeNum(order.revenueAdjustment);
+            let totalQty = 0;
+            let totalCOGS = 0;
             (order.products || []).forEach(prod => {
                 const invItem = inventory.find(i => i.code.toUpperCase() === (prod.code || '').toUpperCase());
-                const category = invItem ? invItem.category : 'N/A';
-                if (catFilter && catFilter !== "" && category !== catFilter) return;
-
                 const unitCost = invItem ? safeNum(invItem.unitCost) : 0;
-                let currentStock = 0;
-                if (invItem) {
-                    currentStock = invItem.type === 'Variable'
-                        ? Object.values(invItem.stock || {}).reduce((a, b) => a + Number(b), 0)
-                        : safeNum(invItem.totalStock);
-                }
+                totalQty += safeNum(prod.qty);
+                totalCOGS += unitCost * safeNum(prod.qty);
+            });
 
-                const qty = safeNum(prod.qty);
-                const grossItemRevenue = safeNum(prod.price) * qty;
-                const ratio = grossOrderRevenue > 0 ? grossItemRevenue / grossOrderRevenue : 0;
-                const netRevenue = orderRevenue * ratio;
-                const costOfSold = unitCost * qty;
-                const profitLoss = netRevenue - costOfSold;
-
-                data.push({
-                    uniqueKey: `${order.id}-${prod.code}-${Math.random()}`,
-                    originalOrder: order,
-                    id: order.id,
-                    date: order.date,
-                    orderId, phone, checkOutStatus,
-                    code: prod.code, category, unitStock: currentStock, costUnit: unitCost,
-                    unitSold: qty, revenue: netRevenue, profitLoss,
-                    paymentMode, addedBy
-                });
+            data.push({
+                uniqueKey: order.id,
+                originalOrder: order,
+                id: order.id,
+                date: order.date,
+                orderId, phone, checkOutStatus,
+                products: order.products || [],
+                unitSold: totalQty,
+                revenue: orderNetRevenue,
+                profitLoss: orderNetRevenue - totalCOGS,
+                paymentMode, addedBy
             });
         });
 
@@ -148,7 +144,8 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
     const handleExport = () => {
         const csvData = salesData.map(row => ({
             Date: row.date, 'Order ID': row.orderId, 'Phone': row.phone, 'Status': row.checkOutStatus,
-            Code: row.code, Category: row.category, 'Qty': row.unitSold, 'Revenue': row.revenue, 'Profit': row.profitLoss
+            Products: (row.products || []).map(p => `${p.code}${p.size ? ` (${p.size})` : ''} x${p.qty}`).join(' | '),
+            'Total Qty': row.unitSold, 'Revenue': row.revenue, 'Profit': row.profitLoss
         }));
         downloadCSV(csvData, 'store_sales_report.csv');
     };
@@ -356,16 +353,14 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
                     </div>
 
                     <div className="overflow-x-auto max-h-[600px] relative">
-                        <table className="w-full text-sm text-left min-w-[1000px]">
+                        <table className="w-full text-sm text-left min-w-[900px]">
                             <thead className="bg-white text-slate-600 font-bold border-b text-xs uppercase sticky top-0 z-10 shadow-sm">
                                 <tr>
-                                    <th className="p-3 bg-slate-50">Code</th>
+                                    <th className="p-3 bg-slate-50">Order</th>
                                     <th className="p-3 bg-slate-50">Phone Number</th>
                                     <th className="p-3 bg-slate-50">Check Out</th>
-                                    <th className="p-3 bg-slate-50">Category</th>
-                                    <th className="p-3 bg-slate-50 text-center">Stock</th>
-                                    <th className="p-3 bg-slate-50 text-right">Cost</th>
-                                    <th className="p-3 bg-slate-50 text-center">Sold Qty</th>
+                                    <th className="p-3 bg-slate-50">Products</th>
+                                    <th className="p-3 bg-slate-50 text-center">Total Qty</th>
                                     <th className="p-3 bg-slate-50 text-right">Revenue</th>
                                     <th className="p-3 bg-slate-50 text-right">Profit</th>
                                     <th className="p-3 bg-slate-50">Payment</th>
@@ -383,9 +378,8 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
                                     return (
                                         <tr key={row.uniqueKey} className="hover:bg-slate-50 transition-colors cursor-pointer" onClick={() => setSelectedOrder(row.originalOrder)}>
                                             <td className="p-3 font-medium text-slate-800">
-                                                {row.code}
+                                                {row.orderId || '-'}
                                                 <div className="text-[10px] text-slate-400 font-normal">{row.date}</div>
-                                                <div className="text-[10px] text-slate-500">{row.orderId}</div>
                                             </td>
                                             <td className="p-3 text-slate-600 font-mono text-xs">{row.phone}</td>
 
@@ -437,9 +431,11 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
                                                 </div>
                                             </td>
 
-                                            <td className="p-3 text-slate-600">{row.category}</td>
-                                            <td className="p-3 text-center text-slate-600">{row.unitStock}</td>
-                                            <td className="p-3 text-right text-slate-600">৳{row.costUnit.toFixed(0)}</td>
+                                            <td className="p-3 text-xs text-slate-600">
+                                                {(row.products || []).map((p, i) => (
+                                                    <div key={i}>{p.code}{p.size ? ` (${p.size})` : ''} ×{p.qty}</div>
+                                                ))}
+                                            </td>
                                             <td className="p-3 text-center font-medium text-slate-800">{row.unitSold}</td>
                                             <td className="p-3 text-right text-emerald-700 font-medium">৳{row.revenue.toFixed(2)}</td>
                                             <td className={`p-3 text-right font-bold ${row.profitLoss >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
@@ -461,14 +457,14 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
                                         </tr>
                                     )
                                 })}
-                                {salesData.length === 0 && <tr><td colSpan="12" className="p-10 text-center text-slate-400">No store sales found.</td></tr>}
+                                {salesData.length === 0 && <tr><td colSpan="10" className="p-10 text-center text-slate-400">No store sales found.</td></tr>}
                             </tbody>
                             <tfoot className="sticky bottom-0 bg-slate-100 border-t-2 border-slate-200 font-bold text-slate-700 z-10 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
                                 <tr>
                                     <td className="p-3 text-right uppercase text-xs text-slate-500" colSpan="3">
                                         Total Orders: <span className="text-slate-900 text-sm ml-1">{totals.orderCount}</span> | TOTALS
                                     </td>
-                                    <td className="p-3 text-center" colSpan="4">{totals.unitSold}</td>
+                                    <td className="p-3 text-center" colSpan="2">{totals.unitSold}</td>
                                     <td className="p-3 text-right text-emerald-800">৳{totals.revenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                                     <td className={`p-3 text-right ${totals.profitLoss >= 0 ? 'text-emerald-800' : 'text-red-700'}`}>৳{totals.profitLoss.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                                     <td className="p-3" colSpan="3"></td>

@@ -44,56 +44,42 @@ const OnlineSalesTab = ({ orders, inventory, onEdit, onCreate, onDelete }) => {
             const receiver = order.recipientName || '-';
             const checkOutStatus = order.checkOutStatus || 'Pending';
 
-            // Actual product revenue = what customer paid, excluding delivery
-            const orderRevenue = safeNum(order.grandTotal) - safeNum(order.deliveryCharge) + safeNum(order.revenueAdjustment);
-            let grossOrderRevenue = 0;
-            (order.products || []).forEach(p => { grossOrderRevenue += safeNum(p.price) * safeNum(p.qty); });
+            // Category filter: include order if any product matches
+            if (catFilter && catFilter !== "") {
+                const hasMatch = (order.products || []).some(p => {
+                    const inv = inventory.find(i => i.code.toUpperCase() === (p.code || '').toUpperCase());
+                    return (inv ? inv.category : 'N/A') === catFilter;
+                });
+                if (!hasMatch) return;
+            }
 
+            // Order-level revenue and COGS
+            const orderNetRevenue = safeNum(order.grandTotal) - safeNum(order.deliveryCharge) + safeNum(order.revenueAdjustment);
+            let totalQty = 0;
+            let totalCOGS = 0;
             (order.products || []).forEach(prod => {
                 const invItem = inventory.find(i => i.code.toUpperCase() === (prod.code || '').toUpperCase());
-                const category = invItem ? invItem.category : 'N/A';
-
-                if (catFilter && catFilter !== "" && category !== catFilter) return;
-
                 const unitCost = invItem ? safeNum(invItem.unitCost) : 0;
-                let currentStock = 0;
-                if (invItem) {
-                    if (invItem.type === 'Variable') {
-                        currentStock = Object.values(invItem.stock || {}).reduce((a, b) => a + Number(b), 0);
-                    } else {
-                        currentStock = safeNum(invItem.totalStock);
-                    }
-                }
+                totalQty += safeNum(prod.qty);
+                totalCOGS += unitCost * safeNum(prod.qty);
+            });
 
-                const qty = safeNum(prod.qty);
-                const grossItemRevenue = safeNum(prod.price) * qty;
-                const ratio = grossOrderRevenue > 0 ? grossItemRevenue / grossOrderRevenue : 0;
-
-                // Net Revenue Calculation
-                const netRevenue = orderRevenue * ratio;
-
-                const profitLoss = netRevenue - (unitCost * qty);
-
-                data.push({
-                    uniqueKey: `${order.id}-${prod.code}-${Math.random()}`,
-                    id: order.id,
-                    date: order.date,
-                    orderId: orderId,
-                    receiver: receiver,
-                    phone: phone,
-                    checkOutStatus: checkOutStatus,
-                    code: prod.code,
-                    category: category,
-                    unitStock: currentStock,
-                    costUnit: unitCost,
-                    unitSold: qty,
-                    revenue: netRevenue,
-                    profitLoss: profitLoss,
-                    salesBy: salesBy,
-                    addedBy: addedBy,
-                    lastEdited: order.lastEditedBy || '-',
-                    originalOrder: order
-                });
+            data.push({
+                uniqueKey: order.id,
+                id: order.id,
+                date: order.date,
+                orderId,
+                receiver,
+                phone,
+                checkOutStatus,
+                products: order.products || [],
+                unitSold: totalQty,
+                revenue: orderNetRevenue,
+                profitLoss: orderNetRevenue - totalCOGS,
+                salesBy,
+                addedBy,
+                lastEdited: order.lastEditedBy || '-',
+                originalOrder: order
             });
         });
 
@@ -116,9 +102,8 @@ const OnlineSalesTab = ({ orders, inventory, onEdit, onCreate, onDelete }) => {
             'Receiver Name': row.receiver,
             'Phone Number': row.phone,
             'Check Out': row.checkOutStatus,
-            Code: row.code,
-            Category: row.category,
-            'Unit Sold': row.unitSold,
+            Products: (row.products || []).map(p => `${p.code}${p.size ? ` (${p.size})` : ''} x${p.qty}`).join(' | '),
+            'Total Qty': row.unitSold,
             'Net Revenue': row.revenue.toFixed(2),
             'Net Profit': row.profitLoss.toFixed(2),
             'Sales By': row.salesBy,
@@ -164,18 +149,16 @@ const OnlineSalesTab = ({ orders, inventory, onEdit, onCreate, onDelete }) => {
 
                 {/* Table Container */}
                 <div className="overflow-x-auto max-h-[600px] relative">
-                    <table className="w-full text-sm text-left min-w-[1000px]">
+                    <table className="w-full text-sm text-left min-w-[900px]">
                         {/* Sticky Header with Whitespace No Wrap */}
                         <thead className="bg-white font-bold border-b text-slate-600 sticky top-0 z-10 shadow-sm whitespace-nowrap">
                             <tr>
-                                <th className="p-3 bg-slate-50">Code</th>
+                                <th className="p-3 bg-slate-50">Order</th>
                                 <th className="p-3 bg-slate-50">Receiver Name</th>
                                 <th className="p-3 bg-slate-50">Phone Number</th>
                                 <th className="p-3 bg-slate-50">Check Out</th>
-                                <th className="p-3 bg-slate-50">Category</th>
-                                <th className="p-3 bg-slate-50 text-center">Unit (Stock)</th>
-                                <th className="p-3 bg-slate-50 text-right">Cost (Unit)</th>
-                                <th className="p-3 bg-slate-50 text-center">Unit Sold</th>
+                                <th className="p-3 bg-slate-50">Products</th>
+                                <th className="p-3 bg-slate-50 text-center">Total Qty</th>
                                 <th className="p-3 bg-slate-50 text-right">Net Revenue</th>
                                 <th className="p-3 bg-slate-50 text-right">Prof/Loss</th>
                                 <th className="p-3 bg-slate-50">Sales By</th>
@@ -187,9 +170,8 @@ const OnlineSalesTab = ({ orders, inventory, onEdit, onCreate, onDelete }) => {
                             {salesData.map(row => (
                                 <tr key={row.uniqueKey} className="hover:bg-slate-50 border-b cursor-pointer" onClick={() => setSelectedOrder(row.originalOrder)}>
                                     <td className="p-3 font-medium">
-                                        {row.code}
+                                        {row.orderId || '-'}
                                         <div className="text-xs text-slate-400">{row.date}</div>
-                                        <div className="text-[10px] text-slate-500">{row.orderId}</div>
                                     </td>
 
                                     <td className="p-3 text-slate-700 font-bold text-xs">{row.receiver}</td>
@@ -202,9 +184,11 @@ const OnlineSalesTab = ({ orders, inventory, onEdit, onCreate, onDelete }) => {
                                         </span>
                                     </td>
 
-                                    <td className="p-3 text-slate-600">{row.category}</td>
-                                    <td className="p-3 text-center text-slate-600">{row.unitStock}</td>
-                                    <td className="p-3 text-right text-slate-600">৳{row.costUnit.toFixed(2)}</td>
+                                    <td className="p-3 text-xs text-slate-600">
+                                        {(row.products || []).map((p, i) => (
+                                            <div key={i}>{p.code}{p.size ? ` (${p.size})` : ''} ×{p.qty}</div>
+                                        ))}
+                                    </td>
                                     <td className="p-3 text-center font-bold text-slate-800">{row.unitSold}</td>
                                     <td className="p-3 text-right text-emerald-700 font-medium">৳{row.revenue.toFixed(2)}</td>
                                     <td className={`p-3 text-right font-bold ${row.profitLoss >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
@@ -224,7 +208,7 @@ const OnlineSalesTab = ({ orders, inventory, onEdit, onCreate, onDelete }) => {
                             ))}
                             {salesData.length === 0 && (
                                 <tr>
-                                    <td colSpan="13" className="p-10 text-center text-slate-400">
+                                    <td colSpan="11" className="p-10 text-center text-slate-400">
                                         No delivered online sales found for this period.
                                     </td>
                                 </tr>
@@ -234,15 +218,15 @@ const OnlineSalesTab = ({ orders, inventory, onEdit, onCreate, onDelete }) => {
                         {/* Sticky Footer */}
                         <tfoot className="sticky bottom-0 bg-slate-100 border-t-2 border-slate-200 font-bold text-slate-700 z-10 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
                             <tr>
-                                <td className="p-3 text-right uppercase text-xs text-slate-500" colSpan="2">
+                                <td className="p-3 text-right uppercase text-xs text-slate-500" colSpan="4">
                                     Total Orders: <span className="text-slate-900 text-sm ml-1">{totals.orderCount}</span> | TOTALS
                                 </td>
-                                <td className="p-3 text-center" colSpan="6">{totals.unitSold}</td>
+                                <td className="p-3 text-center" colSpan="2">{totals.unitSold}</td>
                                 <td className="p-3 text-right text-emerald-800">৳{totals.revenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                                 <td className={`p-3 text-right ${totals.profitLoss >= 0 ? 'text-emerald-800' : 'text-red-700'}`}>
                                     ৳{totals.profitLoss.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                                 </td>
-                                <td className="p-3" colSpan="2"></td>
+                                <td className="p-3" colSpan="3"></td>
                             </tr>
                         </tfoot>
                     </table>
