@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Edit2, Save, Trash2, Printer, MapPin, Phone, User, Package, Plus, Clock, RefreshCw, AlertTriangle, RotateCcw, CheckCircle, Eye, Zap, ArrowLeft } from 'lucide-react';
-import { disableScroll, updateInventoryStock } from '../utils';
+import { X, Edit2, Save, Trash2, Printer, MapPin, User, Package, Plus, Clock, RefreshCw, AlertTriangle, RotateCcw, CheckCircle, Eye, Zap, ArrowLeft } from 'lucide-react';
+import { disableScroll } from '../utils';
 import InvoiceGenerator from './InvoiceGenerator';
 
 const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, inventory = [], isReturnMode = false }) => {
@@ -611,16 +611,13 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                                     <p><span className="font-medium">Name:</span> {order.recipientName || 'Walk-in Customer'}</p>
                                     <p><span className="font-medium">Phone:</span> {order.recipientPhone}</p>
                                     {order.email && <p><span className="font-medium">Email:</span> {order.email}</p>}
-                                    {(order.recipientAddress || order.recipientCity || order.recipientZone || order.recipientPostcode || order.recipientCountry) && (
+                                    {(order.recipientAddress || order.recipientCity) && (
                                         <p className="flex gap-1">
                                             <MapPin size={14} className="mt-1 flex-shrink-0" />
                                             <span>
                                                 {[
                                                     order.recipientAddress,
                                                     order.recipientCity,
-                                                    order.recipientZone,
-                                                    order.recipientPostcode,
-                                                    order.recipientCountry,
                                                 ].filter(Boolean).join(', ')}
                                             </span>
                                         </p>
@@ -1068,4 +1065,4 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
     );
 };
 
-export default OrderDetailsPopup;
+export default React.memo(OrderDetailsPopup);

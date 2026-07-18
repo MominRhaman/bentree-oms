@@ -220,7 +220,6 @@ async function syncInventory(oldProducts, newProducts, logCtx) {
  * @return {object} Firestore-ready order document.
  */
 function mapWooOrder(data) {
-  console.log(data, "Woo payload");
   const billing = data.billing || {};
   const shipping = data.shipping || {};
 
@@ -245,8 +244,6 @@ function mapWooOrder(data) {
       "Inside Dhaka" :
       "Outside Dhaka";
   const recipientZone = shipping.state || billing.state || "";
-  const recipientPostcode = shipping.postcode || billing.postcode || "";
-  const recipientCountry = shipping.country || billing.country || "";
 
   const products = (data.line_items || []).map((item) => {
     const sizeMeta = (item.meta_data || []).find(
@@ -338,8 +335,6 @@ function mapWooOrder(data) {
     deliveryZone,
     recipientCity,
     recipientZone,
-    recipientPostcode,
-    recipientCountry,
     recipientArea: "",
     products,
     specialInstructions: data.customer_note || "",
@@ -537,8 +532,6 @@ exports.woocommerceWebhook = onRequest(async (req, res) => {
         recipientAddress: orderData.recipientAddress,
         recipientCity: orderData.recipientCity,
         recipientZone: orderData.recipientZone,
-        recipientPostcode: orderData.recipientPostcode,
-        recipientCountry: orderData.recipientCountry,
         products: orderData.products,
         subtotal: orderData.subtotal,
         grandTotal: orderData.grandTotal,
@@ -652,18 +645,17 @@ function makeWooApi() {
  * @return {Array} WooCommerce line_items.
  */
 async function resolveWooLineItems(api, products) {
-  const items = [];
-  for (const p of (products || [])) {
+  const resolveOne = async (p) => {
     // Uppercase: WooCommerce SKU search is case-insensitive
     const sku = (p.code || "").trim().toUpperCase();
-    if (!sku) continue;
+    if (!sku) return null;
     try {
       const {data} = await api.get("/products", {
         params: {sku, per_page: 1},
       });
       if (!data.length) {
         logger.warn("Woo SKU not found", {sku});
-        continue;
+        return null;
       }
       const prod = data[0];
       logger.info("Woo product found", {
@@ -706,38 +698,41 @@ async function resolveWooLineItems(api, products) {
           logger.info("Variation resolved", {
             sku, variationId: v.id, size: p.size,
           });
-          items.push({
+          return {
             product_id: prod.id,
             variation_id: v.id,
             quantity: Number(p.qty || 1),
-          });
-        } else {
-          logger.warn("No variation matched — order item will lack size", {
-            sku, size: p.size, normalized: up,
-          });
-          items.push({product_id: prod.id, quantity: Number(p.qty || 1)});
+          };
         }
+        logger.warn(
+            "No variation matched — order item will lack size",
+            {sku, size: p.size, normalized: up},
+        );
+        return {product_id: prod.id, quantity: Number(p.qty || 1)};
       } else if (prod.type === "variation") {
         // SKU matched a variation directly (not the parent)
         logger.info("SKU matched variation directly", {sku, varId: prod.id});
-        items.push({
+        return {
           product_id: prod.parent_id || prod.id,
           variation_id: prod.id,
           quantity: Number(p.qty || 1),
-        });
-      } else {
-        items.push({
-          product_id: prod.id,
-          quantity: Number(p.qty || 1),
-        });
+        };
       }
+      return {
+        product_id: prod.id,
+        quantity: Number(p.qty || 1),
+      };
     } catch (err) {
       logger.warn("Woo SKU resolve failed", {
         sku, err: (err.response && err.response.data) || err.message,
       });
+      return null;
     }
-  }
-  return items;
+  };
+  const results = await Promise.all(
+      (products || []).map(resolveOne),
+  );
+  return results.filter(Boolean);
 }
 
 // ── wooCreateOrder onCall ────────────────────────────────────────────────────
@@ -764,7 +759,6 @@ exports.wooCreateOrder = onCall(async (request) => {
     "Bank Transfer": "Bank Transfer",
     "MFS": "Mobile Banking (MFS)",
   };
-  console.log(order, "Payment");
   const rawPayment = order.paymentType || order.storePaymentMode || "";
   const payMethod = PAY_METHOD_MAP[rawPayment] || "cod";
   const payTitle = PAY_TITLE_MAP[rawPayment] || "Cash on Delivery";
@@ -834,20 +828,18 @@ exports.wooCreateOrder = onCall(async (request) => {
 exports.wooAdjustStock = onCall(async (request) => {
   const {products, delta} = request.data || {};
   const api = makeWooApi();
-  let adjusted = 0;
 
-  for (const p of (products || [])) {
+  const adjustOne = async (p) => {
     const sku = (p.code || "").trim().toUpperCase();
     const qty = Number(p.qty || 0);
-    if (!sku || qty === 0) continue;
-
+    if (!sku || qty === 0) return false;
     try {
       const {data} = await api.get("/products", {
         params: {sku, per_page: 1},
       });
       if (!data.length) {
         logger.warn("Woo product not found for stock", {sku});
-        continue;
+        return false;
       }
       const prod = data[0];
 
@@ -866,7 +858,7 @@ exports.wooAdjustStock = onCall(async (request) => {
           logger.warn("Woo variation not found", {
             sku, size: p.size, normalized: up,
           });
-          continue;
+          return false;
         }
         const ns = Math.max(
             0, (v.stock_quantity || 0) + delta * qty,
@@ -886,15 +878,19 @@ exports.wooAdjustStock = onCall(async (request) => {
         );
         logger.info("Woo product stock adjusted", {sku, ns});
       }
-      adjusted++;
+      return true;
     } catch (err) {
       logger.warn("Woo stock adjust failed", {
         sku, err: (err.response && err.response.data) || err.message,
       });
+      return false;
     }
-  }
+  };
 
-  return {adjusted};
+  const results = await Promise.all(
+      (products || []).map(adjustOne),
+  );
+  return {adjusted: results.filter(Boolean).length};
 });
 
 // ── wooUpdateOrder onCall ────────────────────────────────────────────────────

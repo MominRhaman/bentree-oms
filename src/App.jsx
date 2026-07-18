@@ -165,20 +165,26 @@ function App() {
     }, [inventory]);
 
     // --- SCANNER INTEGRATION ---
-    useScanner((code) => {
-        // Search orders by Merchant ID, Store ID, or Tracking ID
-        const found = orders.find(o =>
+    // Keep latest orders in a ref so the scan callback stays stable.
+    // Without this, every Firestore orders snapshot would recreate the callback,
+    // causing useScanner to detach and reattach the keydown listener on every update.
+    const ordersRef = useRef(orders);
+    useEffect(() => { ordersRef.current = orders; }, [orders]);
+
+    const onScanCallback = useCallback((code) => {
+        const found = ordersRef.current.find(o =>
             (o.merchantOrderId && o.merchantOrderId.toString() === code) ||
             (o.storeOrderId && o.storeOrderId.toString() === code) ||
             (o.trackingId && o.trackingId.toString() === code)
         );
-
         if (found) {
             setScannedOrder(found);
         } else {
             console.log("No order found for scanned code:", code);
         }
-    });
+    }, []);
+
+    useScanner(onScanCallback);
 
     // Called from InventoryTab when user clicks the printer icon
     const handleOpenBarcodePrint = useCallback((labels) => {
@@ -187,7 +193,7 @@ function App() {
     }, [handleTabChange]);
 
     // --- 5. INVENTORY IMPACT LOGIC: Status Changes (Cancel/Return/Restore) ---
-    const handleUpdateStatus = async (orderId, newStatus, extraData = {}) => {
+    const handleUpdateStatus = useCallback(async (orderId, newStatus, extraData = {}) => {
         // Find order by ID or fallback to Merchant ID if ID changed during exchange
         let order = orders.find(o => o.id === orderId);
         if (!order && (extraData.merchantOrderId || extraData.storeOrderId)) {
@@ -294,10 +300,10 @@ function App() {
                 console.error(`[WooOrder] ${newStatus}→${wcStatus} sync failed:`, e)
             );
         }
-    };
+    }, [orders, inventory, user]);
 
     // --- 6. INVENTORY IMPACT LOGIC: Edits & Exchanges ---
-    const handleEditOrderWithStock = async (orderId, newStatus, updatedData) => {
+    const handleEditOrderWithStock = useCallback(async (orderId, newStatus, updatedData) => {
         // Find the order in the current local state
         const oldOrder = orders.find(o => o.id === orderId);
 
@@ -460,25 +466,19 @@ function App() {
             console.error("Inventory Sync Failure:", err);
             alert("Error syncing inventory. Check console for details.");
         }
-    };
+    }, [orders, inventory, user]);
 
     // --- NEW: CREATE ORDER (for Partial Returns) ---
-    const handleCreateOrder = async (orderData) => {
+    const handleCreateOrder = useCallback(async (orderData) => {
         try {
-            console.log(' Creating new return order...');
-            console.log('Order data:', { status: orderData.status, products: orderData.products?.length });
-
             // CRITICAL: For RETURNED/CANCELLED orders, we DON'T touch inventory
 
             // Only deduct inventory if creating a new ACTIVE order (not a return)
             if (!['Cancelled', 'Returned'].includes(orderData.status)) {
-                console.log('Deducting inventory for active order...');
                 const products = orderData.products || [];
                 await Promise.all(products.map(p =>
                     updateInventoryStock(p.code, p.size, -Number(p.qty), inventory)
                 ));
-            } else {
-                console.log('Skipping inventory deduction for return/cancelled order');
             }
 
             // Create new document in Firebase using your custom path
@@ -494,18 +494,16 @@ function App() {
                 createdBy: user?.displayName || 'Admin'
             });
 
-            console.log(' New return order created with ID:', docRef.id);
             return docRef.id;
         } catch (error) {
             console.error('❌ Error creating new order:', error);
-            console.error('Error details:', error);
             alert(`Failed to create return order: ${error.message}`);
             throw error;
         }
-    };
+    }, [inventory, user]);
 
     // --- 7. INVENTORY IMPACT LOGIC: Permanent Deletion ---
-    const handleDeleteOrder = async (orderId) => {
+    const handleDeleteOrder = useCallback(async (orderId) => {
         const order = orders.find(o => o.id === orderId);
         if (order && !['Cancelled', 'Returned'].includes(order.status)) {
             const delRef = order.merchantOrderId || order.storeOrderId || orderId;
@@ -534,7 +532,7 @@ function App() {
             );
         }
         await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', orderId));
-    };
+    }, [orders, inventory, user]);
 
     const handleEditInventory = useCallback(async (id, updatedData) => {
         try {

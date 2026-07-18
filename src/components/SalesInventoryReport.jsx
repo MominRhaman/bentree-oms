@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef } from 'react';
 import {
     Search, Download, FileText, X,
-    Package, TrendingUp, ArrowUpDown, ChevronRight, Filter, DollarSign
+    TrendingUp, ArrowUpDown, ChevronRight, Filter, DollarSign
 } from 'lucide-react';
 import { downloadCSV, INVENTORY_CATEGORIES } from '../utils';
 

@@ -42,7 +42,6 @@ const OnlineSalesTab = ({ orders, inventory, onEdit, onCreate, onDelete }) => {
             const addedBy = order.addedBy || 'System';
             const phone = order.recipientPhone || '-';
             const receiver = order.recipientName || '-';
-            const checkOutStatus = order.checkOutStatus || 'Pending';
 
             // Category filter: include order if any product matches
             if (catFilter && catFilter !== "") {
@@ -71,7 +70,6 @@ const OnlineSalesTab = ({ orders, inventory, onEdit, onCreate, onDelete }) => {
                 orderId,
                 receiver,
                 phone,
-                checkOutStatus,
                 products: order.products || [],
                 unitSold: totalQty,
                 revenue: orderNetRevenue,
@@ -101,7 +99,6 @@ const OnlineSalesTab = ({ orders, inventory, onEdit, onCreate, onDelete }) => {
             'Order ID': row.orderId,
             'Receiver Name': row.receiver,
             'Phone Number': row.phone,
-            'Check Out': row.checkOutStatus,
             Products: (row.products || []).map(p => `${p.code}${p.size ? ` (${p.size})` : ''} x${p.qty}`).join(' | '),
             'Total Qty': row.unitSold,
             'Net Revenue': row.revenue.toFixed(2),
@@ -156,7 +153,6 @@ const OnlineSalesTab = ({ orders, inventory, onEdit, onCreate, onDelete }) => {
                                 <th className="p-3 bg-slate-50">Order</th>
                                 <th className="p-3 bg-slate-50">Receiver Name</th>
                                 <th className="p-3 bg-slate-50">Phone Number</th>
-                                <th className="p-3 bg-slate-50">Check Out</th>
                                 <th className="p-3 bg-slate-50">Products</th>
                                 <th className="p-3 bg-slate-50 text-center">Total Qty</th>
                                 <th className="p-3 bg-slate-50 text-right">Net Revenue</th>
@@ -177,12 +173,6 @@ const OnlineSalesTab = ({ orders, inventory, onEdit, onCreate, onDelete }) => {
                                     <td className="p-3 text-slate-700 font-bold text-xs">{row.receiver}</td>
 
                                     <td className="p-3 text-slate-600 font-mono text-xs">{row.phone}</td>
-
-                                    <td className="p-3">
-                                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${row.checkOutStatus === 'Completed' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
-                                            {row.checkOutStatus}
-                                        </span>
-                                    </td>
 
                                     <td className="p-3 text-xs text-slate-600">
                                         {(row.products || []).map((p, i) => (
@@ -208,7 +198,7 @@ const OnlineSalesTab = ({ orders, inventory, onEdit, onCreate, onDelete }) => {
                             ))}
                             {salesData.length === 0 && (
                                 <tr>
-                                    <td colSpan="11" className="p-10 text-center text-slate-400">
+                                    <td colSpan="10" className="p-10 text-center text-slate-400">
                                         No delivered online sales found for this period.
                                     </td>
                                 </tr>
@@ -218,7 +208,7 @@ const OnlineSalesTab = ({ orders, inventory, onEdit, onCreate, onDelete }) => {
                         {/* Sticky Footer */}
                         <tfoot className="sticky bottom-0 bg-slate-100 border-t-2 border-slate-200 font-bold text-slate-700 z-10 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
                             <tr>
-                                <td className="p-3 text-right uppercase text-xs text-slate-500" colSpan="4">
+                                <td className="p-3 text-right uppercase text-xs text-slate-500" colSpan="3">
                                     Total Orders: <span className="text-slate-900 text-sm ml-1">{totals.orderCount}</span> | TOTALS
                                 </td>
                                 <td className="p-3 text-center" colSpan="2">{totals.unitSold}</td>

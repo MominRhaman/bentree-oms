@@ -1,6 +1,6 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import Barcode from 'react-barcode';
-import { Printer, X, ArrowLeft, ChevronLeft, ChevronRight, Settings, Tag } from 'lucide-react';
+import { Printer, ArrowLeft, ChevronLeft, ChevronRight, Settings, Tag } from 'lucide-react';
 
 // --- LABEL SIZE PRESETS ---
 const SIZE_PRESETS = [
@@ -17,8 +17,6 @@ const BarcodePrintView = ({ items, onClose }) => {
     const [customH, setCustomH] = useState('28');
     const [currentIndex, setCurrentIndex] = useState(0);
     const [printMode, setPrintMode] = useState('single');
-
-    const printFrameRef = useRef(null);
 
     if (!items || items.length === 0) {
         return (
@@ -524,4 +522,4 @@ ${labelsHTML}
     );
 };
 
-export default BarcodePrintView;
+export default React.memo(BarcodePrintView);

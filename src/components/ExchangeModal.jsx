@@ -1,6 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Plus, Trash2, X, RefreshCw, AlertCircle, AlertTriangle } from 'lucide-react';
-import { updateInventoryStock } from '../utils';
+import { Plus, Trash2, X, RefreshCw, AlertTriangle } from 'lucide-react';
 
 // Added 'user' to the props list below
 const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user }) => {
@@ -753,4 +752,4 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
     );
 };
 
-export default ExchangeModal;
+export default React.memo(ExchangeModal);

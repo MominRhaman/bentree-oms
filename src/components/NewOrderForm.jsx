@@ -32,12 +32,11 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         specialInstructions: '',
         remarks: '',
         checkOutStatus: 'Pending',
-        storePaymentMode: 'Cash',
         storeOrderId: '',
         storeCheckoutStatus: 'Pending',
         // NEW FIELDS
         salesByName: '',
-        storeReceivedAmount: '',
+        storePayments: [{ mode: 'Cash', amount: '', txRef: '' }],
         deliveryZone: ''
     });
 
@@ -68,7 +67,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
             remarks: '',
             isExpress: false,
             salesByName: '',
-            storeReceivedAmount: ''
+            storePayments: [{ mode: 'Cash', amount: '', txRef: '' }]
         }));
     };
 
@@ -223,7 +222,11 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         } else {
             // Store Specific Validation
             if (!formData.salesByName) { newErrors.salesByName = "Sales By is required"; isValid = false; }
-            if (!formData.storeReceivedAmount) { newErrors.storeReceivedAmount = "Received Amount is required"; isValid = false; }
+            const _spPaid = formData.storePayments.reduce((s, p) => s + Number(p.amount || 0), 0);
+            if (_spPaid > totals.grandTotal + 0.01) {
+                newErrors.storePayments = `Total paid (৳${_spPaid.toFixed(2)}) cannot exceed order total (৳${totals.grandTotal.toFixed(2)})`;
+                isValid = false;
+            }
         }
 
         const productErrors = {};
@@ -327,13 +330,19 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                 storeName: 'Bentree'
             });
         } else {
+            const _pmts = formData.storePayments
+                .filter(p => Number(p.amount || 0) > 0)
+                .map(p => ({ mode: p.mode, amount: Number(p.amount), txRef: p.txRef || '', timestamp: new Date().toISOString() }));
+            const _paid = _pmts.reduce((s, p) => s + p.amount, 0);
+            const _mode = _pmts.length === 0 ? 'Due' : _pmts.length === 1 ? _pmts[0].mode : 'Split';
             Object.assign(payload, {
-                storePaymentMode: formData.storePaymentMode,
+                storePaymentMode: _mode,
                 storeOrderId: formData.storeOrderId,
                 checkOutStatus: formData.storeCheckoutStatus,
                 salesByName: formData.salesByName,
-                collectedAmount: Number(formData.storeReceivedAmount || 0),
-                dueAmount: totals.grandTotal - Number(formData.storeReceivedAmount || 0)
+                collectedAmount: _paid,
+                dueAmount: totals.grandTotal - _paid,
+                payments: _pmts
             });
         }
 
@@ -576,6 +585,18 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         setFormData(prev => ({ ...prev, products: newProducts }));
         setSuggestions({ index: null, list: [] }); // Close any open suggestion dropdown
     });
+
+    // --- Store Split-Payment Helpers ---
+    const STORE_PMT_MODES = ['Cash', 'Card', 'bKash', 'Nagad', 'MFS', 'Bank Transfer'];
+    const addStorePmt    = () => setFormData(prev => ({ ...prev, storePayments: [...prev.storePayments, { mode: 'Cash', amount: '', txRef: '' }] }));
+    const removeStorePmt = (i) => setFormData(prev => ({ ...prev, storePayments: prev.storePayments.filter((_, idx) => idx !== i) }));
+    const updateStorePmt = (i, field, val) => {
+        const updated = [...formData.storePayments];
+        updated[i] = { ...updated[i], [field]: val };
+        setFormData(prev => ({ ...prev, storePayments: updated }));
+    };
+    const spPaid = formData.storePayments.reduce((s, p) => s + Number(p.amount || 0), 0);
+    const spDue  = Math.max(0, totals.grandTotal - spPaid);
 
     return (
         <div className="max-w-4xl mx-auto bg-white rounded-xl shadow-sm border border-slate-200">
@@ -856,7 +877,6 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="space-y-4">
                                 <div><label className="block text-sm font-medium mb-1">Order ID</label><input className="w-full p-2 border rounded bg-slate-50" value={formData.storeOrderId} readOnly /></div>
-                                <div><label className="block text-sm font-medium mb-1">Payment Mode</label><select className="w-full p-2 border rounded" value={formData.storePaymentMode} onChange={e => setFormData({ ...formData, storePaymentMode: e.target.value })}><option>Cash</option><option>Card</option><option>MFS</option></select></div>
                                 <div>
                                     <label className="block text-sm font-medium mb-1">Sales By Name *</label>
                                     <input
@@ -871,20 +891,63 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                             <div className="space-y-4">
                                 <div><label className="block text-sm font-medium mb-1">Customer Phone *</label><input className={`w-full p-2 border rounded ${errors.recipientPhone ? 'border-red-500 bg-red-50' : ''}`} placeholder="Enter phone number" value={formData.recipientPhone} onChange={e => { const val = e.target.value.replace(/\D/g, ''); if (val.length <= 11) setFormData({ ...formData, recipientPhone: val }); }} required />{errors.recipientPhone && <p className="text-xs text-red-500 mt-1">{errors.recipientPhone}</p>}</div>
                                 <div><label className="block text-sm font-medium mb-1">Customer Name (Optional)</label><input className="w-full p-2 border rounded" placeholder="Enter customer name" value={formData.recipientName} onChange={e => setFormData({ ...formData, recipientName: e.target.value })} /></div>
-                                <div>
-                                    <label className="block text-sm font-medium mb-1">Total Received Amount *</label>
-                                    <input
-                                        type="number"
-                                        className={`w-full p-2 border rounded ${errors.storeReceivedAmount ? 'border-red-500 bg-red-50' : ''}`}
-                                        placeholder="Amount collected"
-                                        value={formData.storeReceivedAmount}
-                                        onChange={e => setFormData({ ...formData, storeReceivedAmount: e.target.value })}
-                                        onWheel={disableScroll}
-                                    />
-                                    {errors.storeReceivedAmount && <p className="text-xs text-red-500 mt-1">{errors.storeReceivedAmount}</p>}
-                                </div>
                             </div>
                         </div>
+
+                        {/* Payment — supports split & due */}
+                        <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
+                            <div className="flex justify-between items-center mb-3">
+                                <label className="block text-sm font-medium text-slate-700">Payment</label>
+                                <span className="text-xs text-slate-500">Order Total: <span className="font-bold text-slate-700">৳{totals.grandTotal.toFixed(2)}</span></span>
+                            </div>
+                            <div className="space-y-2">
+                                {formData.storePayments.map((p, i) => (
+                                    <div key={i} className="flex gap-2 items-center">
+                                        <select
+                                            className="w-32 p-2 border rounded text-sm bg-white"
+                                            value={p.mode}
+                                            onChange={e => updateStorePmt(i, 'mode', e.target.value)}
+                                        >
+                                            {STORE_PMT_MODES.map(m => <option key={m}>{m}</option>)}
+                                        </select>
+                                        <input
+                                            type="number"
+                                            placeholder="Amount"
+                                            className="flex-1 p-2 border rounded text-sm"
+                                            value={p.amount}
+                                            onChange={e => updateStorePmt(i, 'amount', e.target.value)}
+                                            onWheel={disableScroll}
+                                            min="0"
+                                        />
+                                        <input
+                                            placeholder="Ref# (optional)"
+                                            className="flex-1 p-2 border rounded text-sm"
+                                            value={p.txRef}
+                                            onChange={e => updateStorePmt(i, 'txRef', e.target.value)}
+                                        />
+                                        {formData.storePayments.length > 1 && (
+                                            <button type="button" onClick={() => removeStorePmt(i)} className="p-2 text-red-500 hover:bg-red-100 rounded flex-shrink-0">
+                                                <Trash2 size={15} />
+                                            </button>
+                                        )}
+                                    </div>
+                                ))}
+                                <button
+                                    type="button"
+                                    onClick={addStorePmt}
+                                    className="flex items-center text-sm text-emerald-600 font-bold hover:bg-emerald-50 p-2 rounded border border-dashed border-emerald-300 w-full justify-center"
+                                >
+                                    <Plus size={15} className="mr-1" /> Add Payment Method
+                                </button>
+                            </div>
+                            {errors.storePayments && <p className="text-xs text-red-500 mt-2">{errors.storePayments}</p>}
+                            <div className="mt-2 flex gap-4 text-xs p-2 bg-white rounded border border-slate-200">
+                                <span className="text-slate-500">Paid: <span className="font-bold text-emerald-700">৳{spPaid.toFixed(2)}</span></span>
+                                <span className="text-slate-500">Due: <span className={`font-bold ${spDue > 0 ? 'text-red-600' : 'text-emerald-600'}`}>৳{spDue.toFixed(2)}</span></span>
+                                {spDue <= 0 && spPaid > 0 && <span className="font-bold text-emerald-600">Fully Paid</span>}
+                            </div>
+                        </div>
+
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-1">Checkout Status</label>

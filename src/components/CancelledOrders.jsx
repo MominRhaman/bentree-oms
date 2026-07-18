@@ -1,10 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import { Calendar, Download, Trash2, RefreshCw, Ban, CheckCircle, Clock, Eye } from 'lucide-react';
-import { doc, deleteDoc } from "firebase/firestore";
 import { getStatusColor, downloadCSV } from '../utils';
 
 // IMPORTANT: Using db from your firebase configuration
-import { db } from "../firebase";
 import OrderDetailsPopup from './OrderDetailsPopup';
 import SearchBar from './SearchBar';
 

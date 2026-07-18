@@ -1,10 +1,11 @@
 import React, { useState, useMemo } from 'react';
-import { Download, Filter, Edit, Trash2, CheckCircle, ShoppingBag, XCircle, Search, ArrowLeft, CreditCard } from 'lucide-react';
+import { Download, Filter, Edit, Trash2, CheckCircle, ShoppingBag, XCircle, Search, CreditCard } from 'lucide-react';
 import SearchBar from './SearchBar';
 import OrderDetailsPopup from './OrderDetailsPopup';
 import { INVENTORY_CATEGORIES, downloadCSV } from '../utils';
 
 const CANCEL_ORDER_CONFIRM = 'Cancel this Store Order? Stock will be restored and recorded in Movement Log.';
+const PAYMENT_MODES = ['Cash', 'Card', 'bKash', 'Nagad', 'MFS', 'Bank Transfer'];
 
 const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete }) => {
     // --- States ---
@@ -19,6 +20,9 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
     const [selectedOrder, setSelectedOrder] = useState(null);
+    const [dueFilter, setDueFilter] = useState(false);
+    const [paymentModal, setPaymentModal] = useState(null);
+    const [editedPayments, setEditedPayments] = useState([]);
 
     // --- CHECKOUT LOGIC (Like Primary Orders) ---
     // 1. Start with BLANK list. Only show if search has value.
@@ -50,10 +54,19 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
         if (startDate) processedOrders = processedOrders.filter(o => o.date >= startDate);
         if (endDate) processedOrders = processedOrders.filter(o => o.date <= endDate);
 
-        // NEW: Payment Mode Filter Logic
-        if (paymentFilter) {
-            processedOrders = processedOrders.filter(o => (o.storePaymentMode || 'Cash') === paymentFilter);
+        // Payment Mode Filter — checks payments[] array; falls back to storePaymentMode for old orders
+        if (paymentFilter === 'Due') {
+            processedOrders = processedOrders.filter(o => Number(o.dueAmount || 0) > 0);
+        } else if (paymentFilter) {
+            processedOrders = processedOrders.filter(o => {
+                const pmts = o.payments || [];
+                if (pmts.length > 0) return pmts.some(p => p.mode === paymentFilter);
+                return (o.storePaymentMode || 'Cash') === paymentFilter;
+            });
         }
+
+        // Due Orders Filter
+        if (dueFilter) processedOrders = processedOrders.filter(o => Number(o.dueAmount || 0) > 0);
 
         if (searchTerm) {
             const term = searchTerm.toLowerCase();
@@ -92,6 +105,14 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
                 totalCOGS += unitCost * safeNum(prod.qty);
             });
 
+            // When a payment method filter is active, displayRevenue = amount collected via that method
+            const pmts = order.payments || [];
+            const displayRevenue = (paymentFilter && paymentFilter !== 'Due')
+                ? (pmts.length > 0
+                    ? pmts.filter(p => p.mode === paymentFilter).reduce((s, p) => s + Number(p.amount || 0), 0)
+                    : Number(order.collectedAmount || order.grandTotal || 0))
+                : orderNetRevenue;
+
             data.push({
                 uniqueKey: order.id,
                 originalOrder: order,
@@ -101,21 +122,27 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
                 products: order.products || [],
                 unitSold: totalQty,
                 revenue: orderNetRevenue,
+                displayRevenue,
                 profitLoss: orderNetRevenue - totalCOGS,
-                paymentMode, addedBy
+                paymentMode, addedBy,
+                dueAmount: Number(order.dueAmount || 0),
+                collectedAmount: Number(order.collectedAmount || 0),
+                payments: pmts,
+                grandTotal: safeNum(order.grandTotal)
             });
         });
 
         const totals = data.reduce((acc, row) => ({
             unitSold: acc.unitSold + row.unitSold,
             revenue: acc.revenue + row.revenue,
+            displayRevenue: acc.displayRevenue + row.displayRevenue,
             profitLoss: acc.profitLoss + row.profitLoss
-        }), { unitSold: 0, revenue: 0, profitLoss: 0 });
+        }), { unitSold: 0, revenue: 0, displayRevenue: 0, profitLoss: 0 });
 
         totals.orderCount = uniqueOrderIds.size;
 
         return { salesData: data, totals };
-    }, [orders, inventory, startDate, endDate, searchTerm, catFilter, paymentFilter, isCheckoutMode]);
+    }, [orders, inventory, startDate, endDate, searchTerm, catFilter, paymentFilter, dueFilter, isCheckoutMode]);
 
     // --- Input Handlers (Primary Order Style) ---
     const handleIdChange = (orderId, value) => {
@@ -325,20 +352,31 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
                                 <Filter size={14} className="absolute left-2.5 top-3 text-slate-400 pointer-events-none" />
                             </div>
 
-                            {/* NEW: Payment Mode Filter UI */}
+                            {/* Payment Mode Filter */}
                             <div className="relative">
                                 <select
-                                    className="p-2 pl-8 border rounded text-sm bg-white outline-none w-full md:w-40 appearance-none cursor-pointer hover:border-emerald-400 transition-colors"
+                                    className="p-2 pl-8 border rounded text-sm bg-white outline-none w-full md:w-44 appearance-none cursor-pointer hover:border-emerald-400 transition-colors"
                                     value={paymentFilter}
                                     onChange={e => setPaymentFilter(e.target.value)}
                                 >
                                     <option value="">All Payments</option>
                                     <option value="Cash">Cash</option>
                                     <option value="Card">Card</option>
+                                    <option value="bKash">bKash</option>
+                                    <option value="Nagad">Nagad</option>
                                     <option value="MFS">MFS</option>
+                                    <option value="Bank Transfer">Bank Transfer</option>
+                                    <option value="Split">Split</option>
+                                    <option value="Due">Due</option>
                                 </select>
                                 <CreditCard size={14} className="absolute left-2.5 top-3 text-slate-400 pointer-events-none" />
                             </div>
+                            <button
+                                onClick={() => setDueFilter(f => !f)}
+                                className={`px-3 py-2 rounded text-sm font-bold border transition-colors whitespace-nowrap ${dueFilter ? 'bg-red-600 text-white border-red-600' : 'bg-white text-red-500 border-red-200 hover:bg-red-50'}`}
+                            >
+                                Due Orders
+                            </button>
                         </div>
                         <div className="flex flex-col md:flex-row gap-2 w-full md:w-auto">
                             <div className="flex items-center bg-white border rounded px-2 py-1 gap-2 w-full md:w-auto justify-between md:justify-start">
@@ -437,13 +475,29 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
                                                 ))}
                                             </td>
                                             <td className="p-3 text-center font-medium text-slate-800">{row.unitSold}</td>
-                                            <td className="p-3 text-right text-emerald-700 font-medium">৳{row.revenue.toFixed(2)}</td>
+                                            <td className="p-3 text-right text-emerald-700 font-medium">
+                                                ৳{row.displayRevenue.toFixed(2)}
+                                                {row.dueAmount > 0 && (
+                                                    <div className="text-[10px] text-red-500 font-bold">Due ৳{row.dueAmount.toFixed(0)}</div>
+                                                )}
+                                            </td>
                                             <td className={`p-3 text-right font-bold ${row.profitLoss >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                                                 {row.profitLoss.toFixed(2)}
                                             </td>
                                             <td className="p-3 text-xs text-slate-500">{row.paymentMode}</td>
                                             <td className="p-3 text-xs text-slate-500">{row.addedBy}</td>
                                             <td className="p-3 text-center flex justify-center gap-2">
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setEditedPayments((row.payments || []).map(p => ({ ...p })));
+                                                        setPaymentModal({ id: row.id, orderId: row.orderId, grandTotal: row.grandTotal, collectedAmount: row.collectedAmount, dueAmount: row.dueAmount, payments: row.payments || [], status: row.originalOrder.status });
+                                                    }}
+                                                    className={`p-1 rounded ${row.dueAmount > 0 ? 'text-red-500 hover:bg-red-50' : 'text-slate-400 hover:bg-slate-100'}`}
+                                                    title="Manage Payments"
+                                                >
+                                                    <CreditCard size={16} />
+                                                </button>
                                                 <button onClick={(e) => { e.stopPropagation(); setSelectedOrder(row.originalOrder); }} className="text-blue-500 hover:bg-blue-50 p-1 rounded"><Edit size={16} /></button>
                                                 <button onClick={(e) => {
                                                     e.stopPropagation();
@@ -465,7 +519,7 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
                                         Total Orders: <span className="text-slate-900 text-sm ml-1">{totals.orderCount}</span> | TOTALS
                                     </td>
                                     <td className="p-3 text-center" colSpan="2">{totals.unitSold}</td>
-                                    <td className="p-3 text-right text-emerald-800">৳{totals.revenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                                    <td className="p-3 text-right text-emerald-800">৳{(totals.displayRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                                     <td className={`p-3 text-right ${totals.profitLoss >= 0 ? 'text-emerald-800' : 'text-red-700'}`}>৳{totals.profitLoss.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                                     <td className="p-3" colSpan="3"></td>
                                 </tr>
@@ -474,6 +528,102 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
                     </div>
                 </div>
             )}
+
+            {/* Payment Modal */}
+            {paymentModal && (() => {
+                const epTotal = editedPayments.reduce((s, p) => s + Number(p.amount || 0), 0);
+                const epDue   = Math.max(0, paymentModal.grandTotal - epTotal);
+                const isOver  = epTotal > paymentModal.grandTotal + 0.01;
+                const handleSave = () => {
+                    const valid = editedPayments
+                        .filter(p => Number(p.amount || 0) > 0)
+                        .map(p => ({ ...p, amount: Number(p.amount) }));
+                    const paid = valid.reduce((s, p) => s + p.amount, 0);
+                    const due  = Math.max(0, paymentModal.grandTotal - paid);
+                    const mode = valid.length === 0 ? 'Due' : valid.length === 1 ? valid[0].mode : 'Split';
+                    onUpdate(paymentModal.id, paymentModal.status, { collectedAmount: paid, dueAmount: due, storePaymentMode: mode, payments: valid });
+                    setPaymentModal(null);
+                };
+                return (
+                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg flex flex-col max-h-[90vh]">
+                        {/* Header */}
+                        <div className="p-5 border-b flex justify-between items-start">
+                            <div>
+                                <h3 className="font-bold text-slate-800 text-lg">Payments — #{paymentModal.orderId || '—'}</h3>
+                                <div className="flex gap-3 text-xs mt-1 flex-wrap">
+                                    <span className="text-slate-500">Total: <span className="font-bold text-slate-700">৳{paymentModal.grandTotal.toFixed(2)}</span></span>
+                                    <span className="text-slate-500">Paid: <span className="font-bold text-emerald-600">৳{epTotal.toFixed(2)}</span></span>
+                                    {epDue > 0 ? <span className="font-bold text-red-600">Due: ৳{epDue.toFixed(2)}</span> : <span className="font-bold text-emerald-600">Fully Paid</span>}
+                                    {isOver && <span className="font-bold text-orange-600">Overpaid!</span>}
+                                </div>
+                            </div>
+                            <button onClick={() => setPaymentModal(null)} className="text-slate-400 hover:text-slate-600 ml-4 flex-shrink-0"><XCircle size={20} /></button>
+                        </div>
+                        {/* Editable Payment Entries */}
+                        <div className="p-5 overflow-y-auto flex-1">
+                            <div className="flex justify-between items-center mb-3">
+                                <p className="text-xs font-bold text-slate-500 uppercase">Payment Entries</p>
+                                <p className="text-xs text-slate-400">Mode · Amount · Ref# · Date</p>
+                            </div>
+                            {editedPayments.length === 0 && <p className="text-xs text-slate-400 italic mb-3">No payments recorded yet.</p>}
+                            <div className="space-y-2 mb-3">
+                                {editedPayments.map((p, i) => (
+                                    <div key={i} className="flex gap-2 items-center bg-slate-50 rounded-lg px-2 py-2 border">
+                                        <select
+                                            className="w-28 p-1.5 border rounded text-xs bg-white"
+                                            value={p.mode || 'Cash'}
+                                            onChange={e => { const n = [...editedPayments]; n[i] = { ...n[i], mode: e.target.value }; setEditedPayments(n); }}
+                                        >
+                                            {PAYMENT_MODES.map(m => <option key={m}>{m}</option>)}
+                                        </select>
+                                        <input
+                                            type="number"
+                                            className="w-24 p-1.5 border rounded text-xs"
+                                            value={p.amount}
+                                            onChange={e => { const n = [...editedPayments]; n[i] = { ...n[i], amount: e.target.value }; setEditedPayments(n); }}
+                                            min="0"
+                                            placeholder="Amount"
+                                        />
+                                        <input
+                                            className="flex-1 p-1.5 border rounded text-xs"
+                                            value={p.txRef || ''}
+                                            onChange={e => { const n = [...editedPayments]; n[i] = { ...n[i], txRef: e.target.value }; setEditedPayments(n); }}
+                                            placeholder="Ref# (optional)"
+                                        />
+                                        <span className="text-slate-400 text-[10px] whitespace-nowrap">
+                                            {p.timestamp ? new Date(p.timestamp).toLocaleDateString('en-GB') : 'new'}
+                                        </span>
+                                        <button onClick={() => setEditedPayments(prev => prev.filter((_, idx) => idx !== i))} className="text-red-400 hover:text-red-600 flex-shrink-0">
+                                            <Trash2 size={14} />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                            <button
+                                onClick={() => setEditedPayments(prev => [...prev, { mode: 'Cash', amount: '', txRef: '', timestamp: new Date().toISOString() }])}
+                                className="flex items-center text-sm text-emerald-600 font-bold hover:bg-emerald-50 p-2 rounded border border-dashed border-emerald-300 w-full justify-center"
+                            >
+                                + Add Payment Row
+                            </button>
+                        </div>
+                        {/* Footer */}
+                        <div className="p-5 border-t flex gap-2">
+                            <button
+                                onClick={handleSave}
+                                disabled={isOver}
+                                className={`flex-1 py-2 rounded-lg font-bold text-sm transition-colors ${isOver ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}
+                            >
+                                Save Changes
+                            </button>
+                            <button onClick={() => setPaymentModal(null)} className="px-4 py-2 border rounded-lg text-sm text-slate-600 hover:bg-slate-50 transition-colors">
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                );
+            })()}
 
             {/* Popup */}
             {selectedOrder && (

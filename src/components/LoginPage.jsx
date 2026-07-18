@@ -118,4 +118,4 @@ const LoginPage = ({ onLogin }) => {
     );
 };
 
-export default LoginPage;
+export default React.memo(LoginPage);

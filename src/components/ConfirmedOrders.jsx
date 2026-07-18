@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { Calendar, Download, AlertTriangle, CheckCircle, ArrowRightLeft, PauseCircle, Ban, X, RotateCcw, Trash2, Zap, Eye, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Calendar, Download, AlertTriangle, CheckCircle, ArrowRightLeft, PauseCircle, Ban, X, RotateCcw, Trash2, Zap, ChevronLeft, ChevronRight } from 'lucide-react';
 import OrderDetailsPopup from './OrderDetailsPopup';
 import SearchBar from './SearchBar';
 import ExchangeModal from './ExchangeModal';
@@ -17,7 +17,6 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
     const [deliveryModal, setDeliveryModal] = useState(null);
     const [returnPopupOrder, setReturnPopupOrder] = useState(null);
     const [exchangeModal, setExchangeModal] = useState(null); // For full exchange
-    const [exchangePopupOrder, setExchangePopupOrder] = useState(null); // For partial exchange via OrderDetailsPopup
     const [holdModal, setHoldModal] = useState(null);
 
     // --- 1. Duplicate Logic ---
@@ -616,17 +615,6 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                 />
             )}
 
-            {exchangePopupOrder && (
-                <OrderDetailsPopup
-                    order={exchangePopupOrder}
-                    onClose={() => setExchangePopupOrder(null)}
-                    getStatusColor={getStatusColor}
-                    onEdit={onEdit}
-                    onCreate={onCreate}
-                    inventory={inventory}
-                    isExchangeMode={true}
-                />
-            )}
         </div>
     );
 };
