@@ -92,7 +92,8 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
     const oldDiscountAbsolute = (Number(order.subtotal || 0) - oldProductValue);
 
     // C. Calculate Difference (Product Level)
-    const productDifference = newProductValue - oldProductValue;
+    // Old discount is deducted so it carries over to the exchange instead of being re-charged.
+    const productDifference = newProductValue - oldProductValue - oldDiscountAbsolute;
 
     // D. Final Adjustment (Payable/Refund)
     const totalCollectedSoFar = Number(order.advanceAmount || 0) + Number(order.collectedAmount || 0);
@@ -183,16 +184,80 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
         // Generate a new Exchange Order ID
         const originalOrderId = order.merchantOrderId || order.storeOrderId || 'N/A';
         const exchangeOrderId = `${originalOrderId}-EXC-${Date.now().toString().slice(-6)}`;
-        // --- NEW REQUIREMENT CALCULATIONS ---
-        // Subtotal = Product Value (Raw Total)
-        const partialProductValue = itemsToCreateInNewOrder.reduce((sum, p) => sum + (Number(p.price || 0) * Number(p.qty || 0)), 0);
 
-        // Calculate proportional discount for this partial order
-        const partialDiscount = actualDiscountAmount > 0 ? (partialProductValue / newProductTotal) * actualDiscountAmount : 0;
+        // ── Step 1: Per-item product discount helper ───────────────────────────
+        const getItemProductDiscount = (p) => {
+            const raw = Number(p.price || 0) * Number(p.qty || 0);
+            if ((p.discountType || '').toLowerCase().includes('percent')) {
+                return parseFloat(((raw * Number(p.discountValue || 0)) / 100).toFixed(2));
+            }
+            return parseFloat(Number(p.discountValue || 0).toFixed(2));
+        };
 
-        // Grand Total = (Product Value - Discount) + New Delivery Charge
+        // ── Step 2: Global discount absolute amount from the original order ────
+        const orderNetSubtotal = Number(order.subtotal || 0);
+        let globalDiscountAmount = 0;
+        if ((order.discountType || '').toLowerCase().includes('percent')) {
+            globalDiscountAmount = parseFloat(
+                ((orderNetSubtotal * Number(order.discountValue || 0)) / 100).toFixed(2)
+            );
+        } else {
+            globalDiscountAmount = parseFloat(Number(order.discountValue || 0).toFixed(2));
+        }
+
+        // ── Step 3: Split global discount proportionally by raw product value ──
+        // Using raw (price × qty) totals so both numerator and denominator share the same basis.
+        const allRawTotal = order.products.reduce(
+            (sum, p) => sum + Number(p.price || 0) * Number(p.qty || 0), 0
+        );
+
+        const exchangedRaw = exchangedItems.reduce(
+            (sum, p) => sum + Number(p.price || 0) * Number(p.qty || 0), 0
+        );
+        const exchangedItemDiscounts = parseFloat(
+            exchangedItems.reduce((sum, p) => sum + getItemProductDiscount(p), 0).toFixed(2)
+        );
+        const exchangedGlobalShare = allRawTotal > 0
+            ? parseFloat(((exchangedRaw / allRawTotal) * globalDiscountAmount).toFixed(2))
+            : 0;
+        // Net value of exchanged items: what was effectively paid for them (item discounts + global share)
+        const exchangedNetValue = parseFloat(
+            (exchangedRaw - exchangedItemDiscounts - exchangedGlobalShare).toFixed(2)
+        );
+
+        const keptRaw = keptItems.reduce(
+            (sum, p) => sum + Number(p.price || 0) * Number(p.qty || 0), 0
+        );
+        const keptItemDiscounts = parseFloat(
+            keptItems.reduce((sum, p) => sum + getItemProductDiscount(p), 0).toFixed(2)
+        );
+        // Remaining global discount — ensures exchanged + kept shares always sum to original total
+        const keptGlobalShare = parseFloat((globalDiscountAmount - exchangedGlobalShare).toFixed(2));
+        const keptNetSubtotal = parseFloat((keptRaw - keptItemDiscounts).toFixed(2));
+        const keptGrandTotal = parseFloat(
+            (keptNetSubtotal - keptGlobalShare + Number(order.deliveryCharge || 0)).toFixed(2)
+        );
+
+        // ── Step 4: Adjust collected amounts ──────────────────────────────────
+        const adjustedOriginalCollected = parseFloat(
+            Math.max(0, totalCollectedSoFar - exchangedNetValue).toFixed(2)
+        );
+        const originalStatus = keptItems.length === 0 ? 'Exchanged' : order.status;
+        const keptDueAmount = parseFloat(
+            Math.max(0, keptGrandTotal - adjustedOriginalCollected).toFixed(2)
+        );
+
+        // ── Step 5: New exchange order financials ──────────────────────────────
+        const partialProductValue = itemsToCreateInNewOrder.reduce(
+            (sum, p) => sum + (Number(p.price || 0) * Number(p.qty || 0)), 0
+        );
+        const partialDiscount = actualDiscountAmount > 0
+            ? parseFloat(((partialProductValue / newProductTotal) * actualDiscountAmount).toFixed(2))
+            : 0;
         const partialDeliveryCharge = Number(newDeliveryCost || 0);
-        const partialGrandTotal = (partialProductValue - partialDiscount) + partialDeliveryCharge;
+        const partialGrandTotal = parseFloat(
+            ((partialProductValue - partialDiscount) + partialDeliveryCharge).toFixed(2)
+        );
 
         // Single exchange record — used for both exchangeDetails and exchangeHistory[0]
         const partialExchangeRecord = {
@@ -216,9 +281,9 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
             createdAt: { seconds: Math.floor(Date.now() / 1000) },
             isPartialExchange: true,
             originalOrderId: originalOrderId,
-            subtotal: partialProductValue,
+            subtotal: parseFloat(partialProductValue.toFixed(2)),
             discountValue: partialDiscount,
-            discountType: 'amount',
+            discountType: 'Fixed',
             deliveryCharge: partialDeliveryCharge,
             grandTotal: partialGrandTotal,
             dueAmount: partialGrandTotal,
@@ -229,48 +294,19 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
             history: [{
                 status: 'Exchanged',
                 timestamp: new Date().toISOString(),
-                note: `Partial Exchange processed. Order: ${exchangeOrderId}. Delivery Applied: ৳${partialDeliveryCharge}`,
+                note: `Partial Exchange processed. Order: ${exchangeOrderId}. Delivery Applied: ৳${partialDeliveryCharge.toFixed(2)}`,
                 updatedBy: user?.displayName || 'Admin'
             }]
         };
 
-        // 2. Calculate financials for kept items (Original Order)
-        const keptSubtotal = keptItems.reduce((sum, p) => sum + (Number(p.price || 0) * Number(p.qty || 0)), 0);
-
-        let keptDiscount = 0;
-        if (order.discountType === 'Percent') {
-            keptDiscount = keptSubtotal * (Number(order.discountValue || 0) / 100);
-        } else {
-            const originalSubtotal = order.subtotal || 1;
-            keptDiscount = (keptSubtotal / originalSubtotal) * Number(order.discountValue || 0);
-        }
-
-        const keptGrandTotal = keptSubtotal - keptDiscount + Number(order.deliveryCharge || 0);
-
-        // --- NEW REQUIREMENT LOGIC ---
-        // Deduct old product price including applied discount from original order's received amount
-        const exchangedSubtotal = exchangedItems.reduce((sum, p) => sum + (Number(p.price || 0) * Number(p.qty || 0)), 0);
-        let exchangedDiscount = 0;
-        if (order.discountType === 'Percent') {
-            exchangedDiscount = exchangedSubtotal * (Number(order.discountValue || 0) / 100);
-        } else {
-            const originalSubtotal = order.subtotal || 1;
-            exchangedDiscount = (exchangedSubtotal / originalSubtotal) * Number(order.discountValue || 0);
-        }
-        const exchangedNetValue = exchangedSubtotal - exchangedDiscount;
-        const adjustedOriginalCollected = Math.max(0, totalCollectedSoFar - exchangedNetValue);
-
-        // Logic: During dispatch, original order shows due amount correctly
-        const keptDueAmount = Math.max(0, keptGrandTotal - adjustedOriginalCollected);
-
-        const originalStatus = keptItems.length === 0 ? 'Exchanged' : order.status;
-
-        // 3. Update the ORIGINAL Order entry
+        // 2. Update the ORIGINAL Order entry with kept items and corrected financials
         const updatedOriginalOrder = {
             ...order,
             products: keptItems,
             status: originalStatus,
-            subtotal: keptSubtotal,
+            subtotal: keptNetSubtotal,
+            discountValue: keptGlobalShare,
+            discountType: 'Fixed',
             grandTotal: keptGrandTotal,
             advanceAmount: adjustedOriginalCollected,
             collectedAmount: 0,
@@ -280,7 +316,7 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
                 {
                     status: originalStatus,
                     timestamp: new Date().toISOString(),
-                    note: `Partial Exchange processed. ${exchangedItems.length} item(s) exchanged. Original Received adjusted by -৳${exchangedNetValue.toFixed(0)}. Delivery charge ৳${order.deliveryCharge} remains. Exchange Order ID: ${exchangeOrderId}`,
+                    note: `Partial Exchange processed. ${exchangedItems.length} item(s) exchanged. Item discount: ৳${exchangedItemDiscounts.toFixed(2)}, Global discount share: ৳${exchangedGlobalShare.toFixed(2)}, Net value deducted: ৳${exchangedNetValue.toFixed(2)}. Delivery charge ৳${order.deliveryCharge} remains. Exchange Order ID: ${exchangeOrderId}`,
                     updatedBy: user?.displayName || 'Admin'
                 }
             ]
@@ -302,7 +338,7 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
             await onConfirm(order.id, updatedOriginalOrder.status, sanitizedOriginalOrder);
 
             onClose();
-            alert(`Partial Exchange processed successfully!\n\nNew Delivery Charge Applied: ৳${partialDeliveryCharge}`);
+            alert(`Partial Exchange processed successfully!\n\nNew Delivery Charge Applied: ৳${partialDeliveryCharge.toFixed(2)}`);
         } catch (error) {
             console.error(" Error processing partial exchange:", error);
             alert(`Failed: ${error.message || 'Unknown error'}`);
@@ -688,9 +724,9 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
                                         <div className="font-bold text-slate-800 flex justify-between border-t border-slate-200 pt-1 mt-1"><span>New Product Value:</span><span>৳ {newProductValue.toFixed(0)}</span></div>
                                         <div className="flex justify-between text-blue-600 font-medium mt-1"><span>Old Item Value:</span><span>- ৳ {oldProductValue}</span></div>
                                         {oldDiscountAbsolute > 0 && (
-                                            <div className="flex justify-between italic text-slate-400">
-                                                <span>Incl. Old Discount {order.discountType === 'Percent' ? `(${order.discountValue}%)` : ''}:</span>
-                                                <span>- ৳ {oldDiscountAbsolute.toFixed(0)}</span>
+                                            <div className="flex justify-between text-blue-500 font-medium">
+                                                <span>Old Discount {order.discountType === 'Percent' ? `(${order.discountValue}%)` : ''} Deducted:</span>
+                                                <span>- ৳ {oldDiscountAbsolute.toFixed(2)}</span>
                                             </div>
                                         )}
                                         {oldDeliveryCharge > 0 && (
