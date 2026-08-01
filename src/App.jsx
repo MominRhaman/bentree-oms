@@ -626,7 +626,11 @@ function App() {
 
     // Memoize filtered order subsets so child components only re-render when their slice changes
     const primaryOrders = useMemo(() => orders.filter(o => o.type === 'Online' && o.status === 'Pending'), [orders]);
-    const confirmedOrders = useMemo(() => orders.filter(o => o.type === 'Online' && ['Confirmed', 'Dispatched', 'Delivered', 'Returned', 'Exchanged', 'Hold'].includes(o.status)), [orders]);
+    const confirmedOrders = useMemo(() => orders.filter(o => o.type === 'Online' && (
+        ['Confirmed', 'Dispatched', 'Delivered', 'Returned', 'Exchanged', 'Hold'].includes(o.status) ||
+        o.exchangeDetails ||
+        o.isPartialExchange
+    )), [orders]);
     const holdOrders = useMemo(() => orders.filter(o => o.type === 'Online' && o.status === 'Hold'), [orders]);
     const dispatchOrders = useMemo(() => orders.filter(o => o.type === 'Online' && ['Confirmed', 'Dispatched', 'Exchanged'].includes(o.status)), [orders]);
     const storeOrders = useMemo(() => orders.filter(o => o.type === 'Store'), [orders]);

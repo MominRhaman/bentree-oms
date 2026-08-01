@@ -216,6 +216,12 @@ const PrimaryOrders = ({ orders, onUpdate, onEdit, inventory = [] }) => {
                                     <td className="p-3">
                                         <div className="font-bold text-slate-700">{order.recipientName}</div>
                                         <div className="text-xs text-slate-500 font-mono">{order.recipientPhone}</div>
+                                        {order.isPartialExchange === true && (
+                                            <div className="text-[10px] font-bold mt-1 text-yellow-700 bg-yellow-100 px-2 py-0.5 rounded inline-block">PARTIAL EXCHANGE</div>
+                                        )}
+                                        {(!!order.exchangeDetails || order.status === 'Exchanged') && !order.isPartialExchange && (
+                                            <div className="text-[10px] font-bold mt-1 text-blue-700 bg-blue-100 px-2 py-0.5 rounded inline-block">EXCHANGE</div>
+                                        )}
                                     </td>
                                     <td className="p-3">
                                         <div className="flex gap-1 mb-1">

@@ -80,7 +80,11 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
             });
         }
 
-        if (filterStatus !== 'All') res = res.filter(o => o.status === filterStatus);
+        if (filterStatus === 'Exchanged') {
+            res = res.filter(o => o.status === 'Exchanged' || !!o.exchangeDetails || o.isPartialExchange === true);
+        } else if (filterStatus !== 'All') {
+            res = res.filter(o => o.status === filterStatus);
+        }
 
         if (searchTerm) {
             const term = searchTerm.toLowerCase();
@@ -278,6 +282,7 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                                 // Check if this is a NEW partial return/exchange order (created during split)
                                 const isNewPartialReturnOrder = order.isPartialReturn === true;
                                 const isNewPartialExchangeOrder = order.isPartialExchange === true;
+                                const isFullExchangeOrder = (order.status === 'Exchanged' || !!order.exchangeDetails) && !order.isPartialExchange;
 
                                 // Only hide for NEW partial orders, not original orders
                                 const shouldHideFinancials = isNewPartialReturnOrder || isNewPartialExchangeOrder;
@@ -387,11 +392,6 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                                                     PARTIAL RETURN
                                                 </div>
                                             )}
-                                            {isNewPartialExchangeOrder && (
-                                                <div className="text-[10px] font-bold mt-1 text-yellow-600 bg-yellow-50 px-2 py-0.5 rounded inline-block">
-                                                    PARTIAL EXCHANGE
-                                                </div>
-                                            )}
                                         </td>
                                         <td className="p-3 text-xs">
                                             {displayProducts.map((p, i) => (
@@ -400,8 +400,16 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                                                 </div>
                                             ))}
                                         </td>
-                                        <td className="p-3 font-bold">
-                                            <span className={`px-2 py-1 rounded ${getStatusColor(order.status)}`}>{order.status}</span>
+                                        <td className="p-3">
+                                            <div className="flex flex-col gap-1">
+                                                {isFullExchangeOrder && (
+                                                    <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 text-[10px] font-bold inline-block">Exchange</span>
+                                                )}
+                                                {isNewPartialExchangeOrder && (
+                                                    <span className="px-2 py-0.5 rounded bg-yellow-100 text-yellow-800 text-[10px] font-bold inline-block">Partial Exchange</span>
+                                                )}
+                                                <span className={`px-2 py-1 rounded text-xs font-bold ${getStatusColor(order.status)}`}>{order.status}</span>
+                                            </div>
                                         </td>
                                         <td className="p-3 font-bold text-slate-700">
                                             {getSourceLabel(order.orderSource)}

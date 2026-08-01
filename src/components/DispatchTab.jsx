@@ -121,7 +121,8 @@ const DispatchTab = ({ orders, onUpdate }) => {
                                     <td className="p-3">
                                         <div className="font-bold">{order.recipientPhone}</div>
                                         <div className="text-xs text-slate-500">{order.date}</div>
-                                        {order.status === 'Exchanged' && <span className="inline-block mt-1 bg-yellow-100 text-yellow-800 text-[10px] font-bold px-1.5 py-0.5 rounded">EXCHANGE</span>}
+                                        {order.isPartialExchange === true && <span className="inline-block mt-1 bg-yellow-100 text-yellow-800 text-[10px] font-bold px-1.5 py-0.5 rounded">PARTIAL EXCHANGE</span>}
+                                        {(!!order.exchangeDetails || order.status === 'Exchanged') && !order.isPartialExchange && <span className="inline-block mt-1 bg-blue-100 text-blue-800 text-[10px] font-bold px-1.5 py-0.5 rounded">EXCHANGE</span>}
                                     </td>
                                     <td className="p-3">{(order.products || []).map((p, i) => (<div key={i} className="font-mono bg-slate-100 inline-block px-2 py-1 rounded mr-2 mb-1">{p.code} / {p.size} / Qty: {p.qty}</div>))}</td>
                                     <td className="p-3 text-xs italic max-w-xs">{order.specialInstructions || 'None'}</td>
