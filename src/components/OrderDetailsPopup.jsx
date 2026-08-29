@@ -146,9 +146,19 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
         return { ...currentOrder, subtotal, grandTotal, dueAmount, collectedAmount: collected };
     };
 
-    // --- NEW: Calculate totals for partial return (NO delivery charge, NO discount) ---
+    // --- Calculate totals for partial return using stored per-item discounts ---
     const recalculatePartialReturnTotals = (products) => {
-        const subtotal = products.reduce((sum, p) => sum + (Number(p.price || 0) * Number(p.qty || 0)), 0);
+        const subtotal = products.reduce((sum, p) => {
+            const base = Number(p.price || 0) * Number(p.qty || 0);
+            // Use stored totalDiscount if available (set at order creation time)
+            if (p.totalDiscount != null) return sum + Math.max(0, base - Number(p.totalDiscount));
+            // Fallback: compute from per-item discount + stored globalDiscountShare
+            const itemDisc = p.discountType === 'Percent'
+                ? base * (Number(p.discountValue || 0) / 100)
+                : Number(p.discountValue || 0);
+            const globalShare = Number(p.globalDiscountShare || 0);
+            return sum + Math.max(0, base - itemDisc - globalShare);
+        }, 0);
         return { subtotal, grandTotal: subtotal };
     };
 

@@ -282,15 +282,36 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
             date: formData.date,
             addedBy: user?.displayName || 'Unknown',
             addedByEmail: user?.email || 'N/A', // Audit: Creator account
-            products: formData.products.map(p => ({
-                ...p,
-                code: p.code.toUpperCase(),
-                size: p.size ? p.size.toUpperCase() : '',
-                price: Number(p.price || 0),
-                qty: Number(p.qty || 0),
-                discountValue: Number(p.discountValue || 0),
-                discountType: p.discountType
-            })),
+            products: (() => {
+                const productNets = formData.products.map(p => {
+                    const base = Number(p.price || 0) * Number(p.qty || 0);
+                    const itemDisc = p.discountType === 'Fixed'
+                        ? Number(p.discountValue || 0)
+                        : base * (Number(p.discountValue || 0) / 100);
+                    return base - itemDisc;
+                });
+                const totalNet = productNets.reduce((s, v) => s + v, 0);
+                return formData.products.map((p, idx) => {
+                    const base = Number(p.price || 0) * Number(p.qty || 0);
+                    const itemDisc = p.discountType === 'Fixed'
+                        ? Number(p.discountValue || 0)
+                        : base * (Number(p.discountValue || 0) / 100);
+                    const globalShare = totalNet > 0
+                        ? parseFloat(((productNets[idx] / totalNet) * totals.discount).toFixed(2))
+                        : 0;
+                    return {
+                        ...p,
+                        code: p.code.toUpperCase(),
+                        size: p.size ? p.size.toUpperCase() : '',
+                        price: Number(p.price || 0),
+                        qty: Number(p.qty || 0),
+                        discountValue: Number(p.discountValue || 0),
+                        discountType: p.discountType,
+                        globalDiscountShare: globalShare,
+                        totalDiscount: parseFloat((itemDisc + globalShare).toFixed(2)),
+                    };
+                });
+            })(),
             discountType: formData.discountType,
             discountValue: Number(formData.discountValue || 0),
             subtotal: totals.subtotal,

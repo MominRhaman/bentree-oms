@@ -482,7 +482,7 @@ exports.woocommerceWebhook = onRequest(async (req, res) => {
       const editedAt = raw.toDate ?
         raw.toDate() : new Date(raw);
       const ageMs = Date.now() - editedAt.getTime();
-      if (ageMs < 90000) {
+      if (ageMs < 300000) {
         logger.info("Skipping webhook — OMS sync bounce",
             {orderId: data.id, ageMs});
         return res.status(200).send("OK");

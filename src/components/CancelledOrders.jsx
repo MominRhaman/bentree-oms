@@ -243,7 +243,7 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
                                                         <span className="text-emerald-600 font-black text-sm">Refunded</span>
                                                     ) : (
                                                         <div className="text-red-600 font-black text-sm">
-                                                            Refund: ৳{Math.abs(Number(order.advanceAmount || 0) + Number(order.collectedAmount || 0))}
+                                                            Refund: ৳{Math.max(0, Number(order.advanceAmount || 0) + Number(order.collectedAmount || 0) - Number(order.deliveryCharge || 0))}
                                                         </div>
                                                     )
                                                 ) : (

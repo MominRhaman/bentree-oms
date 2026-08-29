@@ -92,12 +92,17 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
     const oldDiscountAbsolute = (Number(order.subtotal || 0) - oldProductValue);
 
     // C. Calculate Difference (Product Level)
-    // Old discount is deducted so it carries over to the exchange instead of being re-charged.
-    const productDifference = newProductValue - oldProductValue - oldDiscountAbsolute;
+    // oldProductValue = grandTotal - deliveryCharge = net value already after discount,
+    // so no additional discount subtraction is needed here.
+    const productDifference = newProductValue - oldProductValue;
 
     // D. Final Adjustment (Payable/Refund)
+    // Recompute the outstanding balance from live financial fields (not the stored dueAmount
+    // which can be stale after a previous exchange). This equals systemNewGrandTotal - paid
+    // when all terms are expanded, ensuring the exchange due is always self-consistent.
     const totalCollectedSoFar = Number(order.advanceAmount || 0) + Number(order.collectedAmount || 0);
-    const finalAdjustment = productDifference + Number(newDeliveryCost || 0);
+    const existingBalance = Number(order.grandTotal || 0) - totalCollectedSoFar;
+    const finalAdjustment = productDifference + Number(newDeliveryCost || 0) + existingBalance;
 
     // E. Financials for Database (Sales Report)
     const totalSystemDeliveryCharge = oldDeliveryCharge + Number(newDeliveryCost || 0);
@@ -194,45 +199,58 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
             return parseFloat(Number(p.discountValue || 0).toFixed(2));
         };
 
-        // ── Step 2: Global discount absolute amount from the original order ────
-        const orderNetSubtotal = Number(order.subtotal || 0);
-        let globalDiscountAmount = 0;
-        if ((order.discountType || '').toLowerCase().includes('percent')) {
-            globalDiscountAmount = parseFloat(
-                ((orderNetSubtotal * Number(order.discountValue || 0)) / 100).toFixed(2)
-            );
-        } else {
-            globalDiscountAmount = parseFloat(Number(order.discountValue || 0).toFixed(2));
-        }
-
-        // ── Step 3: Split global discount proportionally by raw product value ──
-        // Using raw (price × qty) totals so both numerator and denominator share the same basis.
-        const allRawTotal = order.products.reduce(
-            (sum, p) => sum + Number(p.price || 0) * Number(p.qty || 0), 0
-        );
-
+        // ── Step 2 & 3: Compute raw totals and global discount shares ────────────
         const exchangedRaw = exchangedItems.reduce(
             (sum, p) => sum + Number(p.price || 0) * Number(p.qty || 0), 0
         );
         const exchangedItemDiscounts = parseFloat(
             exchangedItems.reduce((sum, p) => sum + getItemProductDiscount(p), 0).toFixed(2)
         );
-        const exchangedGlobalShare = allRawTotal > 0
-            ? parseFloat(((exchangedRaw / allRawTotal) * globalDiscountAmount).toFixed(2))
-            : 0;
-        // Net value of exchanged items: what was effectively paid for them (item discounts + global share)
-        const exchangedNetValue = parseFloat(
-            (exchangedRaw - exchangedItemDiscounts - exchangedGlobalShare).toFixed(2)
-        );
-
         const keptRaw = keptItems.reduce(
             (sum, p) => sum + Number(p.price || 0) * Number(p.qty || 0), 0
         );
         const keptItemDiscounts = parseFloat(
             keptItems.reduce((sum, p) => sum + getItemProductDiscount(p), 0).toFixed(2)
         );
-        // Remaining global discount — ensures exchanged + kept shares always sum to original total
-        const keptGlobalShare = parseFloat((globalDiscountAmount - exchangedGlobalShare).toFixed(2));
+
+        // Always use the permanently-stored globalDiscountShare written at order creation.
+        // Never recalculate or redistribute after the order is created.
+        // Fall back to proportional split only for legacy orders that predate this field.
+        const allHaveStoredShares = order.products.every(p => p.globalDiscountShare != null);
+        let exchangedGlobalShare, keptGlobalShare;
+
+        if (allHaveStoredShares) {
+            exchangedGlobalShare = parseFloat(
+                exchangedItems.reduce((sum, p) => sum + Number(p.globalDiscountShare || 0), 0).toFixed(2)
+            );
+            keptGlobalShare = parseFloat(
+                keptItems.reduce((sum, p) => sum + Number(p.globalDiscountShare || 0), 0).toFixed(2)
+            );
+        } else {
+            // Legacy fallback: proportional split from order-level discountValue
+            const orderSubtotal = Number(order.subtotal || 0);
+            const globalDiscountAmount = (order.discountType || '').toLowerCase().includes('percent')
+                ? parseFloat(((orderSubtotal * Number(order.discountValue || 0)) / 100).toFixed(2))
+                : parseFloat(Number(order.discountValue || 0).toFixed(2));
+            const allRawTotal = order.products.reduce(
+                (sum, p) => sum + Number(p.price || 0) * Number(p.qty || 0), 0
+            );
+            exchangedGlobalShare = allRawTotal > 0
+                ? parseFloat(((exchangedRaw / allRawTotal) * globalDiscountAmount).toFixed(2))
+                : 0;
+            keptGlobalShare = parseFloat((globalDiscountAmount - exchangedGlobalShare).toFixed(2));
+        }
+
+        // Net value of exchanged items = what the customer effectively paid.
+        // Prefer stored totalDiscount (= productDiscount + globalDiscountShare) for accuracy.
+        const allExchangedHaveTotalDiscount = exchangedItems.every(p => p.totalDiscount != null);
+        const exchangedNetValue = allExchangedHaveTotalDiscount
+            ? parseFloat(exchangedItems.reduce((sum, p) => {
+                const base = Number(p.price || 0) * Number(p.qty || 0);
+                return sum + Math.max(0, base - Number(p.totalDiscount));
+            }, 0).toFixed(2))
+            : parseFloat((exchangedRaw - exchangedItemDiscounts - exchangedGlobalShare).toFixed(2));
+
         const keptNetSubtotal = parseFloat((keptRaw - keptItemDiscounts).toFixed(2));
         const keptGrandTotal = parseFloat(
             (keptNetSubtotal - keptGlobalShare + Number(order.deliveryCharge || 0)).toFixed(2)
@@ -281,6 +299,13 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
             createdAt: { seconds: Math.floor(Date.now() / 1000) },
             isPartialExchange: true,
             originalOrderId: originalOrderId,
+            // Exchange orders are OMS-only records linked to the original by originalOrderId.
+            // Inheriting wc_order_id would cause the Cloud Function webhook handler to find
+            // this document when processing webhooks for the original WooCommerce order,
+            // leading to incorrect stock sync (deductedProducts mismatch with WC line items).
+            wc_order_id: null,
+            // Clear the partial-return flag so this exchange order is not treated as a return.
+            _oms_partial_return: false,
             subtotal: parseFloat(partialProductValue.toFixed(2)),
             discountValue: partialDiscount,
             discountType: 'Fixed',
@@ -302,6 +327,11 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
         // 2. Update the ORIGINAL Order entry with kept items and corrected financials
         const updatedOriginalOrder = {
             ...order,
+            // Signal to handleEditOrderWithStock that a separate exchange order was created
+            // via handleCreateOrder. This prevents wooSyncOrder (which auto-adjusts WC stock
+            // on line-item changes) from doubling up on the adjustWooStock calls, and prevents
+            // incorrect deduction of keptItems in the isPartialReturn WooCommerce branch.
+            _oms_partial_exchange: true,
             products: keptItems,
             status: originalStatus,
             subtotal: keptNetSubtotal,
@@ -722,13 +752,7 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
                                         <div className="flex justify-between"><span>New Items Total:</span><span>৳ {newProductTotal}</span></div>
                                         <div className="flex justify-between"><span>New Discount {discountType === 'percent' && discountInput ? `(${discountInput}%)` : ''}:</span><span className="text-red-500">- ৳ {Number(actualDiscountAmount).toFixed(0)}</span></div>
                                         <div className="font-bold text-slate-800 flex justify-between border-t border-slate-200 pt-1 mt-1"><span>New Product Value:</span><span>৳ {newProductValue.toFixed(0)}</span></div>
-                                        <div className="flex justify-between text-blue-600 font-medium mt-1"><span>Old Item Value:</span><span>- ৳ {oldProductValue}</span></div>
-                                        {oldDiscountAbsolute > 0 && (
-                                            <div className="flex justify-between text-blue-500 font-medium">
-                                                <span>Old Discount {order.discountType === 'Percent' ? `(${order.discountValue}%)` : ''} Deducted:</span>
-                                                <span>- ৳ {oldDiscountAbsolute.toFixed(2)}</span>
-                                            </div>
-                                        )}
+                                        <div className="flex justify-between text-blue-600 font-medium mt-1"><span>Old Item Value (net):</span><span>- ৳ {oldProductValue}</span></div>
                                         {oldDeliveryCharge > 0 && (
                                             <div className="flex justify-between italic text-slate-400"><span>Delivery Charge (Included):</span><span>৳ {oldDeliveryCharge}</span></div>
                                         )}
@@ -736,6 +760,9 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
                                         <div className="border-b border-dashed border-slate-300 my-1"></div>
                                         <div className="flex justify-between"><span>Product Diff:</span><span>৳ {productDifference.toFixed(0)}</span></div>
                                         <div className="flex justify-between mt-1"><span>New Delivery:</span><span>+ ৳ {Number(newDeliveryCost || 0)}</span></div>
+                                        {existingBalance > 0 && (
+                                            <div className="flex justify-between text-orange-600 font-medium mt-1"><span>Outstanding Balance:</span><span>+ ৳ {existingBalance.toFixed(0)}</span></div>
+                                        )}
                                         <div className={`flex justify-between items-center mt-2 p-2 rounded ${finalAdjustment >= 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>
                                             <span className="font-bold uppercase">{finalAdjustment >= 0 ? 'Net Due:' : 'Refund Amount:'}</span>
                                             <span className="font-bold text-sm">৳ {Math.abs(finalAdjustment).toFixed(0)}</span>

@@ -69,6 +69,10 @@ const BarcodePrintView = ({ items, onClose }) => {
 
     const handlePrint = (mode) => {
         const labelsToPrint = mode === 'single' ? [currentItem] : items;
+        // Total document height = one label height × number of labels.
+        // Setting this on <body> prevents the iframe's 600px viewport from becoming the
+        // document height, which would send a ~159mm blank-padded page to the Rongta driver.
+        const totalBodyHeight = `${labelsToPrint.length * parseFloat(activeHeight)}mm`;
 
         // FIX 4: Build label HTML with idx so last label gets no page-break-after.
         const labelsHTML = labelsToPrint.map((item, idx) => {
@@ -127,9 +131,7 @@ const BarcodePrintView = ({ items, onClose }) => {
         margin: 0 !important;
         padding: 0 !important;
         width: ${activeWidth};
-        height: ${activeHeight};
-        max-height: ${activeHeight};
-        overflow: hidden;
+        height: ${totalBodyHeight};
         background: white;
         font-family: Arial, sans-serif;
         /* Both prefixes required: -webkit- for Chrome/Edge/Safari, unprefixed for Firefox */
@@ -164,7 +166,7 @@ const BarcodePrintView = ({ items, onClose }) => {
     .brand {
         font-size: 6pt;
         font-weight: bold;
-        color: #666;
+        color: #000;
         text-transform: uppercase;
         letter-spacing: 1pt;
         line-height: 1;

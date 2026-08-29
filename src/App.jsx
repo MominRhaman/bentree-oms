@@ -317,6 +317,14 @@ function App() {
             const newProducts = updatedData.products || [];
             const isActiveStatus = !['Cancelled', 'Returned'].includes(newStatus);
 
+            // Dispatching a partial-return record is a tracking-only status change.
+            // The returned items were already restored to stock during the partial-return
+            // flow; re-deducting them here (OMS STEP 2 and WooCommerce -1) would be wrong.
+            const isDispatchingReturnOrder =
+                !!updatedData.isPartialReturn &&
+                oldOrder.status === 'Returned' &&
+                isActiveStatus;
+
             // Determine semantic action types from the updated data / new status
             const logHint = updatedData._logActionType;
             const editRef  = oldOrder.merchantOrderId || oldOrder.storeOrderId || orderId;
@@ -352,7 +360,8 @@ function App() {
             // STEP 2: Deduct new stock (if the resulting status is active).
             // React state lags behind the Firestore increments done in STEP 1, so build
             // an effectiveInventory that reflects those restorations for the guard check.
-            if (isActiveStatus) {
+            // Skip when dispatching a return order — no stock movement needed.
+            if (isActiveStatus && !isDispatchingReturnOrder) {
                 const wasActiveBeforeEdit = !['Cancelled', 'Returned'].includes(oldOrder.status);
                 const restoredProducts = wasActiveBeforeEdit ? (oldOrder.products || []) : [];
                 const effectiveInventory = restoredProducts.length === 0
@@ -426,21 +435,68 @@ function App() {
                     oldOrder.status !== newStatus &&
                     ['Cancelled', 'Returned'].includes(newStatus);
 
+                const isPartialReturn = !!updatedData._oms_partial_return;
+                // True when this edit was initiated by handlePartialExchangeProcess — a separate
+                // exchange order was already created via handleCreateOrder (which calls
+                // adjustWooStock for the exchange items). This flag prevents double-adjustment:
+                // (1) wooSyncOrder is skipped so WooCommerce doesn't auto-restock zeroed items,
+                // (2) newProducts (keptItems) are not re-deducted in the isPartialReturn branch.
+                const isPartialExchangeFlow = !!updatedData._oms_partial_exchange;
+
                 (async () => {
-                    if (!['Cancelled', 'Returned'].includes(oldOrder.status) && !wooWillAutoRestock) {
-                        await adjustWooStock(oldOrder.products || [], +1);
+                    if (isPartialReturn) {
+                        // Delta-based restore: only adjust the items that were actually removed
+                        // from the original order (returned or exchanged), not the full
+                        // restore+re-deduct cycle that causes double-adjustment with wooSyncOrder.
+                        if (!wooWillAutoRestock) {
+                            const oldQtyMap = {};
+                            for (const p of (oldOrder.products || [])) {
+                                const key = `${(p.code || '').toUpperCase()}|${(p.size || '').toUpperCase()}`;
+                                if (!oldQtyMap[key]) oldQtyMap[key] = { p, qty: 0 };
+                                oldQtyMap[key].qty += Number(p.qty || 0);
+                            }
+                            const newQtyMap = {};
+                            for (const p of newProducts) {
+                                const key = `${(p.code || '').toUpperCase()}|${(p.size || '').toUpperCase()}`;
+                                if (!newQtyMap[key]) newQtyMap[key] = 0;
+                                newQtyMap[key] += Number(p.qty || 0);
+                            }
+                            const returnedItems = [];
+                            for (const [key, entry] of Object.entries(oldQtyMap)) {
+                                const returnedQty = entry.qty - (newQtyMap[key] || 0);
+                                if (returnedQty > 0) returnedItems.push({ ...entry.p, qty: returnedQty });
+                            }
+                            if (returnedItems.length > 0) await adjustWooStock(returnedItems, +1);
+                            // For a full exchange after partial return: the replacement items are
+                            // in newProducts and must be deducted here. For a partial exchange the
+                            // separate exchange order's handleCreateOrder already deducted them.
+                            if (!isPartialExchangeFlow && newProducts.length > 0) {
+                                await adjustWooStock(newProducts, -1);
+                            }
+                        }
+                        // Skip wooSyncOrder for partial returns/exchanges — WooCommerce order keeps
+                        // original products; only OMS tracks the kept/returned split.
+                    } else if (!isDispatchingReturnOrder) {
+                        if (!['Cancelled', 'Returned'].includes(oldOrder.status) && !wooWillAutoRestock) {
+                            await adjustWooStock(oldOrder.products || [], +1);
+                        }
+                        if (isActiveStatus) {
+                            await adjustWooStock(newProducts, -1);
+                        }
                     }
-                    if (isActiveStatus) {
-                        await adjustWooStock(newProducts, -1);
-                    }
+                    // isDispatchingReturnOrder: status-only change, no WooCommerce stock movement.
                 })().catch(e => console.error('[WooStock] Background sync failed:', e));
 
-                // Sync order details to WooCommerce (non-blocking)
-                wooSyncOrder({
-                    ...updatedData,
-                    wc_order_id: oldOrder.wc_order_id,
-                    products: newProducts
-                }).catch(e => console.error('[WooSync] Background sync failed:', e));
+                // Sync order details to WooCommerce (non-blocking) — skipped for partial returns,
+                // partial exchange flows (exchange order's handleCreateOrder handles stock directly),
+                // and for dispatching return orders (no product data changed).
+                if (!isPartialReturn && !isPartialExchangeFlow && !isDispatchingReturnOrder) {
+                    wooSyncOrder({
+                        ...updatedData,
+                        wc_order_id: oldOrder.wc_order_id,
+                        products: newProducts
+                    }).catch(e => console.error('[WooSync] Background sync failed:', e));
+                }
 
                 // Sync status to WooCommerce when transitioning to Cancelled/Returned
                 // (e.g. the "Full Return" action, which goes through this function
@@ -487,12 +543,24 @@ function App() {
             // Remove any existing id field before creating
             const { id, ...cleanOrderData } = orderData;
 
+            const isActiveOrder = !['Cancelled', 'Returned'].includes(orderData.status);
+
             const docRef = await addDoc(ordersRef, {
                 ...cleanOrderData,
                 createdAt: serverTimestamp(),
                 updatedAt: serverTimestamp(),
-                createdBy: user?.displayName || 'Admin'
+                createdBy: user?.displayName || 'Admin',
+                stockDeducted: isActiveOrder,
+                deductedProducts: isActiveOrder ? (orderData.products || []) : [],
             });
+
+            // Deduct WooCommerce stock for new active online orders (e.g. partial exchange items).
+            // Return orders have status 'Returned' — isActiveOrder is false, no deduction.
+            if (isActiveOrder && orderData.type === 'Online') {
+                adjustWooStock(orderData.products || [], -1).catch(e =>
+                    console.error('[WooStock] New active order deduct failed:', e)
+                );
+            }
 
             return docRef.id;
         } catch (error) {
@@ -500,7 +568,7 @@ function App() {
             alert(`Failed to create return order: ${error.message}`);
             throw error;
         }
-    }, [inventory, user]);
+    }, [inventory, user, adjustWooStock]);
 
     // --- 7. INVENTORY IMPACT LOGIC: Permanent Deletion ---
     const handleDeleteOrder = useCallback(async (orderId) => {
