@@ -62,6 +62,7 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
         const map = {};
         orders.forEach(o => {
             if (o.status === 'Cancelled' || o.status === 'Returned') return;
+            // Fallback values used only for legacy orders that pre-date p.totalDiscount
             const orderSubtotal = Number(o.subtotal || 0);
             const orderDiscount = Number(o.totalDiscount || 0);
 
@@ -76,11 +77,18 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
 
                 map[code].soldQty += qtySoldInOrder;
 
-                let proportionalDiscount = 0;
-                if (orderSubtotal > 0) {
-                    proportionalDiscount = (lineTotal / orderSubtotal) * orderDiscount;
+                // p.totalDiscount = itemDisc + globalDiscountShare, stored at order-save time.
+                // This covers both item-level and order-level discounts in one field.
+                // Fall back to proportional global-discount allocation for legacy orders.
+                let lineDiscount;
+                if (p.totalDiscount !== undefined && p.totalDiscount !== null) {
+                    lineDiscount = Number(p.totalDiscount);
+                } else if (orderSubtotal > 0) {
+                    lineDiscount = (lineTotal / orderSubtotal) * orderDiscount;
+                } else {
+                    lineDiscount = 0;
                 }
-                map[code].revenue += (lineTotal - proportionalDiscount);
+                map[code].revenue += (lineTotal - lineDiscount);
             });
         });
         return map;
@@ -119,16 +127,29 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
                 ? Object.values(item.stock || {}).reduce((a, b) => a + Number(b || 0), 0)
                 : Number(item.totalStock || 0);
 
+            // Initial stock qty — falls back to current qty for legacy items without initialStock
+            let initialQty;
+            if (item.type === 'Variable') {
+                initialQty = (item.initialStock && typeof item.initialStock === 'object')
+                    ? Object.values(item.initialStock).reduce((a, b) => a + Number(b || 0), 0)
+                    : qty;
+            } else {
+                initialQty = typeof item.initialStock === 'number' ? item.initialStock : qty;
+            }
+
+            // totalCost: current qty × unitCost — kept for dashboard grand-total card
             const totalCost = qty * Number(item.unitCost || 0);
-            const totalMrpValue = qty * Number(item.mrp || 0);
+            // fixedTotalCost: FIXED at initialStock × unitCost — never changes as stock is sold
+            const fixedTotalCost = initialQty * Number(item.unitCost || 0);
 
             // Cross-reference with Orders to calculate sales performance
             const salesData = soldByCode[item.code.toUpperCase()] || { soldQty: 0, revenue: 0 };
             const soldQty = salesData.soldQty;
+            // revenue = discounted selling amount → displayed as "Earning"
             const revenue = salesData.revenue;
 
-            const cogs = soldQty * Number(item.unitCost || 0);
-            const deviation = revenue - cogs;
+            // Profit/Loss = Earning − Fixed Total Cost
+            const profitLoss = revenue - fixedTotalCost;
 
             const stockBreakdown = item.type === 'Variable'
                 ? Object.entries(item.stock || {}).map(([k, v]) => `${k}:${v}`).join(' | ')
@@ -137,10 +158,11 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
             return {
                 ...item,
                 qty,
+                initialQty,
                 totalCost,
-                totalMrpValue,
+                fixedTotalCost,
                 revenue,
-                deviation,
+                profitLoss,
                 soldQty,
                 stockBreakdown
             };
@@ -327,15 +349,15 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
             Code: i.code,
             Category: i.category,
             Type: i.type,
-            'Total Stock': i.qty,
+            'Initial Stock': i.initialQty,
+            'Current Stock': i.qty,
             'Stock Breakdown': i.stockBreakdown,
-            Cost: i.unitCost,
+            'Unit Cost': i.unitCost,
             MRP: i.mrp,
-            'Total Cost': i.totalCost,
-            'Total Value': i.totalMrpValue,
+            'Total Cost (Fixed)': Number(i.fixedTotalCost.toFixed(2)),
             'Sold Qty': i.soldQty,
-            Revenue: Number(i.revenue.toFixed(2)),
-            Profit: Number(i.deviation.toFixed(2)),
+            Earning: Number(i.revenue.toFixed(2)),
+            'Profit/Loss': Number(i.profitLoss.toFixed(2)),
             'Added By': i.addedBy,
             'Last Edited': i.lastEditedBy,
         }));
@@ -682,15 +704,17 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
 
                 {/* Table with Sticky Header */}
                 <div className="overflow-x-auto max-h-[600px] relative">
-                    <table className="w-full text-sm text-left min-w-[900px]">
+                    <table className="w-full text-sm text-left min-w-[1200px]">
                         <thead className="bg-white text-slate-600 font-bold border-b sticky top-0 z-10 shadow-sm">
                             <tr>
-                                <th className="p-3">Product /Code</th>
+                                <th className="p-3">Product / Code</th>
                                 <th className="p-3">Category</th>
                                 <th className="p-3">Location</th>
                                 <th className="p-3 text-center">Stock</th>
                                 <th className="p-3 text-right">Unit Cost</th>
-                                <th className="p-3 text-right">Total Value</th>
+                                <th className="p-3 text-right">Total Cost</th>
+                                <th className="p-3 text-right">MRP</th>
+                                <th className="p-3 text-right">Earning</th>
                                 <th className="p-3 text-right">Profit/Loss</th>
                                 <th className="p-3 text-left">Added By</th>
                                 <th className="p-3 text-left">Last Edited</th>
@@ -729,10 +753,16 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
                                             )}
                                         </td>
                                         <td className="p-3 text-right text-slate-600">৳{Number(item.unitCost.toFixed(2))}</td>
-                                        <td className="p-3 text-right text-slate-600">৳{Number(item.totalMrpValue.toFixed(2))}</td>
                                         <td className="p-3 text-right">
-                                            <div className="font-bold text-emerald-600">৳{Number(item.deviation.toFixed(2))}</div>
-                                            <div className="text-[10px] text-slate-400">Rev: {Number(item.revenue.toFixed(2))}</div>
+                                            <div className="text-[10px] text-slate-400">{item.initialQty} × {item.unitCost} =</div>
+                                            <div className="font-bold text-slate-700">৳{Number(item.fixedTotalCost.toFixed(2)).toLocaleString()}</div>
+                                        </td>
+                                        <td className="p-3 text-right text-slate-600">৳{Number(item.mrp || 0)}</td>
+                                        <td className="p-3 text-right text-slate-600">৳{Number(item.revenue.toFixed(2)).toLocaleString()}</td>
+                                        <td className="p-3 text-right">
+                                            <div className={`font-bold ${item.profitLoss >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                                ৳{Number(item.profitLoss.toFixed(2)).toLocaleString()}
+                                            </div>
                                         </td>
                                         <td className="p-3 text-xs text-slate-500 truncate max-w-[100px]" title={item.addedBy}>
                                             {item.addedBy || '-'}
@@ -771,7 +801,7 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
                             })}
                             {inventoryStats.length === 0 && (
                                 <tr>
-                                    <td colSpan="10" className="p-8 text-center text-slate-400">
+                                    <td colSpan="12" className="p-8 text-center text-slate-400">
                                         {historyStart ? 'No inventory records found for this date range.' : 'No inventory items found.'}
                                     </td>
                                 </tr>
