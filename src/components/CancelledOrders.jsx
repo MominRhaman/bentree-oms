@@ -18,8 +18,9 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
     // --- Filter Logic ---
     const filteredOrders = useMemo(() => {
         let res = orders.filter(o => {
-            // 1. Immediately hide items that were just deleted
+            // 1. Immediately hide items that were just deleted/archived
             if (deletedIds.has(o.id)) return false;
+            if (o.archived) return false;
 
             if (!o.status) return false;
             const s = o.status.toLowerCase();
@@ -64,7 +65,7 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
 
     // --- DELETE LOGIC ---
     const processDelete = async (orderId) => {
-        const confirmed = window.confirm('⚠️ Are you sure you want to PERMANENTLY delete this order?\n\nThis cannot be undone.');
+        const confirmed = window.confirm('⚠️ Are you sure you want to move this order to Archive?');
         if (!confirmed) return;
 
         try {
@@ -294,7 +295,7 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
 
                                             {/* ROLE-BASED ACCESS BUTTON */}
                                             <button
-                                                title={isMasterUser ? "Delete Permanently" : "Restricted: Master Access Only"}
+                                                title={isMasterUser ? "Move to Archive" : "Restricted: Master Access Only"}
                                                 disabled={!isMasterUser}
                                                 onClick={(e) => {
                                                     if (!isMasterUser) return;

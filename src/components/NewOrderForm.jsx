@@ -168,6 +168,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
 
         // 1. Check if Code Exists
         if (!invItem) return "Product code not found in inventory.";
+        if (invItem.archived) return "Product is archived and unavailable for new orders.";
 
         // Calculate total quantity for this specific product across ALL rows
         const totalQtyForThisProduct = allProducts
@@ -380,6 +381,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                 const [code, size] = key.split('|');
                 const invItem = inventory.find(i => i.code.toUpperCase() === code);
                 if (!invItem) { stockIssues.push(`${code}: not found`); continue; }
+                if (invItem.archived) { stockIssues.push(`${code}: archived`); continue; }
                 if (invItem.type === 'Variable') {
                     const sizeKey = Object.keys(invItem.stock || {}).find(k => k.toUpperCase() === size);
                     const avail = Number(invItem.stock?.[sizeKey] || 0);
@@ -456,8 +458,10 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
             if (val.length >= 3) {
                 const searchStr = val.toUpperCase();
                 const matches = inventory.filter(i =>
-                    i.code.toUpperCase().endsWith(searchStr) ||
-                    i.code.toUpperCase().includes(searchStr)
+                    !i.archived && (
+                        i.code.toUpperCase().endsWith(searchStr) ||
+                        i.code.toUpperCase().includes(searchStr)
+                    )
                 );
                 setSuggestions({ index, list: matches.slice(0, 5) });
             } else {

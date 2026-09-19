@@ -1,5 +1,6 @@
 ﻿const {setGlobalOptions} = require("firebase-functions");
 const {onRequest, onCall} = require("firebase-functions/https");
+const {onSchedule} = require("firebase-functions/v2/scheduler");
 const logger = require("firebase-functions/logger");
 const crypto = require("crypto");
 const axios = require("axios");
@@ -1032,5 +1033,57 @@ exports.wooSyncOrder = onCall(async (request) => {
     wcId, fields: Object.keys(payload),
   });
   return {ok: true};
+});
+
+// Runs daily at midnight — permanently deletes inventory items that have been
+// archived for 30+ days and have not been restored.
+exports.purgeOldArchivedInventory = onSchedule("every 24 hours", async () => {
+  const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const snapshot = await db
+      .collection("artifacts").doc(APP_ID)
+      .collection("public").doc("data")
+      .collection("inventory")
+      .where("archived", "==", true)
+      .where("archivedAt", "<=", cutoff)
+      .get();
+
+  if (snapshot.empty) {
+    logger.info("[ArchivePurge] No expired archived items found.");
+    return;
+  }
+
+  const batch = db.batch();
+  snapshot.docs.forEach((docSnap) => {
+    batch.delete(docSnap.ref);
+  });
+  await batch.commit();
+  logger.info("[ArchivePurge] Permanently deleted expired items.",
+      {count: snapshot.size});
+});
+
+// Runs daily — deletes order records archived for 30+ days.
+// NEVER deletes sales reports, order history, or related business records.
+exports.purgeOldArchivedOrders = onSchedule("every 24 hours", async () => {
+  const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const snapshot = await db
+      .collection("artifacts").doc(APP_ID)
+      .collection("public").doc("data")
+      .collection("orders")
+      .where("archived", "==", true)
+      .where("archivedAt", "<=", cutoff)
+      .get();
+
+  if (snapshot.empty) {
+    logger.info("[OrderArchivePurge] No expired archived orders found.");
+    return;
+  }
+
+  const batch = db.batch();
+  snapshot.docs.forEach((docSnap) => {
+    batch.delete(docSnap.ref);
+  });
+  await batch.commit();
+  logger.info("[OrderArchivePurge] Deleted expired archived orders.",
+      {count: snapshot.size});
 });
 

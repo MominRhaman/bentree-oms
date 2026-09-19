@@ -64,6 +64,7 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
     // --- 2. Filter Logic ---
     const filteredOrders = useMemo(() => {
         let res = orders.filter(o =>
+            !o.archived &&
             o.status !== 'Pending' &&
             o.status !== 'Hold' &&
             o.type !== 'Store'
@@ -484,11 +485,11 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                                                 </button>
                                                 {/* ROLE-BASED ACCESS BUTTON */}
                                                 <button
-                                                    title={isMasterUser ? "Delete Permanently" : "Restricted: Master Access Only"}
+                                                    title={isMasterUser ? "Move to Archive" : "Restricted: Master Access Only"}
                                                     disabled={!isMasterUser}
                                                     onClick={(e) => {
                                                         if (!isMasterUser) return;
-                                                        if (confirm('⚠️ Are you sure you want to PERMANENTLY DELETE this order?')) {
+                                                        if (confirm('⚠️ Are you sure you want to move this order to Archive?')) {
                                                             onDelete(order.id);
                                                         }
                                                     }}

@@ -28,6 +28,8 @@ const SalesReports = lazy(() => import('./components/SalesReports'));
 const SalesInventoryReport = lazy(() => import('./components/SalesInventoryReport'));
 const BarcodePrintView = lazy(() => import('./components/BarcodePrintView'));
 const OrderDetailsPopup = lazy(() => import('./components/OrderDetailsPopup'));
+const InventoryArchiveTab = lazy(() => import('./components/InventoryArchiveTab'));
+const OrderArchiveTab = lazy(() => import('./components/OrderArchiveTab'));
 
 function App() {
     const savedRole = localStorage.getItem('bentree_role');
@@ -56,6 +58,7 @@ function App() {
     const [locations, setLocations] = useState([]);
     const [expenses, setExpenses] = useState([]);
     const [inventoryAdjustments, setInventoryAdjustments] = useState([]);
+    const recentlyRestoredRef = useRef(new Set());
 
     // --- 2. Authentication Observer ---
     useEffect(() => {
@@ -527,6 +530,18 @@ function App() {
     // --- NEW: CREATE ORDER (for Partial Returns) ---
     const handleCreateOrder = useCallback(async (orderData) => {
         try {
+            // Block active orders that include archived inventory products
+            if (!['Cancelled', 'Returned'].includes(orderData.status)) {
+                const archivedProducts = (orderData.products || []).filter(p => {
+                    const inv = inventory.find(i => (i.code || '').toUpperCase() === (p.code || '').toUpperCase());
+                    return inv && inv.archived;
+                });
+                if (archivedProducts.length > 0) {
+                    const codes = archivedProducts.map(p => p.code).join(', ');
+                    throw new Error(`Cannot create order: [${codes}] is archived and unavailable.`);
+                }
+            }
+
             // CRITICAL: For RETURNED/CANCELLED orders, we DON'T touch inventory
 
             // Only deduct inventory if creating a new ACTIVE order (not a return)
@@ -599,8 +614,22 @@ function App() {
                 console.error('[WooOrder] Store delete cancel failed:', e)
             );
         }
-        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', orderId));
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', orderId), {
+            archived: true,
+            archivedAt: serverTimestamp(),
+            archivedReason: 'deleted',
+        });
     }, [orders, inventory, user]);
+
+    const handleRestoreOrder = useCallback(async (orderId) => {
+        try {
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', orderId), {
+                archived: false,
+                archivedAt: null,
+                archivedReason: null,
+            });
+        } catch (e) { alert("Order restore failed"); }
+    }, []);
 
     const handleEditInventory = useCallback(async (id, updatedData) => {
         try {
@@ -649,13 +678,45 @@ function App() {
             } else if (oldItem.type === 'Single') {
                 await logAndSync('Free', Number(oldItem.totalStock || 0), Number(updatedData.totalStock || 0));
             }
+
+            // Auto-archive when stock reaches 0
+            if (!oldItem.archived && !recentlyRestoredRef.current.has(id)) {
+                let newTotalStock = 0;
+                if (oldItem.type === 'Variable') {
+                    const newStock = updatedData.stock || oldItem.stock || {};
+                    newTotalStock = Object.values(newStock).reduce((a, b) => a + Number(b || 0), 0);
+                } else {
+                    newTotalStock = Number(updatedData.totalStock !== undefined ? updatedData.totalStock : (oldItem.totalStock || 0));
+                }
+                if (newTotalStock === 0) {
+                    await updateDoc(
+                        doc(db, 'artifacts', appId, 'public', 'data', 'inventory', id),
+                        { archived: true, archivedAt: serverTimestamp(), archivedReason: 'stock_out' }
+                    );
+                }
+            }
         } catch (e) {
             alert("Inventory update failed");
         }
     }, [inventory, user]);
     const handleDeleteInventory = useCallback(async (id) => {
-        try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventory', id)); }
-        catch (e) { alert("Inventory delete failed"); }
+        try {
+            await updateDoc(
+                doc(db, 'artifacts', appId, 'public', 'data', 'inventory', id),
+                { archived: true, archivedAt: serverTimestamp(), archivedReason: 'deleted' }
+            );
+        } catch (e) { alert("Inventory delete failed"); }
+    }, []);
+
+    const handleRestoreInventory = useCallback(async (id) => {
+        try {
+            await updateDoc(
+                doc(db, 'artifacts', appId, 'public', 'data', 'inventory', id),
+                { archived: false, archivedAt: null, archivedReason: null }
+            );
+            recentlyRestoredRef.current.add(id);
+            setTimeout(() => recentlyRestoredRef.current.delete(id), 60000);
+        } catch (e) { alert("Restore failed"); }
     }, []);
 
     // Logs initial stock when a brand-new product is added to inventory
@@ -705,6 +766,9 @@ function App() {
     const exchangeOrders = useMemo(() => orders.filter(o => o.type === 'Online' && (o.status === 'Exchanged' || o.exchangeDetails || o.isPartialExchange)), [orders]);
     const cancelledReturnedOrders = useMemo(() => orders.filter(o => o.status === 'Cancelled' || o.status === 'Returned'), [orders]);
 
+    const activeOrders = useMemo(() => orders.filter(o => !o.archived), [orders]);
+    const archivedOrders = useMemo(() => orders.filter(o => o.archived), [orders]);
+
     // Pre-index inventory by uppercase code for O(1) lookups in child components
     const inventoryMap = useMemo(() => {
         const map = new Map();
@@ -712,8 +776,11 @@ function App() {
         return map;
     }, [inventory]);
 
+    const activeInventory = useMemo(() => inventory.filter(i => !i.archived), [inventory]);
+    const archivedInventory = useMemo(() => inventory.filter(i => i.archived), [inventory]);
+
     // Memoize shared prop objects so child components receive stable references
-    const commonProps = useMemo(() => ({ inventory, locations, orders, user, onEdit: handleEditInventory, onDelete: handleDeleteInventory, onAdd: handleAddInventory, adjustments: inventoryAdjustments }), [inventory, locations, orders, user, handleEditInventory, handleDeleteInventory, handleAddInventory, inventoryAdjustments]);
+    const commonProps = useMemo(() => ({ inventory: activeInventory, locations, orders, user, onEdit: handleEditInventory, onDelete: handleDeleteInventory, onAdd: handleAddInventory, adjustments: inventoryAdjustments }), [activeInventory, locations, orders, user, handleEditInventory, handleDeleteInventory, handleAddInventory, inventoryAdjustments]);
     const orderProps = useMemo(() => ({
         orders,
         onUpdate: handleUpdateStatus,
@@ -735,10 +802,12 @@ function App() {
         switch (activeTab) {
             case 'new-order': return <NewOrderForm user={user} existingOrders={orders} setActiveTab={handleTabChange} inventory={inventory} />;
             case 'inventory': return ( <InventoryTab {...commonProps} onOpenBarcodePrint={handleOpenBarcodePrint} /> );
+            case 'inventory-archive': return userRole !== 'qmt' ? <InventoryArchiveTab inventory={archivedInventory} locations={locations} onRestore={handleRestoreInventory} /> : <div className="p-10 text-center text-slate-400">Access denied.</div>;
             case 'stock-location': return <StockLocationTab locations={locations} />;
             case 'monthly-profit': return userRole === 'master' ? <MonthlyProfitTab orders={orders} inventory={inventory} expenses={expenses} /> : <div className="p-10 text-center text-slate-400">Master access required.</div>;
             case 'primary': return <PrimaryOrders orders={primaryOrders} onUpdate={handleUpdateStatus} onEdit={handleEditOrderWithStock} onCreate={handleCreateOrder} inventory={inventory} />;
-            case 'confirmed': return <ConfirmedOrders allOrders={orders} orders={confirmedOrders} {...orderProps} userRole={userRole} />;
+            case 'confirmed': return <ConfirmedOrders allOrders={activeOrders} orders={confirmedOrders} {...orderProps} userRole={userRole} />;
+            case 'order-archive': return userRole !== 'qmt' ? <OrderArchiveTab orders={archivedOrders} onRestore={handleRestoreOrder} /> : <div className="p-10 text-center text-slate-400">Access denied.</div>;
             case 'hold': return <HoldTab orders={holdOrders} onUpdate={handleUpdateStatus} onCreate={handleCreateOrder} />;
             case 'dispatch': return <DispatchTab orders={dispatchOrders} onUpdate={handleUpdateStatus} onCreate={handleCreateOrder} />;
             case 'store-sales': return <StoreSales orders={storeOrders} {...orderProps} />;

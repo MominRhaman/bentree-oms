@@ -2,7 +2,7 @@ import React, { useRef, useMemo, useCallback } from 'react';
 import {
     Plus, ClipboardCheck, CheckCircle, Truck, PauseCircle,
     ArrowRightLeft, Ban, Layers, MapPin, Globe, ShoppingBag,
-    BarChart3, PieChart, FileBarChart2, LogOut, Camera, X
+    BarChart3, PieChart, FileBarChart2, LogOut, Camera, X, Archive
 } from 'lucide-react';
 
 const Sidebar = ({ activeTab, setActiveTab, userRole, onLogout, user, setUser, isOpen, onClose }) => {
@@ -16,7 +16,9 @@ const Sidebar = ({ activeTab, setActiveTab, userRole, onLogout, user, setUser, i
         { id: 'hold', label: 'Hold Orders', icon: PauseCircle, roles: ['master', 'employee', 'qmt'] },
         { id: 'exchange', label: 'Exchange Orders', icon: ArrowRightLeft, roles: ['master', 'employee', 'qmt'] },
         { id: 'cancelled', label: 'Cancel & Return', icon: Ban, roles: ['master', 'employee', 'qmt'] },
+        { id: 'order-archive', label: 'Order Archive', icon: Archive, roles: ['master', 'employee'] },
         { id: 'inventory', label: 'Inventory', icon: Layers, roles: ['master', 'employee'] },
+        { id: 'inventory-archive', label: 'Stock Archive', icon: Archive, roles: ['master', 'employee'] },
         { id: 'stock-location', label: 'Stock Location', icon: MapPin, roles: ['master', 'employee'] },
         { id: 'online-sales', label: 'Online Sales', icon: Globe, roles: ['master', 'employee'] },
         { id: 'store-sales', label: 'Store Sales', icon: ShoppingBag, roles: ['master', 'employee'] },
