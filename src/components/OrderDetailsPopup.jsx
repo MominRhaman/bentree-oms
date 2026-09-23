@@ -29,7 +29,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
             const deepCopy = JSON.parse(JSON.stringify(order));
             // Ensure products have discount fields; derive from inventory MRP if no explicit discount set
             deepCopy.products = deepCopy.products.map(p => {
-                let discountType = p.discountType || 'Fixed';
+                let discountType = p.discountType || 'Percent';
                 let discountValue = Number(p.discountValue) || 0;
                 let price = p.price;
 
@@ -46,6 +46,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
 
                 return { ...p, price, discountType, discountValue };
             });
+            if (!deepCopy.discountType) deepCopy.discountType = 'Percent';
             // Compute missing financial fields for orders saved before this fix (e.g. old WooCommerce imports)
             if (deepCopy.subtotal === undefined || deepCopy.subtotal === null) {
                 deepCopy.subtotal = (deepCopy.products || []).reduce((s, p) => {

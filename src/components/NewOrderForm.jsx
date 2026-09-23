@@ -15,8 +15,8 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         orderSource: 'Facebook',
         orderProfile: '',
         paymentType: 'COD',
-        products: [{ code: '', size: '', qty: 1, price: '', discountType: 'Fixed', discountValue: '' }],
-        discountType: 'Fixed',
+        products: [{ code: '', size: '', qty: 1, price: '', discountType: 'Percent', discountValue: '' }],
+        discountType: 'Percent',
         discountValue: '',
         deliveryCharge: '',
         isExpress: false,
@@ -59,7 +59,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         setFormData(prev => ({
             ...prev,
             date: new Date().toISOString().split('T')[0],
-            products: [{ code: '', size: '', qty: 1, price: '', discountType: 'Fixed', discountValue: '' }],
+            products: [{ code: '', size: '', qty: 1, price: '', discountType: 'Percent', discountValue: '' }],
             recipientName: '',
             recipientPhone: '',
             recipientAddress: '',
@@ -523,7 +523,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
     const addProduct = () => {
         const lastProd = formData.products[formData.products.length - 1];
         if (getStockError(lastProd, formData.products)) return;
-        setFormData({ ...formData, products: [...formData.products, { code: '', size: '', qty: 1, price: '', discountType: 'Fixed', discountValue: '' }] });
+        setFormData({ ...formData, products: [...formData.products, { code: '', size: '', qty: 1, price: '', discountType: 'Percent', discountValue: '' }] });
     };
     const removeProduct = (idx) => setFormData({ ...formData, products: formData.products.filter((_, i) => i !== idx) });
 
@@ -602,7 +602,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                 size: sizeToCheck,
                 qty: 1,
                 price: autoPrice,
-                discountType: 'Fixed',
+                discountType: 'Percent',
                 discountValue: ''
             });
         }

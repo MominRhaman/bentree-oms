@@ -21,7 +21,7 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
             size: p.size || '',
             qty: p.qty,
             price: p.price,
-            discountType: p.discountType || 'amount', // New
+            discountType: p.discountType || 'Percent', // New
             discountValue: p.discountValue || ''      // New
         }))
     );
@@ -29,7 +29,7 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
 
     // --- Discount States ---
     const [discountInput, setDiscountInput] = useState('');
-    const [discountType, setDiscountType] = useState('amount');
+    const [discountType, setDiscountType] = useState('percent');
 
     // --- NEW: Partial Exchange Items Selection ---
     const [partialExchangeItems, setPartialExchangeItems] = useState(new Set());
