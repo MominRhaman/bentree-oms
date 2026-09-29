@@ -5,6 +5,16 @@ import { db, appId } from '../firebase';
 import { INVENTORY_CATEGORIES, SIZES, downloadCSV } from '../utils';
 import SearchBar from './SearchBar';
 
+const SIZE_ALIASES = { 'XXL': '2XL', 'XXXL': '3XL' };
+function getSizeBreakdown(stock) {
+    const merged = {};
+    Object.entries(stock).forEach(([k, v]) => {
+        const key = SIZE_ALIASES[k.toUpperCase()] || k;
+        merged[key] = (merged[key] || 0) + Number(v || 0);
+    });
+    return Object.entries(merged).filter(([, v]) => v > 0).map(([k, v]) => `${k}:${v}`).join(' ');
+}
+
 // NEW: Accept onOpenBarcodePrint prop instead of managing print state locally
 const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, onAdd, onOpenBarcodePrint, adjustments = [] }) => {
     // --- Form State ---
@@ -182,6 +192,23 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
     const editingInventoryItem = useMemo(
         () => inventory.find(i => i.id === form.id),
         [inventory, form.id]
+    );
+
+    // O(1) location lookup — avoids O(inventory × locations) comparisons in the table render loop
+    const locationsMap = useMemo(
+        () => new Map(locations.map(l => [l.id, l])),
+        [locations]
+    );
+
+    // Sort adjustments once (memoized) instead of on every render — the raw array can
+    // be large and spreading + sorting on every local-state change is expensive
+    const sortedAdjustments = useMemo(() =>
+        [...adjustments].sort((a, b) => {
+            const aT = a.timestamp?.toDate ? a.timestamp.toDate().getTime() : 0;
+            const bT = b.timestamp?.toDate ? b.timestamp.toDate().getTime() : 0;
+            return bT - aT;
+        }).slice(0, 100),
+        [adjustments]
     );
 
     // --- Prepare Barcode Print Logic based on Stock Qty ---
@@ -723,7 +750,7 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {inventoryStats.map(item => {
-                                const loc = locations.find(l => l.id === item.locationId);
+                                const loc = locationsMap.get(item.locationId);
                                 return (
                                     <tr key={item.id} className="hover:bg-slate-50 transition-colors">
                                         <td className="p-3">
@@ -740,15 +767,7 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
                                             </span>
                                             {item.type === 'Variable' && (
                                                 <div className="text-[10px] text-slate-400 mt-1">
-                                                    {(() => {
-                                                        const SIZE_ALIASES = { 'XXL': '2XL', 'XXXL': '3XL' };
-                                                        const merged = {};
-                                                        Object.entries(item.stock).forEach(([k, v]) => {
-                                                            const key = SIZE_ALIASES[k.toUpperCase()] || k;
-                                                            merged[key] = (merged[key] || 0) + Number(v || 0);
-                                                        });
-                                                        return Object.entries(merged).filter(([, v]) => v > 0).map(([k, v]) => `${k}:${v}`).join(' ');
-                                                    })()}
+                                                    {getSizeBreakdown(item.stock)}
                                                 </div>
                                             )}
                                         </td>
@@ -834,14 +853,7 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                            {[...adjustments]
-                                .sort((a, b) => {
-                                    const aT = a.timestamp?.toDate ? a.timestamp.toDate().getTime() : 0;
-                                    const bT = b.timestamp?.toDate ? b.timestamp.toDate().getTime() : 0;
-                                    return bT - aT;
-                                })
-                                .slice(0, 100)
-                                .map(adj => {
+                            {sortedAdjustments.map(adj => {
                                     const ts = adj.timestamp?.toDate ? adj.timestamp.toDate() : null;
                                     return (
                                         <tr key={adj.id} className="hover:bg-slate-50 transition-colors">

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { collection, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, arrayUnion, addDoc } from 'firebase/firestore';
+import { collection, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, arrayUnion, addDoc, query, orderBy, limit } from 'firebase/firestore';
 import { auth, db, appId } from './firebase';
 import { getStatusColor, updateInventoryStock, computeStockBefores, logInventoryMovement } from './utils';
 import { adjustWooStock, wooUpdateOrder, wooSyncOrder } from './WooAPI/wooStock';
@@ -129,8 +129,7 @@ function App() {
         const handleSnapshotError = (err) => console.error("Firestore Error:", err);
 
         const unsubOrders = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), (snap) => {
-            
-                const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
             data.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
             setOrders(data);
             setIsDataReceived(true);
@@ -139,7 +138,14 @@ function App() {
         const unsubInv = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'inventory'), (snap) => setInventory(snap.docs.map(d => ({ id: d.id, ...d.data() }))), handleSnapshotError);
         const unsubLoc = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'locations'), (snap) => setLocations(snap.docs.map(d => ({ id: d.id, ...d.data() }))), handleSnapshotError);
         const unsubExp = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'expenses'), (snap) => setExpenses(snap.docs.map(d => ({ id: d.id, ...d.data() }))), handleSnapshotError);
-        const unsubAdj = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'inventoryAdjustments'), (snap) => setInventoryAdjustments(snap.docs.map(d => ({ id: d.id, ...d.data() }))), handleSnapshotError);
+        // Limit adjustments to the 500 most recent — this collection grows unboundedly and
+        // most views only need recent entries. Full history is in Firestore if ever needed.
+        const adjQuery = query(
+            collection(db, 'artifacts', appId, 'public', 'data', 'inventoryAdjustments'),
+            orderBy('timestamp', 'desc'),
+            limit(500)
+        );
+        const unsubAdj = onSnapshot(adjQuery, (snap) => setInventoryAdjustments(snap.docs.map(d => ({ id: d.id, ...d.data() }))), handleSnapshotError);
 
         return () => { unsubOrders(); unsubInv(); unsubLoc(); unsubExp(); unsubAdj(); };
     }, [user]);
@@ -533,7 +539,7 @@ function App() {
             // Block active orders that include archived inventory products
             if (!['Cancelled', 'Returned'].includes(orderData.status)) {
                 const archivedProducts = (orderData.products || []).filter(p => {
-                    const inv = inventory.find(i => (i.code || '').toUpperCase() === (p.code || '').toUpperCase());
+                    const inv = inventoryMap.get((p.code || '').toUpperCase());
                     return inv && inv.archived;
                 });
                 if (archivedProducts.length > 0) {

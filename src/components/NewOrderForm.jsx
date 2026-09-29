@@ -72,35 +72,35 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
     };
 
     // --- Auto ID Generation ---
+    // Runs once when orders first load. Re-running on every Firestore snapshot is
+    // wasteful — IDs only need to be computed once from the current max.
+    const idInitialized = useRef(false);
     useEffect(() => {
-        const fetchLastId = async () => {
-            let maxMerchantId = 1000;
-            let maxStoreId = 2000;
-
-            existingOrders.forEach(o => {
-                if (o.type === 'Online') {
-                    const mid = parseInt(o.merchantOrderId);
-                    if (!isNaN(mid) && mid > maxMerchantId) maxMerchantId = mid;
-                }
-                if (o.type === 'Store') {
-                    const sid = parseInt(o.storeOrderId);
-                    if (!isNaN(sid) && sid > maxStoreId) maxStoreId = sid;
-                }
-            });
-
-            setFormData(prev => ({
-                ...prev,
-                merchantOrderId: (maxMerchantId + 1).toString(),
-                storeOrderId: (maxStoreId + 1).toString()
-            }));
-        };
-
-        if (existingOrders.length > 0) {
-            fetchLastId();
-        } else {
+        if (idInitialized.current) return;
+        if (existingOrders.length === 0) {
+            idInitialized.current = true;
             setFormData(prev => ({ ...prev, merchantOrderId: '1001', storeOrderId: '2001' }));
+            return;
         }
-    }, [existingOrders, orderType]);
+        idInitialized.current = true;
+        let maxMerchantId = 1000;
+        let maxStoreId = 2000;
+        existingOrders.forEach(o => {
+            if (o.type === 'Online') {
+                const mid = parseInt(o.merchantOrderId);
+                if (!isNaN(mid) && mid > maxMerchantId) maxMerchantId = mid;
+            }
+            if (o.type === 'Store') {
+                const sid = parseInt(o.storeOrderId);
+                if (!isNaN(sid) && sid > maxStoreId) maxStoreId = sid;
+            }
+        });
+        setFormData(prev => ({
+            ...prev,
+            merchantOrderId: (maxMerchantId + 1).toString(),
+            storeOrderId: (maxStoreId + 1).toString()
+        }));
+    }, [existingOrders]);
 
     // --- Calculations ---
     const totals = useMemo(() => {
@@ -160,11 +160,17 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         setIsDuplicate(found);
     }, [formData.recipientPhone, formData.products, existingOrders]);
 
+    // O(1) inventory lookups — avoids O(n) find() on every keystroke
+    const inventoryCodeMap = useMemo(
+        () => new Map(inventory.map(i => [i.code?.toUpperCase(), i])),
+        [inventory]
+    );
+
     // --- STRICT INVENTORY CHECKER ---
     const getStockError = (p, allProducts = []) => {
         if (!p.code) return null;
         const normalizedCode = p.code.trim().toUpperCase();
-        const invItem = inventory.find(i => i.code.toUpperCase() === normalizedCode);
+        const invItem = inventoryCodeMap.get(normalizedCode);
 
         // 1. Check if Code Exists
         if (!invItem) return "Product code not found in inventory.";
@@ -379,7 +385,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
             }
             for (const [key, totalQty] of Object.entries(qtyMap)) {
                 const [code, size] = key.split('|');
-                const invItem = inventory.find(i => i.code.toUpperCase() === code);
+                const invItem = inventoryCodeMap.get(code);
                 if (!invItem) { stockIssues.push(`${code}: not found`); continue; }
                 if (invItem.archived) { stockIssues.push(`${code}: archived`); continue; }
                 if (invItem.type === 'Variable') {
@@ -398,9 +404,9 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
             }
 
             const stocksBefore = computeStockBefores(formData.products, inventory);
-            for (const p of formData.products) {
-                await updateInventoryStock(p.code, p.size, -Number(p.qty), inventory);
-            }
+            await Promise.all(formData.products.map(p =>
+                updateInventoryStock(p.code, p.size, -Number(p.qty), inventory)
+            ));
             const docRef = await addDoc(
                 collection(db, 'artifacts', appId, 'public', 'data', 'orders'),
                 payload
@@ -472,7 +478,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         // Auto-fill price if code is found
         if (field === 'code') {
             const normalizedCode = value.trim().toUpperCase();
-            const foundItem = inventory.find(i => i.code.toUpperCase() === normalizedCode);
+            const foundItem = inventoryCodeMap.get(normalizedCode);
             if (foundItem) {
                 newProducts[index].price = foundItem.mrp || '';
             }

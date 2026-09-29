@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { X, Edit2, Save, Trash2, Printer, MapPin, User, Package, Plus, Clock, RefreshCw, AlertTriangle, RotateCcw, CheckCircle, Eye, Zap, ArrowLeft } from 'lucide-react';
 import { disableScroll } from '../utils';
 import InvoiceGenerator from './InvoiceGenerator';
@@ -70,12 +70,18 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
         }
     }, [order, isReturnMode]);
 
+    // Keyed by uppercase code for O(1) lookups — inventory.find() in a loop is O(n) per call
+    const inventoryCodeMap = useMemo(
+        () => new Map((inventory || []).map(i => [i.code?.toUpperCase(), i])),
+        [inventory]
+    );
+
     if (!order || !editedOrder) return null;
 
     // --- Helper: Get Sizes for a Code ---
     const getAvailableSizes = (code) => {
         if (!code || !inventory || !inventory.length) return [];
-        const item = inventory.find(i => i.code && i.code.toUpperCase() === code.toUpperCase());
+        const item = inventoryCodeMap.get(code.toUpperCase());
         if (!item) return [];
         if (item.type === 'Variable' && item.stock) {
             return Object.keys(item.stock);
@@ -87,7 +93,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
     const getStockError = (prod, index, isBlur = false) => {
         if (!inventory || !inventory.length) return null;
         if (!prod.code) return null;
-        const item = inventory.find(i => i.code && i.code.toUpperCase() === prod.code.trim().toUpperCase());
+        const item = inventoryCodeMap.get(prod.code.trim().toUpperCase());
         if (!item) {
             return isBlur ? "Product not found" : null;
         }
