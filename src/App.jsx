@@ -31,6 +31,47 @@ const OrderDetailsPopup = lazy(() => import('./components/OrderDetailsPopup'));
 const InventoryArchiveTab = lazy(() => import('./components/InventoryArchiveTab'));
 const OrderArchiveTab = lazy(() => import('./components/OrderArchiveTab'));
 
+// QMT may only do these status updates to an existing order:
+// 1. Check Out (Primary Orders) — enter the Order ID and mark checkOutStatus 'Completed'
+// 2. Confirm (Primary Orders)   — move a checked-out Pending order to 'Confirmed'
+// 3. Confirm Dispatch (Dispatch Info) — move a Confirmed/Exchanged order to 'Dispatched'
+// 4. Type Tracking ID / Remarks on any page (one text field, status unchanged)
+// 5. Call Log attempt 1/2/3 on Primary Orders (status unchanged)
+// Must match qmtChecksOutOrder / qmtConfirmsOrder / qmtDispatchesOrder /
+// qmtEditsNoteField / qmtLogsCallAttempt in firestore.rules.
+const QMT_NOTE_FIELDS = ['trackingId', 'remarks', 'dispatchRemark'];
+const QMT_CALL_ATTEMPT_FIELDS = [
+    'callAttempts', 'callNote', 'history',
+    'attempt1Remark', 'attempt1Date', 'attempt2Remark', 'attempt2Date', 'attempt3Remark', 'attempt3Date',
+];
+const isQmtAllowedStatusUpdate = (order, newStatus, extraData = {}) => {
+    const keys = Object.keys(extraData);
+    const isCallAttempt = newStatus === order.status
+        && ['Pending', 'Cancelled'].includes(order.status) // the statuses Primary Orders lists
+        && keys.includes('callAttempts')
+        && keys.every(k => QMT_CALL_ATTEMPT_FIELDS.includes(k));
+    if (isCallAttempt) return true;
+    const isNoteEdit = newStatus === order.status
+        && keys.length === 1
+        && QMT_NOTE_FIELDS.includes(keys[0])
+        && typeof extraData[keys[0]] === 'string';
+    if (isNoteEdit) return true;
+    const isDispatch = newStatus === 'Dispatched'
+        && ['Confirmed', 'Exchanged'].includes(order.status)
+        && keys.length === 0;
+    if (isDispatch) return true;
+    if (order.status !== 'Pending') return false;
+    const isCheckOut = newStatus === 'Pending'
+        && order.checkOutStatus !== 'Completed'
+        && keys.length > 0
+        && keys.every(k => ['merchantOrderId', 'checkOutStatus'].includes(k))
+        && (extraData.checkOutStatus === undefined || extraData.checkOutStatus === 'Completed');
+    const isConfirm = newStatus === 'Confirmed'
+        && order.checkOutStatus === 'Completed'
+        && keys.length === 0;
+    return isCheckOut || isConfirm;
+};
+
 function App() {
     const savedRole = localStorage.getItem('bentree_role');
 
@@ -234,7 +275,6 @@ function App() {
 
     // --- 5. INVENTORY IMPACT LOGIC: Status Changes (Cancel/Return/Restore) ---
     const handleUpdateStatus = useCallback(async (orderId, newStatus, extraData = {}) => {
-        if (isQmtBlocked()) return;
         // Find order by ID or fallback to Merchant ID if ID changed during exchange
         let order = orders.find(o => o.id === orderId);
         if (!order && (extraData.merchantOrderId || extraData.storeOrderId)) {
@@ -243,6 +283,8 @@ function App() {
         }
 
         if (!order) return;
+        // QMT: only Call Attempts, Check Out, Confirm, Confirm Dispatch and Tracking ID / Remarks are allowed
+        if (!isQmtAllowedStatusUpdate(order, newStatus, extraData) && isQmtBlocked()) return;
 
         const activeId = order.id;
         const inactiveStatuses = ['Cancelled', 'Returned'];
@@ -857,7 +899,7 @@ function App() {
             case 'confirmed': return <ConfirmedOrders allOrders={activeOrders} orders={confirmedOrders} {...orderProps} userRole={userRole} />;
             case 'order-archive': return userRole !== 'qmt' ? <OrderArchiveTab orders={archivedOrders} onRestore={handleRestoreOrder} /> : <div className="p-10 text-center text-slate-400">Access denied.</div>;
             case 'hold': return <HoldTab orders={holdOrders} onUpdate={handleUpdateStatus} onCreate={handleCreateOrder} userRole={userRole} />;
-            case 'dispatch': return <DispatchTab orders={dispatchOrders} onUpdate={handleUpdateStatus} onCreate={handleCreateOrder} userRole={userRole} />;
+            case 'dispatch': return <DispatchTab orders={dispatchOrders} onUpdate={handleUpdateStatus} onCreate={handleCreateOrder} />;
             case 'store-sales': return <StoreSales orders={storeOrders} {...orderProps} userRole={userRole} />;
             case 'exchange': return <ExchangeTab orders={exchangeOrders} onCreate={handleCreateOrder} onEdit={handleEditOrderWithStock} inventory={inventory} userRole={userRole} />;
             case 'cancelled': return <CancelledOrders orders={cancelledReturnedOrders} onUpdate={handleUpdateStatus} onDelete={handleDeleteOrder} onEdit={handleEditOrderWithStock} onCreate={handleCreateOrder} inventory={inventory} userRole={userRole} />;

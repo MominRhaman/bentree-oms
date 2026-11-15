@@ -52,6 +52,99 @@ service cloud.firestore {
         && request.time < resource.data.createdAt + duration.value(15, 'm');
     }
 
+    // ── QMT status updates: Check Out, Confirm, Confirm Dispatch ────────────
+    // Mirrors the write made by handleUpdateStatus (status + appended history
+    // entry + optional _omsEditedAt stamp). Must match isQmtAllowedStatusUpdate
+    // in src/App.jsx.
+    function historyOnlyAppended() {
+      let before = resource.data.get('history', []);
+      let after = request.resource.data.get('history', []);
+      return after.size() == before.size() + 1
+        && after[0:before.size()] == before;
+    }
+
+    function omsStampOk(keys) {
+      return !('_omsEditedAt' in keys)
+        || request.resource.data._omsEditedAt == request.time;
+    }
+
+    // Enter the Order ID and mark Check Out as Completed (status stays Pending).
+    function qmtChecksOutOrder() {
+      let keys = request.resource.data.diff(resource.data).affectedKeys();
+      return resource.data.get('status', '') == 'Pending'
+        && request.resource.data.get('status', '') == 'Pending'
+        && resource.data.get('checkOutStatus', '') != 'Completed'
+        && keys.hasOnly(['merchantOrderId', 'checkOutStatus', 'history', '_omsEditedAt'])
+        && (!('checkOutStatus' in keys) || request.resource.data.checkOutStatus == 'Completed')
+        && historyOnlyAppended()
+        && omsStampOk(keys);
+    }
+
+    // Confirm a checked-out Pending order (Pending → Confirmed only).
+    function qmtConfirmsOrder() {
+      let keys = request.resource.data.diff(resource.data).affectedKeys();
+      return resource.data.get('status', '') == 'Pending'
+        && request.resource.data.get('status', '') == 'Confirmed'
+        && resource.data.get('checkOutStatus', '') == 'Completed'
+        && keys.hasOnly(['status', 'history', '_omsEditedAt'])
+        && historyOnlyAppended()
+        && omsStampOk(keys);
+    }
+
+    // Dispatch Info "Confirm Dispatch" (Confirmed/Exchanged → Dispatched only).
+    function qmtDispatchesOrder() {
+      let keys = request.resource.data.diff(resource.data).affectedKeys();
+      return resource.data.get('status', '') in ['Confirmed', 'Exchanged']
+        && request.resource.data.get('status', '') == 'Dispatched'
+        && keys.hasOnly(['status', 'history', '_omsEditedAt'])
+        && historyOnlyAppended()
+        && omsStampOk(keys);
+    }
+
+    // Tracking ID / Customer Remarks / Dispatch remark on any page: one text
+    // field changes, status stays the same.
+    function qmtEditsNoteField() {
+      let keys = request.resource.data.diff(resource.data).affectedKeys();
+      let noteKeys = keys.difference(['history', '_omsEditedAt'].toSet());
+      return request.resource.data.get('status', '') == resource.data.get('status', '')
+        && noteKeys.size() == 1
+        && noteKeys.hasOnly(['trackingId', 'remarks', 'dispatchRemark'])
+        && (!('trackingId' in noteKeys) || request.resource.data.trackingId is string)
+        && (!('remarks' in noteKeys) || request.resource.data.remarks is string)
+        && (!('dispatchRemark' in noteKeys) || request.resource.data.dispatchRemark is string)
+        && historyOnlyAppended()
+        && omsStampOk(keys);
+    }
+
+    // Primary Orders Call Log: toggle attempt 1/2/3 (with its remark/date and
+    // the latest call note). Status stays the same; exactly one attempt changes.
+    function qmtLogsCallAttempt() {
+      let keys = request.resource.data.diff(resource.data).affectedKeys();
+      let d = request.resource.data;
+      let attempts = d.get('callAttempts', {});
+      return resource.data.get('status', '') in ['Pending', 'Cancelled']
+        && d.get('status', '') == resource.data.get('status', '')
+        && 'callAttempts' in keys
+        && keys.hasOnly(['callAttempts', 'callNote', 'history', '_omsEditedAt',
+                         'attempt1Remark', 'attempt1Date', 'attempt2Remark', 'attempt2Date',
+                         'attempt3Remark', 'attempt3Date'])
+        && attempts is map
+        && attempts.keys().hasOnly(['attempt1', 'attempt2', 'attempt3'])
+        && attempts.diff(resource.data.get('callAttempts', {})).affectedKeys().size() == 1
+        && (!('attempt1' in attempts) || attempts.attempt1 is bool)
+        && (!('attempt2' in attempts) || attempts.attempt2 is bool)
+        && (!('attempt3' in attempts) || attempts.attempt3 is bool)
+        && (!('callNote' in keys) || d.callNote is string)
+        && (!('attempt1Remark' in keys) || d.attempt1Remark is string)
+        && (!('attempt1Date' in keys) || d.attempt1Date is string)
+        && (!('attempt2Remark' in keys) || d.attempt2Remark is string)
+        && (!('attempt2Date' in keys) || d.attempt2Date is string)
+        && (!('attempt3Remark' in keys) || d.attempt3Remark is string)
+        && (!('attempt3Date' in keys) || d.attempt3Date is string)
+        && historyOnlyAppended()
+        && omsStampOk(keys);
+    }
+
     // Order creation deducts stock (updateInventoryStock). QMT may only change
     // stock quantity fields; totalStock may only go down. Per-size `stock` map
     // values cannot be compared key-by-key in rules, so only the shape is
@@ -79,7 +172,9 @@ service cloud.firestore {
     match /artifacts/{appId}/public/data/orders/{orderId} {
       allow read: if hasAnyRole();
       allow create: if hasFullAccess() || (isQmt() && qmtCanCreateOrder());
-      allow update: if hasFullAccess() || (isQmt() && qmtSetsOwnWooId());
+      allow update: if hasFullAccess()
+        || (isQmt() && (qmtSetsOwnWooId() || qmtChecksOutOrder() || qmtConfirmsOrder()
+                        || qmtDispatchesOrder() || qmtEditsNoteField() || qmtLogsCallAttempt()));
       allow delete: if hasFullAccess();
     }
 

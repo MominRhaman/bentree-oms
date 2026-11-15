@@ -420,7 +420,6 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                                             <input
                                                 className="border border-slate-300 rounded px-2 py-1 text-xs w-32 focus:ring-1 focus:ring-emerald-500"
                                                 placeholder="Enter ID"
-                                                disabled={isQMTUser}
                                                 defaultValue={order.trackingId || ''}
                                                 onClick={(e) => e.stopPropagation()}
                                                 onBlur={(e) => onUpdate(order.id, order.status, { trackingId: e.target.value })}
@@ -430,7 +429,6 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                                         <td className="p-3">
                                             <input
                                                 className="border rounded px-2 py-1 text-xs w-full focus:ring-1 focus:ring-emerald-500 outline-none"
-                                                disabled={isQMTUser}
                                                 defaultValue={order.remarks || ''}
                                                 onClick={(e) => e.stopPropagation()}
                                                 onBlur={(e) => onUpdate(order.id, order.status, { remarks: e.target.value })}
