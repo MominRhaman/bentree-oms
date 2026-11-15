@@ -15,6 +15,35 @@ export const GOOGLE_ACCOUNTS = {
 // functions/accounts.js. They are verified by the credentialLogin Cloud
 // Function, so passwords and roles can't be read or changed from the browser.
 
+// --- Employee date window ---
+// Employee accounts may only see the current calendar month plus the two before
+// it (a rolling calendar-month window, not 90 days), e.g. in November 2026:
+// 2026-09-01 → today. Computed in Bangladesh time (UTC+6, no DST) so it matches
+// employeeWindowStart() in firestore.rules regardless of the browser's timezone.
+const BD_OFFSET_MS = 6 * 60 * 60 * 1000;
+const toYmd = (y, m, d) => new Date(Date.UTC(y, m, d)).toISOString().slice(0, 10);
+
+export const getEmployeeDateWindow = (now = new Date()) => {
+    const bd = new Date(now.getTime() + BD_OFFSET_MS);
+    const y = bd.getUTCFullYear();
+    const m = bd.getUTCMonth();
+    return {
+        minDate: toYmd(y, m - 2, 1),        // earliest selectable date (YYYY-MM-DD)
+        maxDate: toYmd(y, m, bd.getUTCDate()), // today (YYYY-MM-DD)
+        monthStart: toYmd(y, m, 1),         // first day of the current month
+        // minDate 00:00 Bangladesh time as an absolute instant (Firestore query bound)
+        startInstant: new Date(Date.UTC(y, m - 2, 1) - BD_OFFSET_MS),
+    };
+};
+
+// Keeps a YYYY-MM-DD value inside the window (empty stays empty)
+export const clampToDateWindow = (value, dateWindow) => {
+    if (!value) return value;
+    if (value < dateWindow.minDate) return dateWindow.minDate;
+    if (value > dateWindow.maxDate) return dateWindow.maxDate;
+    return value;
+};
+
 // --- Constants ---
 export const INVENTORY_CATEGORIES = [
     'Panjabi', 'Casual Shirt', 'Formal Shirt', 'Cuban Collar Shirt',

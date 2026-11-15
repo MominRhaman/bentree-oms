@@ -200,7 +200,12 @@ function buildAllMovements(orders, adjustments, inventoryMap) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-const SalesInventoryReport = ({ orders, inventory, adjustments }) => {
+const SalesInventoryReport = ({ orders, inventory, adjustments, userRole }) => {
+    // Employee accounts only get the Today / This Month periods (no Custom range, no All Time)
+    const isEmployeeUser = String(userRole || '').trim().toLowerCase() === 'employee';
+    const visiblePeriods = isEmployeeUser ? PERIODS.filter(p => p.id !== 'custom') : PERIODS;
+    const defaultDetailPeriod = isEmployeeUser ? 'month' : 'all';
+
     // Shared filter state
     const [period,         setPeriod]         = useState('today');
     const [customStart,    setCustomStart]    = useState('');
@@ -519,7 +524,7 @@ const SalesInventoryReport = ({ orders, inventory, adjustments }) => {
                 {/* Shared filters */}
                 <div className="mt-4 flex flex-wrap gap-3 items-center">
                     <div className="flex gap-0.5 bg-slate-100 p-1 rounded-lg">
-                        {PERIODS.map(p => (
+                        {visiblePeriods.map(p => (
                             <button key={p.id} onClick={() => setPeriod(p.id)}
                                 className={`px-3 py-1.5 text-xs font-bold rounded-md transition-colors ${period === p.id ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
                                 {p.label}
@@ -630,7 +635,7 @@ const SalesInventoryReport = ({ orders, inventory, adjustments }) => {
                                         </td>
                                         <td className="p-3 text-center">
                                             <button
-                                                onClick={() => { setSelected(row); setDetailTab('sales'); setDetailPeriod('all'); }}
+                                                onClick={() => { setSelected(row); setDetailTab('sales'); setDetailPeriod(defaultDetailPeriod); }}
                                                 className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-2 py-1 rounded-lg transition-colors"
                                             >
                                                 View <ChevronRight size={13} />
@@ -684,7 +689,7 @@ const SalesInventoryReport = ({ orders, inventory, adjustments }) => {
                                         </td>
                                         <td className="p-3 text-center">
                                             <button
-                                                onClick={() => { setSelected({ code: g.code, productName: g.productName }); setDetailTab('movement'); setDetailPeriod('all'); }}
+                                                onClick={() => { setSelected({ code: g.code, productName: g.productName }); setDetailTab('movement'); setDetailPeriod(defaultDetailPeriod); }}
                                                 className="inline-flex items-center gap-1 text-xs font-bold text-purple-600 hover:text-purple-800 hover:bg-purple-50 px-2 py-1 rounded-lg transition-colors"
                                             >
                                                 View <ChevronRight size={13} />
@@ -803,10 +808,12 @@ const SalesInventoryReport = ({ orders, inventory, adjustments }) => {
                         <div className="flex flex-wrap items-center gap-2 px-5 py-2.5 border-b bg-white flex-shrink-0">
                             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Period:</span>
                             <div className="flex gap-0.5 bg-slate-100 p-0.5 rounded-lg">
-                                <button onClick={() => setDetailPeriod('all')} className={`px-2.5 py-1 text-xs font-bold rounded-md transition-colors ${detailPeriod === 'all' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>
-                                    All Time
-                                </button>
-                                {PERIODS.map(p => (
+                                {!isEmployeeUser && (
+                                    <button onClick={() => setDetailPeriod('all')} className={`px-2.5 py-1 text-xs font-bold rounded-md transition-colors ${detailPeriod === 'all' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>
+                                        All Time
+                                    </button>
+                                )}
+                                {visiblePeriods.map(p => (
                                     <button key={p.id} onClick={() => setDetailPeriod(p.id)} className={`px-2.5 py-1 text-xs font-bold rounded-md transition-colors ${detailPeriod === p.id ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>
                                         {p.label}
                                     </button>

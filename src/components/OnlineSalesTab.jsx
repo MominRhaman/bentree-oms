@@ -2,11 +2,15 @@ import React, { useState, useMemo } from 'react';
 import { Download, Filter, Edit, Trash2 } from 'lucide-react';
 import SearchBar from './SearchBar';
 import OrderDetailsPopup from './OrderDetailsPopup';
-import { INVENTORY_CATEGORIES, downloadCSV } from '../utils';
+import { INVENTORY_CATEGORIES, downloadCSV, getEmployeeDateWindow, clampToDateWindow } from '../utils';
 
 const OnlineSalesTab = ({ orders, inventory, onEdit, onCreate, onDelete, userRole }) => {
     // QMT accounts can only view these orders — edit and delete are locked
     const isQMTUser = String(userRole || '').trim().toLowerCase() === 'qmt';
+    // Employee accounts: date search limited to the last 3 calendar months, and the
+    // footer defaults to month-to-date when no date range is selected.
+    const isEmployeeUser = String(userRole || '').trim().toLowerCase() === 'employee';
+    const dateWindow = useMemo(() => getEmployeeDateWindow(), []);
     const [searchTerm, setSearchTerm] = useState('');
     const [catFilter, setCatFilter] = useState('');
     const [startDate, setStartDate] = useState('');
@@ -34,10 +38,14 @@ const OnlineSalesTab = ({ orders, inventory, onEdit, onCreate, onDelete, userRol
         const data = [];
         const uniqueOrderIds = new Set();
 
+        // Employee with no date range selected → footer covers month-to-date only
+        const useMonthToDate = isEmployeeUser && !startDate && !endDate;
+        const inFooterPeriod = (d) => !useMonthToDate || (!!d && d >= dateWindow.monthStart && d <= dateWindow.maxDate);
+
         filtered.forEach(order => {
             // STRICT FILTER: Only 'Delivered' ONLINE orders
             if (order.type !== 'Online' || order.status !== 'Delivered') return;
-            uniqueOrderIds.add(order.id);
+            if (inFooterPeriod(order.date)) uniqueOrderIds.add(order.id);
 
             const orderId = order.merchantOrderId;
             const salesBy = order.orderSource;
@@ -84,7 +92,7 @@ const OnlineSalesTab = ({ orders, inventory, onEdit, onCreate, onDelete, userRol
         });
 
         // Calculate Footer Totals
-        const totalStats = data.reduce((acc, row) => ({
+        const totalStats = data.filter(row => inFooterPeriod(row.date)).reduce((acc, row) => ({
             unitSold: acc.unitSold + row.unitSold,
             revenue: acc.revenue + row.revenue,
             profitLoss: acc.profitLoss + row.profitLoss
@@ -93,7 +101,12 @@ const OnlineSalesTab = ({ orders, inventory, onEdit, onCreate, onDelete, userRol
         totalStats.orderCount = uniqueOrderIds.size;
 
         return { salesData: data, totals: totalStats };
-    }, [orders, inventory, startDate, endDate, searchTerm, catFilter]);
+    }, [orders, inventory, startDate, endDate, searchTerm, catFilter, isEmployeeUser, dateWindow]);
+
+    // Employee: keep typed/picked dates inside the 3-month window
+    const handleDateInput = (e, setter) => {
+        setter(isEmployeeUser ? clampToDateWindow(e.target.value, dateWindow) : e.target.value);
+    };
 
     const handleExport = () => {
         const csvData = salesData.map(row => ({
@@ -135,9 +148,9 @@ const OnlineSalesTab = ({ orders, inventory, onEdit, onCreate, onDelete, userRol
                         </div>
 
                         <div className="flex items-center gap-2 bg-white border rounded p-2 w-full md:w-auto">
-                            <input type="date" className="bg-transparent text-sm w-full outline-none" value={startDate} onChange={e => setStartDate(e.target.value)} />
+                            <input type="date" className="bg-transparent text-sm w-full outline-none" value={startDate} min={isEmployeeUser ? dateWindow.minDate : undefined} max={isEmployeeUser ? dateWindow.maxDate : undefined} onChange={e => handleDateInput(e, setStartDate)} />
                             <span className="text-slate-300">-</span>
-                            <input type="date" className="bg-transparent text-sm w-full outline-none" value={endDate} onChange={e => setEndDate(e.target.value)} />
+                            <input type="date" className="bg-transparent text-sm w-full outline-none" value={endDate} min={isEmployeeUser ? dateWindow.minDate : undefined} max={isEmployeeUser ? dateWindow.maxDate : undefined} onChange={e => handleDateInput(e, setEndDate)} />
                         </div>
 
                         <button onClick={handleExport} className="flex items-center justify-center gap-2 text-emerald-600 font-bold bg-white border rounded p-2 w-full md:w-auto hover:bg-emerald-50">

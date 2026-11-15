@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Download, Filter, Edit, Trash2, CheckCircle, ShoppingBag, XCircle, Search, CreditCard } from 'lucide-react';
 import SearchBar from './SearchBar';
 import OrderDetailsPopup from './OrderDetailsPopup';
-import { INVENTORY_CATEGORIES, downloadCSV } from '../utils';
+import { INVENTORY_CATEGORIES, downloadCSV, getEmployeeDateWindow, clampToDateWindow } from '../utils';
 
 const CANCEL_ORDER_CONFIRM = 'Cancel this Store Order? Stock will be restored and recorded in Movement Log.';
 const PAYMENT_MODES = ['Cash', 'Card', 'bKash', 'Nagad', 'MFS', 'Bank Transfer'];
@@ -10,6 +10,10 @@ const PAYMENT_MODES = ['Cash', 'Card', 'bKash', 'Nagad', 'MFS', 'Bank Transfer']
 const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete, userRole }) => {
     // QMT accounts can only view store orders — checkout, payment, cancel and delete are locked
     const isQMTUser = String(userRole || '').trim().toLowerCase() === 'qmt';
+    // Employee accounts: date search limited to the last 3 calendar months, and the
+    // footer defaults to month-to-date when no date range is selected.
+    const isEmployeeUser = String(userRole || '').trim().toLowerCase() === 'employee';
+    const dateWindow = useMemo(() => getEmployeeDateWindow(), []);
     // --- States ---
     const [isCheckoutMode, setIsCheckoutMode] = useState(false);
     const [checkoutSearch, setCheckoutSearch] = useState('');
@@ -78,10 +82,14 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
             );
         }
 
+        // Employee with no date range selected → footer covers month-to-date only
+        const useMonthToDate = isEmployeeUser && !startDate && !endDate;
+        const inFooterPeriod = (d) => !useMonthToDate || (!!d && d >= dateWindow.monthStart && d <= dateWindow.maxDate);
+
         const data = [];
         const uniqueOrderIds = new Set();
         processedOrders.forEach(order => {
-            uniqueOrderIds.add(order.id);
+            if (inFooterPeriod(order.date)) uniqueOrderIds.add(order.id);
             const orderId = order.storeOrderId;
             const paymentMode = order.storePaymentMode || 'Cash';
             const addedBy = order.addedBy || 'System';
@@ -134,7 +142,7 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
             });
         });
 
-        const totals = data.reduce((acc, row) => ({
+        const totals = data.filter(row => inFooterPeriod(row.date)).reduce((acc, row) => ({
             unitSold: acc.unitSold + row.unitSold,
             revenue: acc.revenue + row.revenue,
             displayRevenue: acc.displayRevenue + row.displayRevenue,
@@ -144,7 +152,12 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
         totals.orderCount = uniqueOrderIds.size;
 
         return { salesData: data, totals };
-    }, [orders, inventory, startDate, endDate, searchTerm, catFilter, paymentFilter, dueFilter, isCheckoutMode]);
+    }, [orders, inventory, startDate, endDate, searchTerm, catFilter, paymentFilter, dueFilter, isCheckoutMode, isEmployeeUser, dateWindow]);
+
+    // Employee: keep typed/picked dates inside the 3-month window
+    const handleDateInput = (e, setter) => {
+        setter(isEmployeeUser ? clampToDateWindow(e.target.value, dateWindow) : e.target.value);
+    };
 
     // --- Input Handlers (Primary Order Style) ---
     const handleIdChange = (orderId, value) => {
@@ -386,9 +399,9 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
                         </div>
                         <div className="flex flex-col md:flex-row gap-2 w-full md:w-auto">
                             <div className="flex items-center bg-white border rounded px-2 py-1 gap-2 w-full md:w-auto justify-between md:justify-start">
-                                <input type="date" className="text-xs outline-none text-slate-600 bg-transparent cursor-pointer" value={startDate} onChange={e => setStartDate(e.target.value)} />
+                                <input type="date" className="text-xs outline-none text-slate-600 bg-transparent cursor-pointer" value={startDate} min={isEmployeeUser ? dateWindow.minDate : undefined} max={isEmployeeUser ? dateWindow.maxDate : undefined} onChange={e => handleDateInput(e, setStartDate)} />
                                 <span className="text-slate-300">-</span>
-                                <input type="date" className="text-xs outline-none text-slate-600 bg-transparent cursor-pointer" value={endDate} onChange={e => setEndDate(e.target.value)} />
+                                <input type="date" className="text-xs outline-none text-slate-600 bg-transparent cursor-pointer" value={endDate} min={isEmployeeUser ? dateWindow.minDate : undefined} max={isEmployeeUser ? dateWindow.maxDate : undefined} onChange={e => handleDateInput(e, setEndDate)} />
                             </div>
                             <button onClick={handleExport} className="flex items-center justify-center gap-1 text-emerald-600 bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded text-sm font-medium transition-colors w-full md:w-auto">
                                 <Download size={16} /> Export

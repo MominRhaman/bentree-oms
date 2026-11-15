@@ -168,9 +168,26 @@ service cloud.firestore {
         && d.get('change', 0) < 0;
     }
 
+    // ── Employee: orders from the last 3 calendar months only ───────────────
+    // Rolling calendar-month window in Bangladesh time (UTC+6, no DST):
+    // in November 2026 the window starts 2026-09-01 00:00 BD time. Must match
+    // getEmployeeDateWindow() in src/utils.js (the app's query uses the same bound).
+    function employeeWindowStart() {
+      let bdNow = request.time + duration.value(6, 'h');
+      let y = bdNow.year();
+      let m = bdNow.month();
+      return (m > 2 ? timestamp.date(y, m - 2, 1) : timestamp.date(y - 1, m + 10, 1))
+        - duration.value(6, 'h');
+    }
+
+    function canReadOrder() {
+      return role() in ['master', 'qmt']
+        || (role() == 'employee' && resource.data.createdAt >= employeeWindowStart());
+    }
+
     // ── Bentree OMS data ────────────────────────────────────────────────────
     match /artifacts/{appId}/public/data/orders/{orderId} {
-      allow read: if hasAnyRole();
+      allow read: if canReadOrder();
       allow create: if hasFullAccess() || (isQmt() && qmtCanCreateOrder());
       allow update: if hasFullAccess()
         || (isQmt() && (qmtSetsOwnWooId() || qmtChecksOutOrder() || qmtConfirmsOrder()
@@ -191,14 +208,17 @@ service cloud.firestore {
     }
 
     // locations, expenses and any other OMS collection: QMT read-only.
+    // Orders are excluded from this read rule so the employee window above
+    // can't be bypassed (rules for the same path are OR-ed together).
     match /artifacts/{appId}/public/data/{collection}/{docId} {
-      allow read: if hasAnyRole();
+      allow read: if hasAnyRole() && collection != 'orders';
       allow write: if hasFullAccess();
     }
 
-    // Everything else keeps Master/Employee full access (as before).
-    match /{document=**} {
-      allow read, write: if hasFullAccess();
+    // Everything outside /artifacts keeps Master/Employee full access (as before).
+    // /artifacts is fully covered by the rules above.
+    match /{top}/{document=**} {
+      allow read, write: if hasFullAccess() && top != 'artifacts';
     }
   }
 }

@@ -3,9 +3,13 @@ import { Calendar, Download, AlertTriangle, CheckCircle, ArrowRightLeft, PauseCi
 import OrderDetailsPopup from './OrderDetailsPopup';
 import SearchBar from './SearchBar';
 import ExchangeModal from './ExchangeModal';
-import { getStatusColor, downloadCSV } from '../utils';
+import { getStatusColor, downloadCSV, getEmployeeDateWindow, clampToDateWindow } from '../utils';
 
 const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDelete, inventory, userRole }) => {
+    // Employee accounts: date search limited to the last 3 calendar months, and the
+    // footer defaults to month-to-date when no date range is selected.
+    const isEmployeeUser = String(userRole || '').trim().toLowerCase() === 'employee';
+    const dateWindow = useMemo(() => getEmployeeDateWindow(), []);
     // --- States ---
     const [startDate, setStartDate] = useState(''); // NEW: Start Date State
     const [endDate, setEndDate] = useState('');
@@ -101,12 +105,16 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
     }, [orders, startDate, endDate, searchTerm, filterStatus]);
 
     const footerStats = useMemo(() => {
-        const totalOrders = filteredOrders.length;
-        const totalAmountExDelivery = filteredOrders.reduce((sum, o) => {
+        // Employee with no date range selected → month-to-date (same eligibility rules)
+        const footerOrders = (isEmployeeUser && !startDate && !endDate)
+            ? filteredOrders.filter(o => o.date && o.date >= dateWindow.monthStart && o.date <= dateWindow.maxDate)
+            : filteredOrders;
+        const totalOrders = footerOrders.length;
+        const totalAmountExDelivery = footerOrders.reduce((sum, o) => {
             return sum + (Number(o.grandTotal || 0) - Number(o.deliveryCharge || 0) + Number(o.revenueAdjustment || 0));
         }, 0);
         return { totalOrders, totalAmountExDelivery };
-    }, [filteredOrders]);
+    }, [filteredOrders, isEmployeeUser, startDate, endDate, dateWindow]);
 
     // --- Pagination ---
     const PAGE_SIZE = 50;
@@ -122,6 +130,17 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
     const setFilterStatusAndReset = useCallback((v) => { setFilterStatus(v); setCurrentPage(0); }, []);
     const setStartDateAndReset = useCallback((v) => { setStartDate(v); setCurrentPage(0); }, []);
     const setEndDateAndReset = useCallback((v) => { setEndDate(v); setCurrentPage(0); }, []);
+
+    // Employee: keep typed/picked dates inside the 3-month window
+    const handleDateInput = (e, setter) => {
+        if (isEmployeeUser) {
+            const clamped = clampToDateWindow(e.target.value, dateWindow);
+            if (clamped !== e.target.value) e.target.value = clamped;
+            setter(clamped);
+        } else {
+            setter(e.target.value);
+        }
+    };
 
     // --- Handlers ---
     const handleExport = () => {
@@ -237,11 +256,11 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                     {/* Updated Date Range Filter UI */}
                     <div className="flex items-center gap-2 bg-white border rounded p-2 w-full md:w-auto">
                         <Calendar size={18} className="text-slate-500" />
-                        <input type="date" className="bg-transparent text-sm w-full outline-none" onChange={(e) => setStartDateAndReset(e.target.value)} />
+                        <input type="date" className="bg-transparent text-sm w-full outline-none" min={isEmployeeUser ? dateWindow.minDate : undefined} max={isEmployeeUser ? dateWindow.maxDate : undefined} onChange={(e) => handleDateInput(e, setStartDateAndReset)} />
                     </div>
                     <div className="flex items-center gap-2 bg-white border rounded p-2 w-full md:w-auto">
                         <Calendar size={18} className="text-slate-500" />
-                        <input type="date" className="bg-transparent text-sm w-full outline-none" onChange={(e) => setEndDateAndReset(e.target.value)} />
+                        <input type="date" className="bg-transparent text-sm w-full outline-none" min={isEmployeeUser ? dateWindow.minDate : undefined} max={isEmployeeUser ? dateWindow.maxDate : undefined} onChange={(e) => handleDateInput(e, setEndDateAndReset)} />
                     </div>
                     
                     <select className="p-2 border rounded text-sm bg-white w-full md:w-auto" value={filterStatus} onChange={(e) => setFilterStatusAndReset(e.target.value)}>

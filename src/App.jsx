@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { collection, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, arrayUnion, addDoc, query, orderBy, limit } from 'firebase/firestore';
+import { collection, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, arrayUnion, addDoc, query, orderBy, limit, where } from 'firebase/firestore';
 import { auth, db, appId } from './firebase';
-import { getStatusColor, updateInventoryStock, computeStockBefores, logInventoryMovement, GOOGLE_ACCOUNTS } from './utils';
+import { getStatusColor, updateInventoryStock, computeStockBefores, logInventoryMovement, GOOGLE_ACCOUNTS, getEmployeeDateWindow } from './utils';
 import { adjustWooStock, wooUpdateOrder, wooSyncOrder } from './WooAPI/wooStock';
 import { useScanner } from './hooks/useScanner';
 import { Menu } from 'lucide-react';
@@ -197,12 +197,24 @@ function App() {
 
     // --- 4. Real-time Data Listeners ---
     useEffect(() => {
-        if (!user) return;
+        if (!user || !userRole) return;
         const handleSnapshotError = (err) => console.error("Firestore Error:", err);
 
-        const unsubOrders = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), (snap) => {
-            const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-            data.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+        // Employee accounts only load orders from the last 3 calendar months.
+        // Firestore rules (employeeWindowStart) reject any wider read.
+        const ordersCol = collection(db, 'artifacts', appId, 'public', 'data', 'orders');
+        const ordersSource = userRole === 'employee'
+            ? query(ordersCol, where('createdAt', '>=', getEmployeeDateWindow().startInstant))
+            : ordersCol;
+
+        const unsubOrders = onSnapshot(ordersSource, (snap) => {
+            // 'estimate' gives a just-created order (serverTimestamp still pending) its
+            // local time instead of null, so it sorts to the top immediately.
+            const data = snap.docs.map(d => ({ id: d.id, ...d.data({ serverTimestamps: 'estimate' }) }));
+            data.sort((a, b) =>
+                ((b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)) ||
+                ((b.createdAt?.nanoseconds || 0) - (a.createdAt?.nanoseconds || 0))
+            );
             setOrders(data);
             setIsDataReceived(true);
         }, handleSnapshotError);
@@ -220,7 +232,7 @@ function App() {
         const unsubAdj = onSnapshot(adjQuery, (snap) => setInventoryAdjustments(snap.docs.map(d => ({ id: d.id, ...d.data() }))), handleSnapshotError);
 
         return () => { unsubOrders(); unsubInv(); unsubLoc(); unsubExp(); unsubAdj(); };
-    }, [user]);
+    }, [user, userRole]);
 
     // --- ONE-TIME INITIAL STOCK MIGRATION ---
     // Runs once per session. Sets initialStock + initialStockDate on any existing
@@ -904,7 +916,7 @@ function App() {
             case 'exchange': return <ExchangeTab orders={exchangeOrders} onCreate={handleCreateOrder} onEdit={handleEditOrderWithStock} inventory={inventory} userRole={userRole} />;
             case 'cancelled': return <CancelledOrders orders={cancelledReturnedOrders} onUpdate={handleUpdateStatus} onDelete={handleDeleteOrder} onEdit={handleEditOrderWithStock} onCreate={handleCreateOrder} inventory={inventory} userRole={userRole} />;
             case 'online-sales': return <OnlineSalesTab {...orderProps} userRole={userRole} />;
-            case 'sales-inventory-report': return <SalesInventoryReport orders={orders} inventory={inventory} adjustments={inventoryAdjustments} />;
+            case 'sales-inventory-report': return userRole !== 'qmt' ? <SalesInventoryReport orders={orders} inventory={inventory} adjustments={inventoryAdjustments} userRole={userRole} /> : <div className="p-10 text-center text-slate-400">Access denied.</div>;
             case 'reports': return userRole === 'master' ? <SalesReports {...orderProps} /> : <div className="p-10 text-center text-slate-400">Master access required.</div>;
             case 'barcodePrintView': return ( <BarcodePrintView items={barcodePrintQueue} onClose={handleBarcodeClose} /> );
             default: return <div className="p-10 text-center">Invalid Tab Selected</div>;

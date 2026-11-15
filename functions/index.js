@@ -393,8 +393,12 @@ function mapWooOrder(data) {
     specialInstructions: data.customer_note || "",
     remarks: "",
     date: dateStr,
-    createdAt: data.date_created ?
-      new Date(data.date_created) : new Date(),
+    // date_created is the store's local time without an offset (Bangladesh,
+    // UTC+6), so parsing it on the UTC server put orders 6 hours in the future
+    // and above newer OMS orders. date_created_gmt + "Z" is the real instant.
+    createdAt: data.date_created_gmt ?
+      new Date(data.date_created_gmt + "Z") :
+      data.date_created ? new Date(data.date_created) : new Date(),
     updatedAt: new Date(),
   };
 }
