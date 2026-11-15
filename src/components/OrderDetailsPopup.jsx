@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { X, Edit2, Save, Trash2, Printer, MapPin, User, Package, Plus, Clock, RefreshCw, AlertTriangle, RotateCcw, CheckCircle, Eye, Zap, ArrowLeft } from 'lucide-react';
+import { X, Edit2, Save, Trash2, Printer, MapPin, User, Package, Plus, Clock, RefreshCw, AlertTriangle, RotateCcw, CheckCircle, Eye, Zap, ArrowLeft, Globe } from 'lucide-react';
 import { disableScroll } from '../utils';
 import InvoiceGenerator from './InvoiceGenerator';
+import { wooPushOrder } from '../WooAPI/wooStock';
 
 const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, inventory = [], isReturnMode = false }) => {
     const [isEditing, setIsEditing] = useState(isReturnMode);
@@ -22,6 +23,10 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
     // --- State for Partial Return Preview Modal ---
     const [showPartialReturnModal, setShowPartialReturnModal] = useState(false);
     const [partialReturnPreview, setPartialReturnPreview] = useState(null);
+
+    // --- State for "Push to Website" (result of the latest push in this popup) ---
+    const [isPushing, setIsPushing] = useState(false);
+    const [pushResult, setPushResult] = useState(null);
 
     // Sync state when order opens
     useEffect(() => {
@@ -483,6 +488,32 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
         }
     };
 
+    // Push this order to the website. The server checks for an existing website
+    // order first, and never changes website or OMS stock.
+    const handlePushToWebsite = async () => {
+        if (isPushing) return;
+        const pushNote = order.wc_order_id
+            ? `Website order #${order.wc_order_id} is linked. If it no longer exists on the website, a new website order will be created.`
+            : 'A new website order will be created.';
+        if (!window.confirm(`Push this order to the website?\n\n${pushNote}\nStock will not change.`)) return;
+        setIsPushing(true);
+        try {
+            const res = await wooPushOrder(order.id);
+            const warn = (res.warnings || []).length ? `\n\nWarnings:\n- ${res.warnings.join('\n- ')}` : '';
+            const text = res.result === 'exists'
+                ? `Already on the website as order #${res.wcOrderId}. No new order was created.`
+                : `Pushed to the website as order #${res.wcOrderId}.`;
+            setPushResult({ type: res.result, text });
+            alert(text + warn);
+        } catch (err) {
+            const text = `Push failed: ${err?.message || err}`;
+            setPushResult({ type: 'failed', text });
+            alert(`${text}\n\nYou can try again.`);
+        } finally {
+            setIsPushing(false);
+        }
+    };
+
     const handleReorder = () => {
         if (!confirm("Are you sure you want to Reorder?")) return;
         const reorderUpdate = {
@@ -585,6 +616,23 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                                         Original Order: #{order.originalOrderId}
                                     </p>
                                 )}
+                                {(() => {
+                                    // Website push status: this popup's latest result, else the saved one.
+                                    const saved = order.wcPush;
+                                    const shown = pushResult || (saved?.status === 'failed'
+                                        ? { type: 'failed', text: `Push failed: ${saved.error || 'Unknown error'}` }
+                                        : saved?.status === 'pushed'
+                                            ? { type: 'pushed', text: `Pushed to website #${saved.wcOrderId}` }
+                                            : saved?.status === 'exists'
+                                                ? { type: 'exists', text: `Already on website #${saved.wcOrderId}` }
+                                                : null);
+                                    if (!shown) return null;
+                                    return (
+                                        <p className={`text-xs mt-1 ${shown.type === 'failed' ? 'text-red-600' : 'text-emerald-600'}`}>
+                                            {shown.text}
+                                        </p>
+                                    );
+                                })()}
                             </>
                         )}
                     </div>
@@ -968,6 +1016,17 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                                 >
                                     <CheckCircle size={18} />
                                     {safeStatus === 'Dispatched' ? 'Dispatched' : 'Mark Dispatched'}
+                                </button>
+                            )}
+                            {onEdit && !isReturnMode && order.id && (
+                                <button
+                                    className={`flex-1 py-2 text-white font-bold rounded shadow flex items-center justify-center gap-2 transition-all ${isPushing ? 'bg-slate-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
+                                    disabled={isPushing}
+                                    onClick={handlePushToWebsite}
+                                    title="Push this order to the website without changing stock"
+                                >
+                                    <Globe size={18} />
+                                    {isPushing ? 'Pushing...' : (pushResult?.type === 'failed' || order.wcPush?.status === 'failed' ? 'Retry Push' : 'Push to Website')}
                                 </button>
                             )}
                             <button className="flex-1 py-2 bg-slate-800 text-white font-bold rounded flex justify-center items-center gap-2 hover:bg-slate-900 shadow-md" onClick={() => setShowInvoice(true)}>

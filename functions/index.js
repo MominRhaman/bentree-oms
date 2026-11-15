@@ -1095,6 +1095,358 @@ exports.wooSyncOrder = onCall(async (request) => {
   return {ok: true};
 });
 
+// ── wooPushOrder onCall ─────────────────────────────────────────────────────
+
+// OMS status → website status for a pushed order. Same targets the OMS
+// already uses: Online orders are created as "processing", Delivered/Completed
+// map to "completed", Cancelled/Returned map to "cancelled".
+const PUSH_WC_STATUS = {
+  "Pending": "processing",
+  "Confirmed": "processing",
+  "Dispatched": "processing",
+  "Exchanged": "processing",
+  "Hold": "on-hold",
+  "Delivered": "completed",
+  "Completed": "completed",
+  "Cancelled": "cancelled",
+  "Returned": "cancelled",
+};
+// WooCommerce reduces stock when an order enters one of these statuses.
+const WC_STOCK_HOLDING_STATUSES =
+  new Set(["processing", "completed", "on-hold"]);
+const PUSH_LOCK_MS = 120000;
+
+const phoneDigits = (s) => String(s || "").replace(/\D/g, "").slice(-10);
+
+/**
+ * True when a WooCommerce order is this OMS order: it carries our
+ * _oms_doc_id tag, or (orders created before pushing existed) the same
+ * customer phone number.
+ * @param {object} wc - WooCommerce order.
+ * @param {string} docId - OMS Firestore doc ID.
+ * @param {object} order - OMS order.
+ * @return {boolean}
+ */
+function isSameWooOrder(wc, docId, order) {
+  const tag = (wc.meta_data || []).find((m) => m.key === "_oms_doc_id");
+  if (tag) return String(tag.value) === docId;
+  const omsPhone = phoneDigits(order.recipientPhone);
+  const wcPhone = phoneDigits(
+      (wc.billing && wc.billing.phone) || (wc.shipping && wc.shipping.phone));
+  return !!omsPhone && omsPhone === wcPhone;
+}
+
+/**
+ * GET /orders/{id}. Returns null only when WooCommerce says the ID is not
+ * an order (deleted, or the ID now belongs to a product). Any other error
+ * is thrown so a push never creates a duplicate because of a network error.
+ * @param {object} api - axios WooCommerce instance.
+ * @param {number|string} wcId - WooCommerce order ID.
+ * @return {object|null}
+ */
+async function fetchWooOrderOrNull(api, wcId) {
+  try {
+    const {data} = await api.get(`/orders/${wcId}`);
+    return data && data.id ? data : null;
+  } catch (err) {
+    const httpCode = (err.response && err.response.status) || 0;
+    const code = (err.response && err.response.data &&
+      err.response.data.code) || "";
+    if ((httpCode === 404 || httpCode === 400) && /invalid_id/.test(code)) {
+      return null;
+    }
+    throw err;
+  }
+}
+
+/**
+ * Finds a website order created by an earlier, unfinished push of this OMS
+ * order (e.g. the POST succeeded but the response or the Firestore write
+ * failed). Scans orders created since that attempt for our _oms_doc_id tag.
+ * @param {object} api - axios WooCommerce instance.
+ * @param {string} docId - OMS Firestore doc ID.
+ * @param {Date} since - Start of the first unfinished attempt.
+ * @return {object|null}
+ */
+async function findPushedWooOrder(api, docId, since) {
+  const after = new Date(since.getTime() - 5 * 60000).toISOString();
+  for (let page = 1; page <= 10; page++) {
+    const {data} = await api.get("/orders", {
+      params: {
+        after, dates_are_gmt: true, status: "any",
+        per_page: 100, page, orderby: "date", order: "asc",
+      },
+    });
+    const hit = (data || []).find((wc) => (wc.meta_data || []).some(
+        (m) => m.key === "_oms_doc_id" && String(m.value) === docId));
+    if (hit) return hit;
+    if (!data || data.length < 100) return null;
+  }
+  return null;
+}
+
+/**
+ * Push an existing OMS order to the website (e.g. one that was removed from
+ * WooCommerce), without changing website or OMS inventory.
+ *
+ * Stock: the order is created with _order_stock_reduced=true, so
+ * WooCommerce's wc_maybe_reduce_stock_levels() skips it when the order moves
+ * to processing/completed/on-hold. Line items are added while the new order is
+ * still "pending", so the REST line-item stock adjustment doesn't run either.
+ * Each line item gets _reduced_stock=qty so later edits/cancels treat the order
+ * like any other website order that already holds its stock. Cancelled orders
+ * get neither flag, so WooCommerce has nothing to restore. OMS inventory is not
+ * touched; the order.created webhook is skipped via _oms_created.
+ *
+ * Duplicates: an order already on the website (by wc_order_id, or found from an
+ * earlier unfinished push) is linked instead of creating another one. A lock
+ * on the Firestore doc stops two pushes of the same order running at once.
+ */
+exports.wooPushOrder = onCall(async (request) => {
+  requireRole(request, FULL_ACCESS_ROLES, "push orders to the website");
+  const docId = String((request.data && request.data.orderId) || "");
+  if (!docId) throw new HttpsError("invalid-argument", "Missing order ID.");
+
+  const ref = ordersCol().doc(docId);
+  const pushedBy = (request.auth.token && (request.auth.token.name ||
+    request.auth.token.email)) || request.auth.uid;
+
+  // ── 1. Lock (one push at a time per order) ──────────────────────────
+  const order = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) {
+      throw new HttpsError("not-found", "Order not found in OMS.");
+    }
+    const data = snap.data();
+    const prev = data.wcPush || {};
+    const startedMs = prev.attemptStartedAt && prev.attemptStartedAt.toDate ?
+      prev.attemptStartedAt.toDate().getTime() : 0;
+    if (prev.status === "pushing" && Date.now() - startedMs < PUSH_LOCK_MS) {
+      throw new HttpsError("aborted",
+          "This order is already being pushed. Please wait a moment.");
+    }
+    tx.update(ref, {
+      "wcPush.status": "pushing",
+      "wcPush.attemptStartedAt": FieldValue.serverTimestamp(),
+      "wcPush.unresolvedSince": prev.unresolvedSince ||
+        FieldValue.serverTimestamp(),
+      "wcPush.error": null,
+      // Skip any webhook bounce-back while the push runs (guard 4c).
+      "_omsEditedAt": FieldValue.serverTimestamp(),
+    });
+    return {...data, wcPush: prev};
+  });
+
+  const api = makeWooApi();
+  const oldWcId = order.wc_order_id || null;
+
+  const finish = async (result, wc, extra = {}) => {
+    await ref.update({
+      "wc_order_id": wc.id,
+      "wcPush.status": result,
+      "wcPush.wcOrderId": wc.id,
+      "wcPush.previousWcOrderId": oldWcId && Number(oldWcId) !== wc.id ?
+        oldWcId : (order.wcPush.previousWcOrderId || null),
+      "wcPush.websiteTotal": Number(wc.total || 0),
+      "wcPush.pushedAt": FieldValue.serverTimestamp(),
+      "wcPush.pushedBy": pushedBy,
+      "wcPush.unresolvedSince": null,
+      "wcPush.error": null,
+      "_omsEditedAt": FieldValue.serverTimestamp(),
+    });
+    logger.info("wooPushOrder done", {docId, result, wcId: wc.id, oldWcId});
+    return {result, wcOrderId: wc.id, ...extra};
+  };
+
+  try {
+    // ── 2. Already on the website? ──────────────────────────────────
+    if (oldWcId) {
+      const wc = await fetchWooOrderOrNull(api, oldWcId);
+      if (wc && isSameWooOrder(wc, docId, order)) {
+        if (wc.status === "trash") {
+          throw new HttpsError("failed-precondition",
+              `Website order #${wc.id} is in the WooCommerce Trash. ` +
+              "Restore it from WooCommerce instead of pushing again.");
+        }
+        return await finish("exists", wc);
+      }
+      if (wc) {
+        logger.warn("wooPushOrder: wc_order_id belongs to another order",
+            {docId, oldWcId});
+      }
+    }
+    if (order.wcPush.unresolvedSince && order.wcPush.unresolvedSince.toDate) {
+      const wc = await findPushedWooOrder(
+          api, docId, order.wcPush.unresolvedSince.toDate());
+      if (wc) return await finish("exists", wc);
+    }
+
+    // ── 3. Build the website order from the OMS order ───────────────
+    const wcStatus = PUSH_WC_STATUS[order.status] || "processing";
+    const holdsStock = WC_STOCK_HOLDING_STATUSES.has(wcStatus);
+    const products = order.products || [];
+    if (products.length === 0) {
+      throw new HttpsError("failed-precondition", "Order has no products.");
+    }
+
+    // resolveWooLineItems treats any error as "SKU not found", so check the
+    // website is reachable first to report connection errors correctly.
+    await api.get("/orders", {params: {per_page: 1}});
+
+    const warnings = [];
+    const lineItems = [];
+    for (const p of products) {
+      const [li] = await resolveWooLineItems(api, [p]);
+      if (!li) {
+        const label = [p.code || "(no code)", p.size].filter(Boolean).join(" ");
+        throw new HttpsError("failed-precondition",
+            `Product ${label} was not found on the website.`);
+      }
+      if (p.size && !li.variation_id) {
+        warnings.push(`${p.code} ${p.size}: size not matched on the website`);
+      }
+      const qty = Number(p.qty || 0);
+      const base = Number(p.price || 0) * qty;
+      const dv = Number(p.discountValue || 0);
+      // Webhook orders store the line price after discount (mapWooOrder);
+      // OMS orders store the list price with the discount separate.
+      const fromWoo = order.source === "WooCommerce";
+      const itemDisc = p.discountType === "Fixed" ? dv : base * (dv / 100);
+      const subtotal = fromWoo ? base + dv : base;
+      const total = fromWoo ? base : base - itemDisc;
+      lineItems.push({
+        ...li,
+        quantity: qty,
+        subtotal: subtotal.toFixed(2),
+        total: Math.max(0, total).toFixed(2),
+        meta_data: holdsStock ? [{key: "_reduced_stock", value: qty}] : [],
+      });
+    }
+
+    const deliveryCharge = Number(order.deliveryCharge || 0);
+    const grandTotal = Number(order.grandTotal || 0);
+    const itemsTotal = lineItems.reduce((s, li) => s + Number(li.total), 0);
+    // Order-level discount / any OMS adjustment, so the website total
+    // matches the OMS grand total.
+    const adjust =
+      Math.round((grandTotal - itemsTotal - deliveryCharge) * 100) / 100;
+
+    const parts = (order.recipientName || "Walk-in Customer").trim().split(" ");
+    const firstName = parts[0] || "Walk-in";
+    const lastName = parts.slice(1).join(" ") || "Customer";
+
+    const PAY_METHOD_MAP = {
+      "Card": "stripe", "Bank Transfer": "bacs", "MFS": "bacs",
+    };
+    const PAY_TITLE_MAP = {
+      "Card": "Card Payment",
+      "Bank Transfer": "Bank Transfer",
+      "MFS": "Mobile Banking (MFS)",
+    };
+    const rawPayment = order.paymentType || order.storePaymentMode || "";
+
+    const address = {
+      first_name: firstName,
+      last_name: lastName,
+      address_1: order.recipientAddress || "",
+      city: order.recipientCity || "",
+      state: order.recipientZone || "",
+      country: "BD",
+    };
+
+    const payload = {
+      payment_method: PAY_METHOD_MAP[rawPayment] || "cod",
+      payment_method_title: PAY_TITLE_MAP[rawPayment] || "Cash on Delivery",
+      status: wcStatus,
+      billing: {
+        ...address,
+        phone: order.recipientPhone || "",
+        email: order.email || "noreply@bentreebd.com",
+      },
+      shipping: address,
+      line_items: lineItems,
+      shipping_lines: deliveryCharge ? [{
+        method_title: "Shipping", method_id: "flat_rate",
+        total: deliveryCharge.toFixed(2),
+      }] : [],
+      fee_lines: adjust ? [{
+        name: adjust < 0 ? "Discount" : "Adjustment",
+        tax_status: "none",
+        total: adjust.toFixed(2),
+      }] : [],
+      customer_note: order.specialInstructions || order.remarks || "",
+      meta_data: [
+        {key: "_oms_created", value: "true"},
+        {key: "_oms_order_type", value: order.type || "Online"},
+        {key: "_oms_pushed", value: "true"},
+        {key: "_oms_doc_id", value: docId},
+        {key: "_oms_original_wc_id", value: oldWcId ? String(oldWcId) : ""},
+        {key: "_oms_merchant_order_id", value: order.merchantOrderId || ""},
+        {key: "_oms_original_date", value: order.date || ""},
+        {key: "_oms_status", value: order.status || ""},
+        {key: "_oms_payment_type", value: rawPayment},
+        {key: "_oms_advance_amount", value: String(order.advanceAmount || 0)},
+        {key: "_oms_collected_amount",
+          value: String(order.collectedAmount || 0)},
+        {key: "_oms_due_amount", value: String(order.dueAmount || 0)},
+        // Stock: see the function comment above.
+        {key: "_order_stock_reduced", value: holdsStock ? "yes" : "no"},
+        {key: "_new_order_email_sent", value: "true"},
+      ],
+    };
+
+    // ── 4. Create ───────────────────────────────────────────────────
+    let wc;
+    try {
+      ({data: wc} = await api.post("/orders", payload));
+    } catch (err) {
+      const wcData = (err.response && err.response.data) || {};
+      logger.error("wooPushOrder POST /orders failed", {
+        docId, httpCode: (err.response && err.response.status) || 0, wcData,
+      });
+      throw new HttpsError("unavailable",
+          `Website rejected the order: ${wcData.message || err.message}`);
+    }
+
+    if (Math.abs(Number(wc.total || 0) - grandTotal) >= 0.01) {
+      warnings.push(
+          `Website total ${wc.total} differs from OMS total ${grandTotal}`);
+    }
+
+    // Order note for staff (not sent to the customer). Not critical.
+    try {
+      await api.post(`/orders/${wc.id}/notes`, {
+        note: `Pushed from OMS by ${pushedBy}. ` +
+          (oldWcId ? `Original website order #${oldWcId}. ` : "") +
+          `OMS order ${order.merchantOrderId || docId}, ` +
+          `status ${order.status}, ` +
+          `date ${order.date || "-"}. Stock was not changed.`,
+        customer_note: false,
+      });
+    } catch (noteErr) {
+      logger.warn("wooPushOrder: note failed", {docId, err: noteErr.message});
+    }
+
+    return await finish("pushed", wc, {warnings});
+  } catch (err) {
+    const message = err instanceof HttpsError ? err.message :
+      ((err.response && err.response.data && err.response.data.message) ||
+        err.message || "Unknown error");
+    logger.error("wooPushOrder failed", {docId, message});
+    try {
+      await ref.update({
+        "wcPush.status": "failed",
+        "wcPush.error": message,
+        "wcPush.failedAt": FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      logger.warn("wooPushOrder: could not save failure", {docId});
+    }
+    if (err instanceof HttpsError) throw err;
+    throw new HttpsError("internal", `Push failed: ${message}`);
+  }
+});
+
 // Runs daily at midnight — permanently deletes inventory items that have been
 // archived for 30+ days and have not been restored.
 exports.purgeOldArchivedInventory = onSchedule("every 24 hours", async () => {

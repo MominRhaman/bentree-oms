@@ -37,6 +37,21 @@ export async function wooUpdateOrder(wcOrderId, status) {
 }
 
 /**
+ * Push an existing OMS order to the website (e.g. one removed from
+ * WooCommerce). The Cloud Function reads the order from Firestore, links an
+ * order already on the website instead of creating a duplicate, and changes
+ * neither website nor OMS stock. Throws on failure so the caller can show it.
+ *
+ * @param {string} orderId - OMS Firestore order doc ID
+ * @returns {object} { result: 'pushed' | 'exists', wcOrderId, warnings? }
+ */
+export async function wooPushOrder(orderId) {
+    const fn = httpsCallable(functions, 'wooPushOrder');
+    const result = await fn({ orderId });
+    return result.data;
+}
+
+/**
  * Sync OMS order edits (customer, products, notes, shipping)
  * to WooCommerce. Fire-and-forget safe.
  *
