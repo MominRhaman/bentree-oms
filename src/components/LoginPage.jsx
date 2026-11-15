@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { AlertTriangle, User, Lock, Mail } from 'lucide-react';
-import { signInWithPopup, GoogleAuthProvider, signInAnonymously, signOut, updateProfile } from 'firebase/auth';
-import { auth } from '../firebase';
-import { GOOGLE_ACCOUNTS, CREDENTIAL_ACCOUNTS } from '../utils';
+import { signInWithPopup, GoogleAuthProvider, signInWithCustomToken, signOut, updateProfile } from 'firebase/auth';
+import { httpsCallable } from 'firebase/functions';
+import { auth, functions } from '../firebase';
+import { GOOGLE_ACCOUNTS } from '../utils';
 
 const LoginPage = ({ onLogin }) => {
     const [username, setUsername] = useState('');
@@ -33,30 +34,42 @@ const LoginPage = ({ onLogin }) => {
         setError('');
         const userKey = username.trim();
 
-        if (CREDENTIAL_ACCOUNTS[userKey] && CREDENTIAL_ACCOUNTS[userKey].pass === password) {
-            try {
-                // 1. Sign in anonymously to get Firebase Token
-                const result = await signInAnonymously(auth);
-
-                const role = CREDENTIAL_ACCOUNTS[userKey].role;
-                const fullName = CREDENTIAL_ACCOUNTS[userKey].name;
-
-                // 2. CRITICAL FIX: Explicitly update the Firebase Auth Profile
-                // This ensures the name persists on reload and shows in the sidebar
-                await updateProfile(result.user, {
-                    displayName: fullName
-                });
-
-                // 3. Pass the updated info to the App
-                const userInfo = { ...result.user, displayName: fullName };
-                onLogin(userInfo, role);
-
-            } catch (err) {
+        let login;
+        try {
+            // 1. Verify username/password on the server. It returns a custom
+            // token that carries the account role, which Firestore rules trust.
+            const credentialLogin = httpsCallable(functions, 'credentialLogin');
+            login = (await credentialLogin({ username: userKey, password })).data;
+        } catch (err) {
+            if (err?.code === 'functions/permission-denied') {
+                setError("Invalid Username or Password.");
+            } else {
                 console.error(err);
                 setError("Database Connection Failed.");
             }
-        } else {
-            setError("Invalid Username or Password.");
+            return;
+        }
+
+        try {
+            // 2. Sign in with the server-issued token to get Firebase Token
+            const result = await signInWithCustomToken(auth, login.token);
+
+            const role = login.role;
+            const fullName = login.name;
+
+            // 3. CRITICAL FIX: Explicitly update the Firebase Auth Profile
+            // This ensures the name persists on reload and shows in the sidebar
+            await updateProfile(result.user, {
+                displayName: fullName
+            });
+
+            // 4. Pass the updated info to the App
+            const userInfo = { ...result.user, displayName: fullName };
+            onLogin(userInfo, role);
+
+        } catch (err) {
+            console.error(err);
+            setError("Database Connection Failed.");
         }
     };
 

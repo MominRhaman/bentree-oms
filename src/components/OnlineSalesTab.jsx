@@ -4,7 +4,9 @@ import SearchBar from './SearchBar';
 import OrderDetailsPopup from './OrderDetailsPopup';
 import { INVENTORY_CATEGORIES, downloadCSV } from '../utils';
 
-const OnlineSalesTab = ({ orders, inventory, onEdit, onCreate, onDelete }) => {
+const OnlineSalesTab = ({ orders, inventory, onEdit, onCreate, onDelete, userRole }) => {
+    // QMT accounts can only view these orders — edit and delete are locked
+    const isQMTUser = String(userRole || '').trim().toLowerCase() === 'qmt';
     const [searchTerm, setSearchTerm] = useState('');
     const [catFilter, setCatFilter] = useState('');
     const [startDate, setStartDate] = useState('');
@@ -197,10 +199,12 @@ const OnlineSalesTab = ({ orders, inventory, onEdit, onCreate, onDelete }) => {
 
                                     {/* Action Buttons wrapped in div to prevent flex breaking table cell */}
                                     <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
-                                        <div className="flex justify-center gap-2">
-                                            <button onClick={() => setSelectedOrder(row.originalOrder)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded"><Edit size={16} /></button>
-                                            <button onClick={() => { if (confirm('Delete?')) onDelete(row.id); }} className="text-red-500 hover:bg-red-50 p-1.5 rounded"><Trash2 size={16} /></button>
-                                        </div>
+                                        {!isQMTUser && (
+                                            <div className="flex justify-center gap-2">
+                                                <button onClick={() => setSelectedOrder(row.originalOrder)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded"><Edit size={16} /></button>
+                                                <button onClick={() => { if (confirm('Delete?')) onDelete(row.id); }} className="text-red-500 hover:bg-red-50 p-1.5 rounded"><Trash2 size={16} /></button>
+                                            </div>
+                                        )}
                                     </td>
                                 </tr>
                             ))}
@@ -236,8 +240,8 @@ const OnlineSalesTab = ({ orders, inventory, onEdit, onCreate, onDelete }) => {
                     order={selectedOrder}
                     onClose={() => setSelectedOrder(null)}
                     getStatusColor={() => 'text-green-600 bg-green-50'}
-                    onEdit={onEdit}
-                    onCreate={onCreate}
+                    onEdit={isQMTUser ? undefined : onEdit}
+                    onCreate={isQMTUser ? undefined : onCreate}
                 />
             )}
         </div>

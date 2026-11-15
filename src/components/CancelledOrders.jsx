@@ -95,6 +95,8 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
 
     // --- Access Control Robust Check ---
     const isMasterUser = String(userRole || '').trim().toLowerCase() === 'master';
+    // QMT accounts can only view these orders — checkboxes, restore and cancel are locked
+    const isQMTUser = String(userRole || '').trim().toLowerCase() === 'qmt';
 
     return (
         <div className="space-y-4">
@@ -184,6 +186,7 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
                                         {shouldShowReturnCheckbox ? (
                                             <input
                                                 type="checkbox"
+                                                disabled={isQMTUser}
                                                 checked={order.isReturnReceived || false}
                                                 onChange={(e) => {
                                                     onUpdate(order.id, order.status, { isReturnReceived: e.target.checked });
@@ -257,6 +260,7 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
                                                     <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Refunded</span>
                                                     <input
                                                         type="checkbox"
+                                                        disabled={isQMTUser}
                                                         checked={order.isRefunded || false}
                                                         onChange={(e) => {
                                                             onUpdate(order.id, order.status, { isRefunded: e.target.checked });
@@ -268,6 +272,7 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
                                         </div>
                                     </td>
                                     <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
+                                        {!isQMTUser && (
                                         <div className="flex justify-center gap-2">
                                             <button
                                                 onClick={(e) => {
@@ -309,6 +314,7 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
                                                 <Trash2 size={16} />
                                             </button>
                                         </div>
+                                        )}
                                     </td>
                                 </tr>
                             );
@@ -329,8 +335,8 @@ const CancelledOrders = ({ orders, onUpdate, onDelete, onEdit, onCreate, invento
                     order={selectedOrder}
                     onClose={() => setSelectedOrder(null)}
                     getStatusColor={() => getBadgeColor(selectedOrder)}
-                    onEdit={onEdit}
-                    onCreate={onCreate}
+                    onEdit={isQMTUser ? undefined : onEdit}
+                    onCreate={isQMTUser ? undefined : onCreate}
                     inventory={inventory}
                 />
             )}

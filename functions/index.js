@@ -1,10 +1,11 @@
 ﻿const {setGlobalOptions} = require("firebase-functions");
-const {onRequest, onCall} = require("firebase-functions/https");
+const {onRequest, onCall, HttpsError} = require("firebase-functions/https");
 const {onSchedule} = require("firebase-functions/v2/scheduler");
 const logger = require("firebase-functions/logger");
 const crypto = require("crypto");
 const axios = require("axios");
 const admin = require("firebase-admin");
+const {GOOGLE_ACCOUNTS, CREDENTIAL_ACCOUNTS} = require("./accounts");
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -14,6 +15,57 @@ setGlobalOptions({maxInstances: 10});
 
 // Must match the appId used in src/firebase.js
 const APP_ID = "1:863146464502:web:ce12de37fc9ba2240148d7";
+
+// ── Role-based access for callable functions ────────────────────────────────
+// Role comes from the server-issued custom token claim (credential logins)
+// or the Google allow-list (Google logins, verified email only).
+const ALL_ROLES = ["master", "employee", "qmt"];
+const FULL_ACCESS_ROLES = ["master", "employee"];
+
+const getCallerRole = (request) => {
+  const token = (request.auth && request.auth.token) || {};
+  if (typeof token.role === "string") return token.role;
+  if (token.email && token.email_verified === true) {
+    return GOOGLE_ACCOUNTS[token.email] || null;
+  }
+  return null;
+};
+
+// Throws "unauthenticated" (HTTP 401) or "permission-denied" (HTTP 403).
+const requireRole = (request, allowedRoles, action) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Login required.");
+  }
+  const role = getCallerRole(request);
+  if (!allowedRoles.includes(role)) {
+    logger.warn("Callable blocked by role", {
+      action, role, uid: request.auth.uid,
+    });
+    throw new HttpsError(
+        "permission-denied",
+        `Your account (${role || "no role"}) is not allowed to ${action}.`,
+    );
+  }
+  return role;
+};
+
+// ── credentialLogin onCall ───────────────────────────────────────────────────
+// Verifies username/password on the server and returns a custom token that
+// carries the account role as a claim, so Firestore rules can trust it.
+exports.credentialLogin = onCall(async (request) => {
+  const {username, password} = request.data || {};
+  const userKey = String(username || "").trim();
+  const account = CREDENTIAL_ACCOUNTS[userKey];
+  if (!account || account.pass !== String(password || "")) {
+    throw new HttpsError(
+        "permission-denied", "Invalid Username or Password.",
+    );
+  }
+  const token = await admin.auth().createCustomToken(`cred_${userKey}`, {
+    role: account.role,
+  });
+  return {token, role: account.role, name: account.name};
+});
 
 // Normalize legacy size keys to OMS canonical form (must match src/utils.js)
 const SIZE_ALIASES = {"XXL": "2XL", "XXXL": "3XL"};
@@ -739,6 +791,7 @@ async function resolveWooLineItems(api, products) {
 // ── wooCreateOrder onCall ────────────────────────────────────────────────────
 
 exports.wooCreateOrder = onCall(async (request) => {
+  requireRole(request, ALL_ROLES, "create orders");
   const order = request.data || {};
   const api = makeWooApi();
   const lineItems = await resolveWooLineItems(api, order.products);
@@ -827,6 +880,7 @@ exports.wooCreateOrder = onCall(async (request) => {
 // ── wooAdjustStock onCall ────────────────────────────────────────────────────
 
 exports.wooAdjustStock = onCall(async (request) => {
+  requireRole(request, FULL_ACCESS_ROLES, "adjust website stock");
   const {products, delta} = request.data || {};
   const api = makeWooApi();
 
@@ -901,6 +955,7 @@ exports.wooAdjustStock = onCall(async (request) => {
  * Cancelling triggers WooCommerce's built-in stock restoration.
  */
 exports.wooUpdateOrder = onCall(async (request) => {
+  requireRole(request, FULL_ACCESS_ROLES, "change order status");
   const {wcOrderId, status} = request.data || {};
   if (!wcOrderId) return {ok: false, reason: "missing wcOrderId"};
   const api = makeWooApi();
@@ -918,6 +973,7 @@ exports.wooUpdateOrder = onCall(async (request) => {
  * webhook bounce-back is skipped (see guard 4c above).
  */
 exports.wooSyncOrder = onCall(async (request) => {
+  requireRole(request, FULL_ACCESS_ROLES, "edit orders");
   const order = request.data || {};
   const wcId = order.wc_order_id;
   if (!wcId) return {ok: false, reason: "no wc_order_id"};

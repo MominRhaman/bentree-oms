@@ -2,7 +2,9 @@ import React, { useState, useMemo } from 'react';
 import { PlayCircle } from 'lucide-react';
 import SearchBar from './SearchBar';
 
-const HoldTab = ({ orders, onUpdate }) => {
+const HoldTab = ({ orders, onUpdate, userRole }) => {
+    // QMT accounts can only view orders — Unhold is hidden for them
+    const isQMTUser = String(userRole || '').trim().toLowerCase() === 'qmt';
     const [searchTerm, setSearchTerm] = useState('');
     const filtered = useMemo(() => {
         let res = orders || [];
@@ -63,12 +65,14 @@ const HoldTab = ({ orders, onUpdate }) => {
                                     </div>
                                 </td>
                                 <td className="p-3">
-                                    <button
-                                        onClick={() => onUpdate(order.id, 'Confirmed', { isUnhold: true })}
-                                        className="flex items-center gap-1 bg-purple-100 text-purple-700 px-3 py-1 rounded text-xs font-bold hover:bg-purple-200"
-                                    >
-                                        <PlayCircle size={14} /> Unhold (To Queue)
-                                    </button>
+                                    {!isQMTUser && (
+                                        <button
+                                            onClick={() => onUpdate(order.id, 'Confirmed', { isUnhold: true })}
+                                            className="flex items-center gap-1 bg-purple-100 text-purple-700 px-3 py-1 rounded text-xs font-bold hover:bg-purple-200"
+                                        >
+                                            <PlayCircle size={14} /> Unhold (To Queue)
+                                        </button>
+                                    )}
                                 </td>
                             </tr>
                         ))}

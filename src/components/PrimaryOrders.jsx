@@ -4,7 +4,9 @@ import OrderDetailsPopup from './OrderDetailsPopup';
 import SearchBar from './SearchBar';
 import { getStatusColor } from '../utils';
 
-const PrimaryOrders = ({ orders, onUpdate, onEdit, inventory = [] }) => {
+const PrimaryOrders = ({ orders, onUpdate, onEdit, inventory = [], userRole }) => {
+    // QMT accounts can only view orders here — every modifying control is hidden or disabled
+    const isQMTUser = String(userRole || '').trim().toLowerCase() === 'qmt';
     const [filterDate, setFilterDate] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedOrder, setSelectedOrder] = useState(null);
@@ -226,12 +228,12 @@ const PrimaryOrders = ({ orders, onUpdate, onEdit, inventory = [] }) => {
                                     <td className="p-3">
                                         <div className="flex gap-1 mb-1">
                                             {[1, 2, 3].map(num => (
-                                                <button key={num} onClick={(e) => toggleAttempt(e, order, num)} className={`w-6 h-6 rounded-full text-xs font-bold border transition-colors ${order.callAttempts?.[`attempt${num}`] ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-white text-slate-400 border-slate-300 hover:border-emerald-400'}`} title={`Attempt ${num}`}>
+                                                <button key={num} disabled={isQMTUser} onClick={(e) => toggleAttempt(e, order, num)} className={`w-6 h-6 rounded-full text-xs font-bold border transition-colors ${order.callAttempts?.[`attempt${num}`] ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-white text-slate-400 border-slate-300 hover:border-emerald-400'}`} title={`Attempt ${num}`}>
                                                     {num}
                                                 </button>
                                             ))}
                                         </div>
-                                        <input placeholder="Caller Note" className="text-xs border rounded p-1 w-full focus:ring-1 focus:ring-emerald-500 outline-none" defaultValue={order.callNote || ''} onClick={(e) => e.stopPropagation()} onBlur={(e) => onUpdate(order.id, order.status, { callNote: e.target.value })} />
+                                        <input placeholder="Caller Note" disabled={isQMTUser} className="text-xs border rounded p-1 w-full focus:ring-1 focus:ring-emerald-500 outline-none" defaultValue={order.callNote || ''} onClick={(e) => e.stopPropagation()} onBlur={(e) => onUpdate(order.id, order.status, { callNote: e.target.value })} />
                                     </td>
                                     <td className="p-3 font-medium">৳{Number(order.grandTotal).toLocaleString('en-IN')}</td>
 
@@ -246,18 +248,21 @@ const PrimaryOrders = ({ orders, onUpdate, onEdit, inventory = [] }) => {
                                                     <div className="text-[10px] text-slate-600 font-mono truncate" title={order.merchantOrderId}>
                                                         ID: {order.merchantOrderId}
                                                     </div>
-                                                    <button
-                                                        onClick={() => onUpdate(order.id, order.status, { checkOutStatus: 'Pending' })}
-                                                        className="text-[10px] text-blue-500 hover:text-blue-700 hover:underline flex items-center gap-1 w-fit"
-                                                    >
-                                                        <Edit2 size={10} /> Edit ID
-                                                    </button>
+                                                    {!isQMTUser && (
+                                                        <button
+                                                            onClick={() => onUpdate(order.id, order.status, { checkOutStatus: 'Pending' })}
+                                                            className="text-[10px] text-blue-500 hover:text-blue-700 hover:underline flex items-center gap-1 w-fit"
+                                                        >
+                                                            <Edit2 size={10} /> Edit ID
+                                                        </button>
+                                                    )}
                                                 </div>
                                             ) : (
                                                 <>
                                                     <input
                                                         type="text"
                                                         placeholder="Enter Order ID"
+                                                        disabled={isQMTUser}
                                                         className="border rounded px-2 py-1 text-xs w-full focus:ring-1 focus:ring-emerald-500 outline-none"
                                                         value={currentId}
                                                         onChange={(e) => handleIdChange(order.id, e.target.value)}
@@ -270,7 +275,7 @@ const PrimaryOrders = ({ orders, onUpdate, onEdit, inventory = [] }) => {
                                                     />
 
                                                     {hasEnteredId ? (
-                                                        <button
+                                                        !isQMTUser && <button
                                                             onClick={(e) => handleQuickComplete(e, order, currentId)}
                                                             className="w-full py-1 px-2 rounded text-xs font-bold bg-slate-800 text-white hover:bg-slate-700 shadow-sm transition-all"
                                                         >
@@ -291,7 +296,7 @@ const PrimaryOrders = ({ orders, onUpdate, onEdit, inventory = [] }) => {
                                     {/* --- ACTIONS COLUMN --- */}
                                     <td className="p-3">
                                         <div className="flex justify-center gap-2">
-                                            {order.status !== 'Cancelled' && (
+                                            {!isQMTUser && order.status !== 'Cancelled' && (
                                                 <>
                                                     {isCheckedOut ? (
                                                         <button
@@ -313,13 +318,13 @@ const PrimaryOrders = ({ orders, onUpdate, onEdit, inventory = [] }) => {
                                                     <button onClick={(e) => { e.stopPropagation(); onUpdate(order.id, 'Cancelled'); }} className="bg-red-100 text-red-700 px-3 py-1.5 rounded text-xs font-bold hover:bg-red-200 transition-colors shadow-sm">Cancel</button>
                                                 </>
                                             )}
-                                            {order.status === 'Cancelled' && (
+                                            {!isQMTUser && order.status === 'Cancelled' && (
                                                 <button onClick={(e) => { e.stopPropagation(); onUpdate(order.id, 'Confirmed'); }} className="bg-emerald-100 text-emerald-700 px-2 py-1 rounded text-xs font-bold hover:bg-emerald-200 border border-emerald-200">Reconfirm</button>
                                             )}
                                         </div>
                                     </td>
                                     <td className="p-3">
-                                        <input className="border rounded px-2 py-1 text-xs w-full focus:ring-1 focus:ring-emerald-500 outline-none" defaultValue={order.remarks} onClick={(e) => e.stopPropagation()} onBlur={(e) => onUpdate(order.id, order.status, { remarks: e.target.value })} placeholder="Remark..." />
+                                        <input disabled={isQMTUser} className="border rounded px-2 py-1 text-xs w-full focus:ring-1 focus:ring-emerald-500 outline-none" defaultValue={order.remarks} onClick={(e) => e.stopPropagation()} onBlur={(e) => onUpdate(order.id, order.status, { remarks: e.target.value })} placeholder="Remark..." />
                                     </td>
                                 </tr>
                             );
@@ -334,7 +339,7 @@ const PrimaryOrders = ({ orders, onUpdate, onEdit, inventory = [] }) => {
                     order={selectedOrder}
                     onClose={() => setSelectedOrder(null)}
                     getStatusColor={getStatusColor}
-                    onEdit={onEdit}
+                    onEdit={isQMTUser ? undefined : onEdit}
                     inventory={inventory}
                 />
             )}

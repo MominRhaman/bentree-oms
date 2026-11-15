@@ -7,7 +7,9 @@ import { INVENTORY_CATEGORIES, downloadCSV } from '../utils';
 const CANCEL_ORDER_CONFIRM = 'Cancel this Store Order? Stock will be restored and recorded in Movement Log.';
 const PAYMENT_MODES = ['Cash', 'Card', 'bKash', 'Nagad', 'MFS', 'Bank Transfer'];
 
-const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete }) => {
+const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete, userRole }) => {
+    // QMT accounts can only view store orders — checkout, payment, cancel and delete are locked
+    const isQMTUser = String(userRole || '').trim().toLowerCase() === 'qmt';
     // --- States ---
     const [isCheckoutMode, setIsCheckoutMode] = useState(false);
     const [checkoutSearch, setCheckoutSearch] = useState('');
@@ -252,6 +254,7 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
                                                         <input
                                                             type="text"
                                                             placeholder="Scan / Type ID"
+                                                            disabled={isQMTUser}
                                                             className="border-2 border-slate-300 rounded-lg px-3 py-2 text-sm w-full focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 outline-none font-mono font-bold"
                                                             value={currentId}
                                                             required
@@ -277,6 +280,7 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
                                                     <td className="p-4 text-center">
                                                         <select
                                                             className="bg-slate-100 border border-slate-200 rounded px-2 py-1 text-xs outline-none focus:border-emerald-500"
+                                                            disabled={isQMTUser}
                                                             value={order.storePaymentMode}
                                                             onClick={(e) => e.stopPropagation()}
                                                             onChange={(e) => onUpdate(order.id, order.status, { storePaymentMode: e.target.value })}
@@ -290,6 +294,7 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
                                                         <span className="text-xl font-bold text-emerald-700">৳{order.grandTotal}</span>
                                                     </td>
                                                     <td className="p-4 text-center" onClick={(e) => e.stopPropagation()}>
+                                                        {!isQMTUser && (
                                                         <div className="flex justify-center gap-2">
                                                             {/* Only show button if user has typed something */}
                                                             {hasEnteredId && (
@@ -309,6 +314,7 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
                                                                 <XCircle size={20} />
                                                             </button>
                                                         </div>
+                                                        )}
                                                     </td>
                                                 </tr>
                                             );
@@ -428,6 +434,7 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
                                                         <input
                                                             type="text"
                                                             placeholder="Order ID"
+                                                            disabled={isQMTUser}
                                                             className="border rounded px-2 py-1 text-[10px] w-full focus:ring-1 focus:ring-emerald-500 outline-none font-bold"
                                                             value={currentIdHistory} //孤立した状態
                                                             required
@@ -450,6 +457,7 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
                                                     {/* Button only appears if input is filled or ID exists in DB */}
                                                     {row.originalOrder.storeOrderId || hasEnteredIdHistory ? (
                                                         <button
+                                                            disabled={isQMTUser}
                                                             onClick={() => onUpdate(row.id, row.originalOrder.status, {
                                                                 storeOrderId: currentIdHistory || row.originalOrder.storeOrderId,
                                                                 checkOutStatus: row.checkOutStatus === 'Completed' ? 'Pending' : 'Completed',
@@ -487,6 +495,7 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
                                             <td className="p-3 text-xs text-slate-500">{row.paymentMode}</td>
                                             <td className="p-3 text-xs text-slate-500">{row.addedBy}</td>
                                             <td className="p-3 text-center flex justify-center gap-2">
+                                                {!isQMTUser && (<>
                                                 <button
                                                     onClick={(e) => {
                                                         e.stopPropagation();
@@ -507,6 +516,7 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
                                                     e.stopPropagation();
                                                     if (confirm('Delete this sale? Stock will be returned.')) onDelete(row.id);
                                                 }} className="text-red-500 hover:bg-red-50 p-1 rounded"><Trash2 size={16} /></button>
+                                                </>)}
                                             </td>
                                         </tr>
                                     )
@@ -530,7 +540,7 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
             )}
 
             {/* Payment Modal */}
-            {paymentModal && (() => {
+            {!isQMTUser && paymentModal && (() => {
                 const epTotal = editedPayments.reduce((s, p) => s + Number(p.amount || 0), 0);
                 const epDue   = Math.max(0, paymentModal.grandTotal - epTotal);
                 const isOver  = epTotal > paymentModal.grandTotal + 0.01;
@@ -631,8 +641,8 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
                     order={selectedOrder}
                     onClose={() => setSelectedOrder(null)}
                     getStatusColor={() => 'text-purple-600 bg-purple-50'}
-                    onEdit={onEdit}
-                    onCreate={onCreate}
+                    onEdit={isQMTUser ? undefined : onEdit}
+                    onCreate={isQMTUser ? undefined : onCreate}
                     inventory={inventory}
                 />
             )}

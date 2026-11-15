@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspens
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { collection, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, arrayUnion, addDoc, query, orderBy, limit } from 'firebase/firestore';
 import { auth, db, appId } from './firebase';
-import { getStatusColor, updateInventoryStock, computeStockBefores, logInventoryMovement } from './utils';
+import { getStatusColor, updateInventoryStock, computeStockBefores, logInventoryMovement, GOOGLE_ACCOUNTS } from './utils';
 import { adjustWooStock, wooUpdateOrder, wooSyncOrder } from './WooAPI/wooStock';
 import { useScanner } from './hooks/useScanner';
 import { Menu } from 'lucide-react';
@@ -60,12 +60,42 @@ function App() {
     const [inventoryAdjustments, setInventoryAdjustments] = useState([]);
     const recentlyRestoredRef = useRef(new Set());
 
+    // --- QMT ACCESS GUARD ---
+    // QMT accounts may only create and view orders. Every handler that changes an
+    // existing order (or inventory) checks this first. Firestore rules and the
+    // Cloud Functions enforce the same restriction on the server.
+    const userRoleRef = useRef(userRole);
+    useEffect(() => { userRoleRef.current = userRole; }, [userRole]);
+    const QMT_DENIED_MESSAGE = 'Permission denied: QMT accounts can only create and view orders.';
+    const isQmtBlocked = useCallback(() => {
+        if (userRoleRef.current !== 'qmt') return false;
+        alert(QMT_DENIED_MESSAGE);
+        return true;
+    }, []);
+
     // --- 2. Authentication Observer ---
     useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-            setIsAuthChecking(false);
+        const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
             if (currentUser) {
-                const storedRole = localStorage.getItem('bentree_role');
+                // Trust only the server-issued role claim (credential login) or the
+                // Google allow-list — never localStorage alone, which can be edited.
+                let verifiedRole = null;
+                try {
+                    const tokenResult = await currentUser.getIdTokenResult();
+                    verifiedRole = tokenResult.claims.role || GOOGLE_ACCOUNTS[currentUser.email] || null;
+                } catch (err) {
+                    console.error('Role verification failed:', err);
+                }
+                if (!verifiedRole) {
+                    // Old anonymous session without a server-issued role → log in again
+                    localStorage.removeItem('bentree_role');
+                    await signOut(auth);
+                    setIsAuthChecking(false);
+                    return;
+                }
+                localStorage.setItem('bentree_role', verifiedRole);
+                setIsAuthChecking(false);
+                const storedRole = verifiedRole;
                 const storedName = localStorage.getItem('bentree_name');
                 const displayName = storedName || currentUser.displayName;
                 const customPhoto = displayName ? localStorage.getItem(`bentree_photo_${displayName}`) : null;
@@ -80,6 +110,7 @@ function App() {
                 if (storedRole) setUserRole(storedRole);
                 setLoading(true);
             } else {
+                setIsAuthChecking(false);
                 setUser(null);
                 setUserRole(null);
             }
@@ -203,6 +234,7 @@ function App() {
 
     // --- 5. INVENTORY IMPACT LOGIC: Status Changes (Cancel/Return/Restore) ---
     const handleUpdateStatus = useCallback(async (orderId, newStatus, extraData = {}) => {
+        if (isQmtBlocked()) return;
         // Find order by ID or fallback to Merchant ID if ID changed during exchange
         let order = orders.find(o => o.id === orderId);
         if (!order && (extraData.merchantOrderId || extraData.storeOrderId)) {
@@ -313,6 +345,7 @@ function App() {
 
     // --- 6. INVENTORY IMPACT LOGIC: Edits & Exchanges ---
     const handleEditOrderWithStock = useCallback(async (orderId, newStatus, updatedData) => {
+        if (isQmtBlocked()) return;
         // Find the order in the current local state
         const oldOrder = orders.find(o => o.id === orderId);
 
@@ -535,6 +568,9 @@ function App() {
 
     // --- NEW: CREATE ORDER (for Partial Returns) ---
     const handleCreateOrder = useCallback(async (orderData) => {
+        // Only used for return/exchange split records — not allowed for QMT.
+        // Throw (not return) so callers stop before updating the original order.
+        if (userRoleRef.current === 'qmt') throw new Error(QMT_DENIED_MESSAGE);
         try {
             // Block active orders that include archived inventory products
             if (!['Cancelled', 'Returned'].includes(orderData.status)) {
@@ -593,6 +629,7 @@ function App() {
 
     // --- 7. INVENTORY IMPACT LOGIC: Permanent Deletion ---
     const handleDeleteOrder = useCallback(async (orderId) => {
+        if (isQmtBlocked()) return;
         const order = orders.find(o => o.id === orderId);
         if (order && !['Cancelled', 'Returned'].includes(order.status)) {
             const delRef = order.merchantOrderId || order.storeOrderId || orderId;
@@ -628,6 +665,7 @@ function App() {
     }, [orders, inventory, user]);
 
     const handleRestoreOrder = useCallback(async (orderId) => {
+        if (isQmtBlocked()) return;
         try {
             await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', orderId), {
                 archived: false,
@@ -638,6 +676,7 @@ function App() {
     }, []);
 
     const handleEditInventory = useCallback(async (id, updatedData) => {
+        if (isQmtBlocked()) return;
         try {
             const oldItem = inventory.find(i => i.id === id);
             await updateDoc(
@@ -706,6 +745,7 @@ function App() {
         }
     }, [inventory, user]);
     const handleDeleteInventory = useCallback(async (id) => {
+        if (isQmtBlocked()) return;
         try {
             await updateDoc(
                 doc(db, 'artifacts', appId, 'public', 'data', 'inventory', id),
@@ -715,6 +755,7 @@ function App() {
     }, []);
 
     const handleRestoreInventory = useCallback(async (id) => {
+        if (isQmtBlocked()) return;
         try {
             await updateDoc(
                 doc(db, 'artifacts', appId, 'public', 'data', 'inventory', id),
@@ -727,6 +768,7 @@ function App() {
 
     // Logs initial stock when a brand-new product is added to inventory
     const handleAddInventory = useCallback(async (payload) => {
+        if (isQmtBlocked()) return;
         const code = (payload.code || '').toUpperCase();
         const adjCol = collection(db, 'artifacts', appId, 'public', 'data', 'inventoryAdjustments');
         const dateStr = new Date().toISOString().split('T')[0];
@@ -811,15 +853,15 @@ function App() {
             case 'inventory-archive': return userRole !== 'qmt' ? <InventoryArchiveTab inventory={archivedInventory} locations={locations} onRestore={handleRestoreInventory} /> : <div className="p-10 text-center text-slate-400">Access denied.</div>;
             case 'stock-location': return <StockLocationTab locations={locations} />;
             case 'monthly-profit': return userRole === 'master' ? <MonthlyProfitTab orders={orders} inventory={inventory} expenses={expenses} /> : <div className="p-10 text-center text-slate-400">Master access required.</div>;
-            case 'primary': return <PrimaryOrders orders={primaryOrders} onUpdate={handleUpdateStatus} onEdit={handleEditOrderWithStock} onCreate={handleCreateOrder} inventory={inventory} />;
+            case 'primary': return <PrimaryOrders orders={primaryOrders} onUpdate={handleUpdateStatus} onEdit={handleEditOrderWithStock} onCreate={handleCreateOrder} inventory={inventory} userRole={userRole} />;
             case 'confirmed': return <ConfirmedOrders allOrders={activeOrders} orders={confirmedOrders} {...orderProps} userRole={userRole} />;
             case 'order-archive': return userRole !== 'qmt' ? <OrderArchiveTab orders={archivedOrders} onRestore={handleRestoreOrder} /> : <div className="p-10 text-center text-slate-400">Access denied.</div>;
-            case 'hold': return <HoldTab orders={holdOrders} onUpdate={handleUpdateStatus} onCreate={handleCreateOrder} />;
-            case 'dispatch': return <DispatchTab orders={dispatchOrders} onUpdate={handleUpdateStatus} onCreate={handleCreateOrder} />;
-            case 'store-sales': return <StoreSales orders={storeOrders} {...orderProps} />;
-            case 'exchange': return <ExchangeTab orders={exchangeOrders} onCreate={handleCreateOrder} onEdit={handleEditOrderWithStock} inventory={inventory} />;
+            case 'hold': return <HoldTab orders={holdOrders} onUpdate={handleUpdateStatus} onCreate={handleCreateOrder} userRole={userRole} />;
+            case 'dispatch': return <DispatchTab orders={dispatchOrders} onUpdate={handleUpdateStatus} onCreate={handleCreateOrder} userRole={userRole} />;
+            case 'store-sales': return <StoreSales orders={storeOrders} {...orderProps} userRole={userRole} />;
+            case 'exchange': return <ExchangeTab orders={exchangeOrders} onCreate={handleCreateOrder} onEdit={handleEditOrderWithStock} inventory={inventory} userRole={userRole} />;
             case 'cancelled': return <CancelledOrders orders={cancelledReturnedOrders} onUpdate={handleUpdateStatus} onDelete={handleDeleteOrder} onEdit={handleEditOrderWithStock} onCreate={handleCreateOrder} inventory={inventory} userRole={userRole} />;
-            case 'online-sales': return <OnlineSalesTab {...orderProps} />;
+            case 'online-sales': return <OnlineSalesTab {...orderProps} userRole={userRole} />;
             case 'sales-inventory-report': return <SalesInventoryReport orders={orders} inventory={inventory} adjustments={inventoryAdjustments} />;
             case 'reports': return userRole === 'master' ? <SalesReports {...orderProps} /> : <div className="p-10 text-center text-slate-400">Master access required.</div>;
             case 'barcodePrintView': return ( <BarcodePrintView items={barcodePrintQueue} onClose={handleBarcodeClose} /> );
@@ -853,8 +895,8 @@ function App() {
                         order={scannedOrder}
                         onClose={() => setScannedOrder(null)}
                         getStatusColor={getStatusColor}
-                        onEdit={handleEditOrderWithStock}
-                        onCreate={handleCreateOrder}
+                        onEdit={userRole === 'qmt' ? undefined : handleEditOrderWithStock}
+                        onCreate={userRole === 'qmt' ? undefined : handleCreateOrder}
                         inventory={inventory}
                     />
                 </Suspense>

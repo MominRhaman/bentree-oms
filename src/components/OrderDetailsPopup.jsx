@@ -942,7 +942,7 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
                     ) : (
                         <div className="w-full flex gap-3">
                             <button className="flex-1 py-2 text-slate-600 font-bold border border-slate-300 rounded hover:bg-slate-100 transition-colors" onClick={onClose}>Close</button>
-                            {order.isPartialReturn && (
+                            {order.isPartialReturn && onEdit && (
                                 <button
                                     className={`flex-1 py-2 text-white font-bold rounded shadow flex items-center justify-center gap-2 transition-all ${safeStatus === 'Dispatched' ? 'bg-slate-300 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-700'}`}
                                     disabled={safeStatus === 'Dispatched'}

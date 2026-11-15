@@ -1,0 +1,109 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Role resolution ─────────────────────────────────────────────────────
+    // Username/password logins get a server-issued custom token whose `role`
+    // claim is set by the credentialLogin Cloud Function.
+    // Google logins are resolved from this allow-list (verified email only).
+    // Keep this list in sync with functions/accounts.js and src/utils.js.
+    function googleRoles() {
+      return {
+        'iftekher.ifty@gmail.com': 'master',
+        'adeebkhan51@gmail.com': 'master',
+        'shahmd.nadim@gmail.com': 'master',
+        'mominrhaman007@gmail.com': 'master',
+        'mominbackstory@gmail.com': 'employee',
+        'iqramulhaque2404@gmail.com': 'employee'
+      };
+    }
+
+    function role() {
+      return request.auth == null ? null
+        : request.auth.token.get('role', null) != null ? request.auth.token.role
+        : request.auth.token.get('email_verified', false) == true
+          ? googleRoles().get(request.auth.token.get('email', ''), null)
+          : null;
+    }
+
+    function hasAnyRole() { return role() in ['master', 'employee', 'qmt']; }
+    // Master and Employee keep the same full read/write access as before.
+    function hasFullAccess() { return role() in ['master', 'employee']; }
+    function isQmt() { return role() == 'qmt'; }
+
+    // ── QMT: create new orders only ─────────────────────────────────────────
+    // Matches the payload written by NewOrderForm (status Pending for Online,
+    // Completed for Store) and nothing that could fake a return/exchange record.
+    function qmtCanCreateOrder() {
+      let d = request.resource.data;
+      return d.get('createdByUid', '') == request.auth.uid
+        && d.get('status', '') in ['Pending', 'Completed']
+        && d.get('archived', false) == false
+        && !('wc_order_id' in d);
+    }
+
+    // NewOrderForm stores the WooCommerce order ID on the order it just
+    // created. QMT may set that one field once, on its own order, shortly
+    // after creation — no other change to an existing order is allowed.
+    function qmtSetsOwnWooId() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['wc_order_id'])
+        && !('wc_order_id' in resource.data)
+        && resource.data.get('createdByUid', '') == request.auth.uid
+        && request.time < resource.data.createdAt + duration.value(15, 'm');
+    }
+
+    // Order creation deducts stock (updateInventoryStock). QMT may only change
+    // stock quantity fields; totalStock may only go down. Per-size `stock` map
+    // values cannot be compared key-by-key in rules, so only the shape is
+    // checked there (same sizes, one size changed per write).
+    function qmtDeductsStock() {
+      let keys = request.resource.data.diff(resource.data).affectedKeys();
+      return keys.hasOnly(['stock', 'totalStock'])
+        && (!('totalStock' in keys)
+            || request.resource.data.totalStock < resource.data.totalStock)
+        && (!('stock' in keys)
+            || (request.resource.data.stock.diff(resource.data.stock).addedKeys().size() == 0
+                && request.resource.data.stock.diff(resource.data.stock).removedKeys().size() == 0
+                && request.resource.data.stock.diff(resource.data.stock).changedKeys().size() == 1));
+    }
+
+    // Order creation logs one stock-out movement per unit (logInventoryMovement).
+    function qmtLogsSale() {
+      let d = request.resource.data;
+      return d.get('source', '') == 'order'
+        && d.get('actionType', '') in ['Online Order', 'Store Sale']
+        && d.get('change', 0) < 0;
+    }
+
+    // ── Bentree OMS data ────────────────────────────────────────────────────
+    match /artifacts/{appId}/public/data/orders/{orderId} {
+      allow read: if hasAnyRole();
+      allow create: if hasFullAccess() || (isQmt() && qmtCanCreateOrder());
+      allow update: if hasFullAccess() || (isQmt() && qmtSetsOwnWooId());
+      allow delete: if hasFullAccess();
+    }
+
+    match /artifacts/{appId}/public/data/inventory/{itemId} {
+      allow read: if hasAnyRole();
+      allow create, delete: if hasFullAccess();
+      allow update: if hasFullAccess() || (isQmt() && qmtDeductsStock());
+    }
+
+    match /artifacts/{appId}/public/data/inventoryAdjustments/{adjId} {
+      allow read: if hasAnyRole();
+      allow create: if hasFullAccess() || (isQmt() && qmtLogsSale());
+      allow update, delete: if hasFullAccess();
+    }
+
+    // locations, expenses and any other OMS collection: QMT read-only.
+    match /artifacts/{appId}/public/data/{collection}/{docId} {
+      allow read: if hasAnyRole();
+      allow write: if hasFullAccess();
+    }
+
+    // Everything else keeps Master/Employee full access (as before).
+    match /{document=**} {
+      allow read, write: if hasFullAccess();
+    }
+  }
+}

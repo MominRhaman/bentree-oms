@@ -3,7 +3,9 @@ import { Download, CheckCircle, Calendar, Zap } from 'lucide-react'; // Added Za
 import SearchBar from './SearchBar';
 import { downloadCSV } from '../utils';
 
-const DispatchTab = ({ orders, onUpdate }) => {
+const DispatchTab = ({ orders, onUpdate, userRole }) => {
+    // QMT accounts can only view orders — remarks and dispatch are locked for them
+    const isQMTUser = String(userRole || '').trim().toLowerCase() === 'qmt';
     const [filterDate, setFilterDate] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
 
@@ -132,6 +134,7 @@ const DispatchTab = ({ orders, onUpdate }) => {
                                         <input
                                             type="text"
                                             placeholder="Reason / Note..."
+                                            disabled={isQMTUser}
                                             className="border rounded px-2 py-1 text-xs w-full focus:ring-1 focus:ring-blue-500 outline-none bg-white"
                                             defaultValue={order.dispatchRemark || ''}
                                             // Save to DB on Blur (clicking away) to avoid re-renders while typing
@@ -142,7 +145,7 @@ const DispatchTab = ({ orders, onUpdate }) => {
 
                                     <td className="p-3">
                                         {isPending ? (
-                                            <button onClick={() => onUpdate(order.id, 'Dispatched')} className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700">Confirm Dispatch</button>
+                                            !isQMTUser && <button onClick={() => onUpdate(order.id, 'Dispatched')} className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700">Confirm Dispatch</button>
                                         ) : (
                                             <span className="flex items-center text-blue-600 text-xs font-bold"><CheckCircle size={14} className="mr-1" /> Dispatched</span>
                                         )}

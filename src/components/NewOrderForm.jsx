@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Save, AlertTriangle, Plus, Trash2, XCircle, Zap } from 'lucide-react';
 import { collection, addDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { db, appId } from '../firebase';
+import { db, appId, auth } from '../firebase';
 import { updateInventoryStock, disableScroll, computeStockBefores, logInventoryMovement } from '../utils';
 import { CreateOrder } from '../WooAPI/CreateOrder.jsx';
 import { useScanner } from '../hooks/useScanner';
@@ -289,6 +289,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
             date: formData.date,
             addedBy: user?.displayName || 'Unknown',
             addedByEmail: user?.email || 'N/A', // Audit: Creator account
+            createdByUid: auth.currentUser?.uid || null, // Lets Firestore rules verify the creator
             products: (() => {
                 const productNets = formData.products.map(p => {
                     const base = Number(p.price || 0) * Number(p.qty || 0);

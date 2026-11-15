@@ -3,7 +3,9 @@ import { ArrowRightLeft, Eye, CheckCircle, Clock } from 'lucide-react';
 import OrderDetailsPopup from './OrderDetailsPopup';
 import { getStatusColor } from '../utils';
 
-const ExchangeTab = ({ orders, onCreate, onEdit, inventory }) => {
+const ExchangeTab = ({ orders, onCreate, onEdit, inventory, userRole }) => {
+    // QMT accounts can only view exchanges — the "received" checkbox and editing are locked
+    const isQMTUser = String(userRole || '').trim().toLowerCase() === 'qmt';
     const [selectedOrder, setSelectedOrder] = useState(null);
 
     // Filter to include both full exchanges and partial exchanges
@@ -56,6 +58,7 @@ const ExchangeTab = ({ orders, onCreate, onEdit, inventory }) => {
                                                 {recordIndex === records.length - 1 && (
                                                     <input
                                                         type="checkbox"
+                                                        disabled={isQMTUser}
                                                         checked={isReceived}
                                                         onChange={(e) => {
                                                             onEdit(order.id, order.status, {
@@ -145,8 +148,8 @@ const ExchangeTab = ({ orders, onCreate, onEdit, inventory }) => {
                     order={selectedOrder}
                     onClose={() => setSelectedOrder(null)}
                     getStatusColor={getStatusColor}
-                    onEdit={onEdit}
-                    onCreate={onCreate}
+                    onEdit={isQMTUser ? undefined : onEdit}
+                    onCreate={isQMTUser ? undefined : onCreate}
                     inventory={inventory}
                 />
             )}

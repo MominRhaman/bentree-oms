@@ -368,6 +368,7 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                                                                 <label className="flex items-center cursor-pointer" onClick={(e) => e.stopPropagation()}>
                                                                     <input
                                                                         type="checkbox"
+                                                                        disabled={isQMTUser}
                                                                         className="w-3 h-3 text-green-600 rounded focus:ring-green-500 cursor-pointer"
                                                                         checked={order.isRefunded || false}
                                                                         onChange={() => {
@@ -419,6 +420,7 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                                             <input
                                                 className="border border-slate-300 rounded px-2 py-1 text-xs w-32 focus:ring-1 focus:ring-emerald-500"
                                                 placeholder="Enter ID"
+                                                disabled={isQMTUser}
                                                 defaultValue={order.trackingId || ''}
                                                 onClick={(e) => e.stopPropagation()}
                                                 onBlur={(e) => onUpdate(order.id, order.status, { trackingId: e.target.value })}
@@ -428,6 +430,7 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                                         <td className="p-3">
                                             <input
                                                 className="border rounded px-2 py-1 text-xs w-full focus:ring-1 focus:ring-emerald-500 outline-none"
+                                                disabled={isQMTUser}
                                                 defaultValue={order.remarks || ''}
                                                 onClick={(e) => e.stopPropagation()}
                                                 onBlur={(e) => onUpdate(order.id, order.status, { remarks: e.target.value })}
@@ -435,6 +438,7 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                                             />
                                         </td>
                                         <td className="p-3">
+                                            {!isQMTUser && (
                                             <div className="flex justify-center gap-1" onClick={(e) => e.stopPropagation()}>
                                                 <button
                                                     title="Mark as Delivered"
@@ -502,6 +506,7 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                                                 </button>
 
                                             </div>
+                                            )}
                                         </td>
                                     </tr>
                                 )
@@ -545,7 +550,7 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
             )}
 
             {/* --- Modals and Popups --- */}
-            {deliveryModal && (
+            {!isQMTUser && deliveryModal && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
                     <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm">
                         <div className="flex justify-between items-center mb-4">
@@ -571,7 +576,7 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                 </div>
             )}
 
-            {holdModal && (
+            {!isQMTUser && holdModal && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
                     <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm">
                         <div className="flex justify-between items-center mb-4">
@@ -595,13 +600,13 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
                     order={selectedOrder}
                     onClose={() => setSelectedOrder(null)}
                     getStatusColor={getStatusColor}
-                    onEdit={onEdit}
-                    onCreate={onCreate}
+                    onEdit={isQMTUser ? undefined : onEdit}
+                    onCreate={isQMTUser ? undefined : onCreate}
                     inventory={inventory}
                 />
             )}
 
-            {returnPopupOrder && (
+            {!isQMTUser && returnPopupOrder && (
                 <OrderDetailsPopup
                     order={returnPopupOrder}
                     onClose={() => setReturnPopupOrder(null)}
@@ -614,7 +619,7 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
             )}
 
             {/* EXCHANGE MODAL - For Full/Partial Exchange */}
-            {exchangeModal && (
+            {!isQMTUser && exchangeModal && (
                 <ExchangeModal
                     order={exchangeModal}
                     onClose={() => setExchangeModal(null)}
