@@ -1031,6 +1031,9 @@ exports.wooSyncOrder = onCall(async (request) => {
   // 2) Reuse IDs for updated items (overwrites in place)
   // 3) Zero out any excess old items
   // 4) Add extra new items without an ID (appended)
+  // Line items that will be removed but still hold website stock
+  // (see "release" below).
+  const releaseRemoved = [];
   if (order.products && order.products.length > 0) {
     const {data: wcOrder} = await api.get(`/orders/${wcId}`);
     const oldItems = wcOrder.line_items || [];
@@ -1052,6 +1055,52 @@ exports.wooSyncOrder = onCall(async (request) => {
           id: oldItems[i].id,
           product_id: oldItems[i].product_id,
           quantity: 0, subtotal: "0", total: "0",
+        });
+      }
+    }
+
+    // ── Stock: website stock is changed only by wooAdjustStock ──
+    // handleEditOrderWithStock already restores the old items and
+    // deducts the new ones via adjustWooStock. For an order in
+    // processing/completed/on-hold, WooCommerce's REST line-item update
+    // ALSO adjusts stock (wc_maybe_adjust_line_item_product_stock:
+    // new quantity minus the item's _reduced_stock), so every quantity
+    // or product change was applied twice, and its writes raced with
+    // adjustWooStock's read-then-write. Setting _reduced_stock to the
+    // item's new quantity makes that difference 0, so WooCommerce
+    // changes no stock here, while a later cancel still restores the
+    // final quantity like any other website order.
+    const WC_HOLDING = ["processing", "completed", "on-hold"];
+    if (WC_HOLDING.includes(wcOrder.status)) {
+      const refundedRestock = (item) => {
+        const m = ((item && item.meta_data) || []).find(
+            (x) => x.key === "_restock_refunded_items");
+        return m ? Number(m.value || 0) : 0;
+      };
+      merged.forEach((li, i) => {
+        const reduced = Math.max(0,
+            Number(li.quantity || 0) - refundedRestock(li.id && oldItems[i]));
+        li.meta_data = [{key: "_reduced_stock", value: reduced}];
+      });
+    }
+
+    // Removing an item (quantity 0) goes through WooCommerce's
+    // remove_item(), which gives back the item's _reduced_stock for any
+    // order status — on top of adjustWooStock's restore. Release those
+    // items first (_reduced_stock 0, _restock_refunded_items = qty: the
+    // line-item stock difference is 0, so this request changes no stock),
+    // so the removal below has nothing to give back.
+    for (let i = newItems.length; i < oldItems.length; i++) {
+      const held = ((oldItems[i].meta_data || []).find(
+          (x) => x.key === "_reduced_stock") || {}).value;
+      if (Number(held || 0) > 0) {
+        releaseRemoved.push({
+          id: oldItems[i].id,
+          meta_data: [
+            {key: "_reduced_stock", value: 0},
+            {key: "_restock_refunded_items",
+              value: Number(oldItems[i].quantity || 0)},
+          ],
         });
       }
     }
@@ -1088,6 +1137,9 @@ exports.wooSyncOrder = onCall(async (request) => {
         {wcId, err: stampErr.message});
   }
 
+  if (releaseRemoved.length > 0) {
+    await api.put(`/orders/${wcId}`, {line_items: releaseRemoved});
+  }
   await api.put(`/orders/${wcId}`, payload);
   logger.info("Woo order synced from OMS", {
     wcId, fields: Object.keys(payload),
