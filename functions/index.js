@@ -96,6 +96,59 @@ const stockOpsCol = () =>
       .collection("public").doc("data")
       .collection("wooStockOps");
 
+// Short-lived per-product / per-variation locks for wooAdjustStock.
+// Written only by Cloud Functions.
+const stockLocksCol = () =>
+  db.collection("artifacts").doc(APP_ID)
+      .collection("public").doc("data")
+      .collection("wooStockLocks");
+
+const STOCK_LOCK_LEASE_MS = 60000;
+const STOCK_LOCK_WAIT_MS = 45000;
+
+/**
+ * Runs fn while holding the lock for one website product or variation.
+ * WooCommerce's REST API can only set an absolute stock_quantity, so two
+ * OMS stock operations reading and writing the same item at once could
+ * overwrite each other. Different items don't block each other. The lock
+ * is a lease: if its holder crashes, it expires after STOCK_LOCK_LEASE_MS.
+ * @param {string} key - WooCommerce product ID or "productId_variationId".
+ * @param {Function} fn - async work done while holding the lock.
+ * @return {Promise<*>} fn's result.
+ */
+async function withStockLock(key, fn) {
+  const ref = stockLocksCol().doc(key);
+  const owner = crypto.randomUUID();
+  const giveUpAt = Date.now() + STOCK_LOCK_WAIT_MS;
+  for (;;) {
+    const got = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      const lock = snap.exists ? snap.data() : null;
+      if (lock && Number(lock.expiresAtMs || 0) > Date.now()) return false;
+      tx.set(ref, {owner, expiresAtMs: Date.now() + STOCK_LOCK_LEASE_MS});
+      return true;
+    });
+    if (got) break;
+    if (Date.now() > giveUpAt) {
+      throw new Error("Website stock for this product is busy; try again.");
+    }
+    await new Promise((r) => setTimeout(r, 200 + Math.random() * 300));
+  }
+  try {
+    return await fn();
+  } finally {
+    try {
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        if (snap.exists && snap.data().owner === owner) tx.delete(ref);
+      });
+    } catch (e) {
+      logger.warn("Could not release stock lock (it will expire)",
+          {key, err: e.message});
+    }
+  }
+}
+
 // WooCommerce order status → Bentree OMS status
 const STATUS_MAP = {
   "pending": "Pending",
@@ -410,6 +463,230 @@ function mapWooOrder(data) {
   };
 }
 
+// ── Split-order (partial return / partial exchange) helpers ─────────────────
+
+/**
+ * Size of a WooCommerce line item, found the same way as in mapWooOrder.
+ * @param {object} item - WooCommerce line item.
+ * @return {string} OMS canonical size, or "".
+ */
+function wooItemSize(item) {
+  const sizeMeta = (item.meta_data || []).find(
+      (m) => m.key === "pa_size" ||
+        m.key === "attribute_pa_size" ||
+        m.key === "size" ||
+        (m.display_key || "").toLowerCase() === "size",
+  );
+  const rawSize = sizeMeta ?
+    (sizeMeta.display_value || sizeMeta.value || "") : "";
+  return normalizeSize(rawSize) || rawSize;
+}
+
+/**
+ * Number value of a line item meta key (0 when missing).
+ * @param {object} item - WooCommerce line item.
+ * @param {string} key - meta key.
+ * @return {number}
+ */
+function wooItemMeta(item, key) {
+  const m = (item.meta_data || []).find((x) => x.key === key);
+  return m ? Number(m.value || 0) : 0;
+}
+
+/**
+ * The OMS order doc linked to a WooCommerce order ID (or null).
+ * @param {number|string} wcId - WooCommerce order ID.
+ * @return {Promise<object|null>} Firestore DocumentReference.
+ */
+async function findOrderRefByWcId(wcId) {
+  const directDoc = ordersCol().doc(String(wcId));
+  const snap = await directDoc.get();
+  if (snap.exists) return directDoc;
+  const q = await ordersCol()
+      .where("wc_order_id", "==", Number(wcId)).limit(1).get();
+  return q.empty ? null : q.docs[0].ref;
+}
+
+/**
+ * Records each website line's _restock_refunded_items after the OMS itself
+ * changed it (wooSyncOrder / wooSyncOrderStock). syncSplitOrderFromWebhook
+ * treats only increases beyond this baseline as website refund restocks.
+ * @param {number|string} wcId - WooCommerce order ID.
+ * @param {object} wcOrder - WooCommerce order after the OMS change.
+ */
+async function recordRestockBaseline(wcId, wcOrder) {
+  try {
+    const ref = await findOrderRefByWcId(wcId);
+    if (!ref) return;
+    const baseline = {};
+    for (const item of (wcOrder.line_items || [])) {
+      baseline[String(item.id)] = wooItemMeta(item, "_restock_refunded_items");
+    }
+    await ref.update({wcRestockBaseline: baseline});
+  } catch (err) {
+    logger.warn("Could not record restock baseline",
+        {wcId, err: err.message});
+  }
+}
+
+/**
+ * Website webhook for an order split by an OMS partial return / partial
+ * exchange. The OMS products are not overwritten (the website order still
+ * lists the original items). Website-side stock events are applied to OMS
+ * inventory, in one Firestore transaction with the order doc, so a repeated
+ * or retried webhook can't apply them twice:
+ *   - refund restock: the increase of a line's _restock_refunded_items over
+ *     wcRestockBaseline, capped at what this OMS order still holds for that
+ *     product (deductedProducts);
+ *   - cancelled / refunded: whatever the OMS order still holds is restored
+ *     and the OMS status becomes Cancelled / Returned.
+ * Other statuses are left alone (processing would otherwise reset a
+ * Dispatched / Delivered OMS status to Pending).
+ * @param {object} data - WooCommerce order payload.
+ * @param {string} docId - OMS order doc ID.
+ * @return {Promise<object>} summary for the log.
+ */
+async function syncSplitOrderFromWebhook(data, docId) {
+  const ref = ordersCol().doc(docId);
+  const newStatus = STATUS_MAP[data.status] || null;
+  const today = new Date().toISOString().split("T")[0];
+  // Simple products have no size on the website line, while the OMS may
+  // store "Free" for them, so those count as the same (empty) size.
+  const keyOf = (code, size) => {
+    const sz = normalizeSize(size || "");
+    return `${String(code || "").trim().toUpperCase()}|` +
+      `${sz === "FREE" || sz === "FREE SIZE" ? "" : sz}`;
+  };
+
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const order = snap.exists ? snap.data() : {};
+    const reference = order.merchantOrderId || `WC-${data.id}`;
+    const stillDeducted = order.stockDeducted === true;
+
+    // What this OMS order still holds, per product + size.
+    const held = {};
+    for (const p of (order.deductedProducts || [])) {
+      const k = keyOf(p.code, p.size);
+      if (!held[k]) held[k] = {p, qty: 0};
+      held[k].qty += Number(p.qty || 0);
+    }
+
+    // 1. Website refund restocks since the last known baseline. A line
+    // with no baseline yet (order split before baselines existed) only
+    // gets one, so nothing unverified is restored.
+    const hadBaseline = !!order.wcRestockBaseline;
+    const baseline = order.wcRestockBaseline || {};
+    const newBaseline = {};
+    const restores = {};
+    for (const item of (data.line_items || [])) {
+      const id = String(item.id);
+      const rr = wooItemMeta(item, "_restock_refunded_items");
+      newBaseline[id] = rr;
+      if (!hadBaseline || baseline[id] === undefined) continue;
+      const delta = rr - Number(baseline[id] || 0);
+      if (delta <= 0 || !stillDeducted) continue;
+      const k = keyOf(item.sku || "", wooItemSize(item));
+      const left = (held[k] ? held[k].qty : 0) -
+        (restores[k] ? restores[k].qty : 0);
+      const q = Math.min(delta, left);
+      if (q > 0) {
+        restores[k] = {
+          p: held[k].p, qty: (restores[k] ? restores[k].qty : 0) + q,
+          actionType: "Website Refund",
+        };
+      }
+    }
+
+    // 2. Cancelled / fully refunded on the website: restore the rest.
+    const becomesInactive = RESTORE_STATUSES.has(newStatus);
+    if (becomesInactive && stillDeducted) {
+      for (const [k, h] of Object.entries(held)) {
+        const already = restores[k] ? restores[k].qty : 0;
+        if (h.qty - already > 0) {
+          restores[k] = {
+            p: h.p, qty: h.qty,
+            actionType: newStatus === "Returned" ? "Full Return" : "Cancel",
+          };
+        }
+      }
+    }
+
+    // Inventory docs (all reads before any write).
+    const items = Object.entries(restores);
+    const invSnaps = await Promise.all(items.map(([, r]) => tx.get(
+        inventoryCol().where("code", "==",
+            String(r.p.code || "").toUpperCase()).limit(1))));
+
+    const restoredList = [];
+    items.forEach(([k, r], i) => {
+      const s = invSnaps[i];
+      if (s.empty) {
+        logger.warn("Inventory item not found", {code: r.p.code});
+        return;
+      }
+      const invDoc = s.docs[0];
+      const inv = invDoc.data();
+      let stockBefore;
+      if (inv.type === "Variable") {
+        const actualKey = Object.keys(inv.stock || {}).find(
+            (x) => normalizeSize(x) === normalizeSize(r.p.size));
+        if (!actualKey) {
+          logger.warn("Size not found in inventory",
+              {code: r.p.code, size: r.p.size});
+          return;
+        }
+        stockBefore = Number((inv.stock || {})[actualKey] || 0);
+        tx.update(invDoc.ref,
+            {[`stock.${actualKey}`]: FieldValue.increment(r.qty)});
+      } else {
+        stockBefore = Number(inv.totalStock || 0);
+        tx.update(invDoc.ref, {totalStock: FieldValue.increment(r.qty)});
+      }
+      // Movement log entries, one per unit (same shape as writeMovementLog).
+      let sb = stockBefore;
+      for (let u = 0; u < r.qty; u++) {
+        tx.set(adjustmentsCol().doc(), {
+          productCode: (r.p.code || "").toUpperCase(),
+          productName: r.p.name || "",
+          size: r.p.size || "Free",
+          previousQty: sb,
+          newQty: sb + 1,
+          change: 1,
+          adjustmentType: "Add",
+          actionType: r.actionType,
+          adjustedBy: "Website",
+          reference,
+          date: today,
+          timestamp: FieldValue.serverTimestamp(),
+          source: "order",
+        });
+        sb += 1;
+      }
+      restoredList.push([k, r.qty, r.actionType]);
+    });
+
+    // Order doc: what is still held, the new baseline, inactive status.
+    const remaining = [];
+    for (const [k, h] of Object.entries(held)) {
+      const left = h.qty - (restores[k] ? restores[k].qty : 0);
+      if (left > 0) remaining.push({...h.p, qty: left});
+    }
+    const update = {wcRestockBaseline: newBaseline, updatedAt: new Date()};
+    if (restoredList.length > 0) {
+      update.deductedProducts = remaining;
+      update.stockDeducted = remaining.length > 0;
+    }
+    if (becomesInactive && order.status !== newStatus) {
+      update.status = newStatus;
+      update.stockDeducted = false;
+      update.deductedProducts = [];
+    }
+    tx.update(ref, update);
+    return {restored: restoredList, status: update.status || order.status};
+  });
+}
+
 // ── Webhook handler ──────────────────────────────────────────────────────────
 
 /**
@@ -530,11 +807,12 @@ exports.woocommerceWebhook = onRequest(async (req, res) => {
     // The OMS sets _oms_partial_return: true and trims products to keptItems.
     // Letting the webhook overwrite with the full WooCommerce payload would
     // restore all returned items and re-deduct stock incorrectly.
-    if (existing._oms_partial_return === true) {
-      logger.info("Skipping webhook — OMS partial return",
-          {orderId: data.id});
-      return res.status(200).send("OK");
-    }
+    // Partial-exchange originals are split the same way (kept items only).
+    // They are no longer skipped outright: a website cancel or refund on
+    // them must still reach OMS inventory. Step 4d handles them without
+    // touching the OMS products (see syncSplitOrderFromWebhook).
+    const isSplitOrder = existing._oms_partial_return === true ||
+      existing._oms_partial_exchange === true;
 
     // ── 4c. Guard: bounce-back from OMS→Woo sync ───────────
     // handleEditOrderWithStock stamps _omsEditedAt synchronously, before
@@ -574,6 +852,16 @@ exports.woocommerceWebhook = onRequest(async (req, res) => {
           {merge: true},
       );
       return res.status(200).send("Order deleted");
+    }
+
+    // ── 4d. Partial return / partial exchange orders ─────────────────────
+    // Products stay as the OMS split them; only website cancel / refund
+    // restocks are applied to OMS inventory.
+    if (isSplitOrder) {
+      const result = await syncSplitOrderFromWebhook(data, docId);
+      logger.info("Split order webhook processed",
+          {orderId: data.id, topic, ...result});
+      return res.status(200).send("OK");
     }
 
     // ── 5. Save / update order document ──────────────────────────────────
@@ -959,23 +1247,33 @@ exports.wooAdjustStock = onCall(async (request) => {
           });
           return fail(`Size ${p.size || "(none)"} not found on the website`);
         }
-        const ns = Math.max(
-            0, (v.stock_quantity || 0) + delta * qty,
-        );
-        await api.put(
-            `/products/${prod.id}/variations/${v.id}`,
-            {stock_quantity: ns},
-        );
-        logger.info("Woo variation stock adjusted", {sku, ns});
+        // Read-then-write under a per-variation lock, re-reading the stock
+        // inside it, so another OMS stock operation on the same variation
+        // can't overwrite this change (see withStockLock).
+        await withStockLock(`${prod.id}_${v.id}`, async () => {
+          const {data: fresh} = await api.get(
+              `/products/${prod.id}/variations/${v.id}`);
+          const ns = Math.max(
+              0, (fresh.stock_quantity || 0) + delta * qty,
+          );
+          await api.put(
+              `/products/${prod.id}/variations/${v.id}`,
+              {stock_quantity: ns},
+          );
+          logger.info("Woo variation stock adjusted", {sku, ns});
+        });
       } else {
-        const ns = Math.max(
-            0, (prod.stock_quantity || 0) + delta * qty,
-        );
-        await api.put(
-            `/products/${prod.id}`,
-            {stock_quantity: ns},
-        );
-        logger.info("Woo product stock adjusted", {sku, ns});
+        await withStockLock(String(prod.id), async () => {
+          const {data: fresh} = await api.get(`/products/${prod.id}`);
+          const ns = Math.max(
+              0, (fresh.stock_quantity || 0) + delta * qty,
+          );
+          await api.put(
+              `/products/${prod.id}`,
+              {stock_quantity: ns},
+          );
+          logger.info("Woo product stock adjusted", {sku, ns});
+        });
       }
       done[itemKey(p, i)] = true;
       return true;
@@ -1193,7 +1491,11 @@ exports.wooSyncOrder = onCall(async (request) => {
   if (releaseRemoved.length > 0) {
     await api.put(`/orders/${wcId}`, {line_items: releaseRemoved});
   }
-  await api.put(`/orders/${wcId}`, payload);
+  const {data: synced} = await api.put(`/orders/${wcId}`, payload);
+  if (payload.line_items) {
+    // These restocked counts were set by the OMS, not by a website refund.
+    await recordRestockBaseline(wcId, synced);
+  }
   logger.info("Woo order synced from OMS", {
     wcId, fields: Object.keys(payload),
   });
@@ -1277,6 +1579,7 @@ exports.wooSyncOrderStock = onCall(async (request) => {
   const notOnOrder = Object.values(byVariation)
       .concat(Object.values(byProduct)).filter((q) => q > 0).length;
   if (updates.length === 0) {
+    await recordRestockBaseline(wcId, wcOrder);
     return {ok: true, updated: 0, notOnOrder};
   }
 
@@ -1292,7 +1595,10 @@ exports.wooSyncOrderStock = onCall(async (request) => {
     logger.warn("Could not stamp _omsEditedAt", {wcId, err: stampErr.message});
   }
 
-  await api.put(`/orders/${wcId}`, {line_items: updates});
+  const {data: synced} =
+    await api.put(`/orders/${wcId}`, {line_items: updates});
+  // These restocked counts were set by the OMS, not by a website refund.
+  await recordRestockBaseline(wcId, synced);
   logger.info("Woo order stock hold synced from OMS", {
     wcId, updated: updates.map((u) => [u.id, u.meta_data[0].value]),
     notOnOrder,
