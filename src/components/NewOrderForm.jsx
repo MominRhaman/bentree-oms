@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Save, AlertTriangle, Plus, Trash2, XCircle, Zap } from 'lucide-react';
-import { collection, addDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db, appId, auth } from '../firebase';
-import { updateInventoryStock, disableScroll, computeStockBefores, logInventoryMovement } from '../utils';
+import { applyInventoryChanges, disableScroll, computeStockBefores, logInventoryMovement } from '../utils';
 import { CreateOrder } from '../WooAPI/CreateOrder.jsx';
 import { useScanner } from '../hooks/useScanner';
 
@@ -405,12 +405,20 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
             }
 
             const stocksBefore = computeStockBefores(formData.products, inventory);
-            await Promise.all(formData.products.map(p =>
-                updateInventoryStock(p.code, p.size, -Number(p.qty), inventory)
-            ));
-            const docRef = await addDoc(
-                collection(db, 'artifacts', appId, 'public', 'data', 'orders'),
-                payload
+            // Stock deduction and the new order doc are ONE transaction: stock is
+            // re-checked fresh inside it (never below 0, even when another user sells
+            // the same item at the same moment) and there is no order without its
+            // stock, or stock taken without an order.
+            const docRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'orders'));
+            // Saved with the order (as handleCreateOrder does): this order holds its
+            // stock. Without the flag, the website webhook took the order for a
+            // reactivated one and deducted its stock a second time.
+            payload.stockDeducted = true;
+            payload.deductedProducts = payload.products;
+            await applyInventoryChanges(
+                formData.products.map(p => ({ code: p.code, size: p.size, qty: -Number(p.qty) })),
+                inventory,
+                { write: (tx) => tx.set(docRef, payload) }
             );
             const newRef = payload.merchantOrderId || payload.storeOrderId || docRef.id;
             const aType = orderType === 'Store' ? 'Store Sale' : 'Online Order';
@@ -427,7 +435,12 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
             // Tagged _oms_created=true so the webhook skips it (no duplicate).
             // Pass payload (normalized) — never spread formData over it.
             CreateOrder(payload)
-                .then(wcOrder => updateDoc(docRef, { wc_order_id: wcOrder.id }))
+                .then(wcOrder => updateDoc(docRef, {
+                    wc_order_id: wcOrder.id,
+                    // The website status the OMS created it with (webhook: only a
+                    // later website status CHANGE moves the OMS status / stock).
+                    ...(wcOrder.status ? { wcStatus: wcOrder.status } : {})
+                }))
                 .catch(err => console.warn(
                     '[WooOrder] Could not create WooCommerce order:',
                     err?.response?.data || err.message

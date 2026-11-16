@@ -2,8 +2,8 @@ import React, { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspens
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { collection, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, arrayUnion, addDoc, query, orderBy, limit, where } from 'firebase/firestore';
 import { auth, db, appId } from './firebase';
-import { getStatusColor, updateInventoryStock, computeStockBefores, logInventoryMovement, GOOGLE_ACCOUNTS, getEmployeeDateWindow } from './utils';
-import { adjustWooStock, wooUpdateOrder, wooSyncOrder, wooSyncOrderStock } from './WooAPI/wooStock';
+import { getStatusColor, applyInventoryChanges, heldByOrder, computeStockBefores, logInventoryMovement, GOOGLE_ACCOUNTS, getEmployeeDateWindow } from './utils';
+import { syncWooStock, wooUpdateOrder, wooSyncOrder, wooSyncOrderStock } from './WooAPI/wooStock';
 import { useScanner } from './hooks/useScanner';
 import { Menu } from 'lucide-react';
 
@@ -306,16 +306,22 @@ function App() {
 
         // Inventory flags to sync with Cloud Function tracking
         let stockFlags = {};
+        // Stock change applied in ONE transaction together with the order update
+        // below (all or nothing, never below 0). Movement logs are written only
+        // after that transaction succeeded.
+        let stockChanges = null;
+        let writeStockLogs = null;
 
         if (becomingInactive && wasActive) {
-            const s0 = computeStockBefores(order.products, inventory);
-            await Promise.all(order.products.map(p =>
-                updateInventoryStock(p.code, p.size, Number(p.qty), inventory)
-            ));
+            // Only what the order still holds comes back (units already given back,
+            // e.g. by a website refund with restock, are not restored twice).
+            const held = heldByOrder(order);
+            const s0 = computeStockBefores(held, inventory);
+            stockChanges = held.map(p => ({ code: p.code, size: p.size, qty: Number(p.qty) }));
             stockFlags = { stockDeducted: false, deductedProducts: [] };
             const aType = newStatus === 'Cancelled' ? (order.type === 'Store' ? 'Store Order Cancel' : 'Cancel') : 'Full Return';
             const ref0  = order.merchantOrderId || order.storeOrderId || activeId;
-            order.products.forEach((p, i) => {
+            writeStockLogs = () => held.forEach((p, i) => {
                 let sb = s0[i]; const qty = Number(p.qty || 0);
                 for (let u = 0; u < qty; u++) {
                     logInventoryMovement({ productCode: p.code, productName: p.name || p.code, size: p.size, qtyChange: +1, stockBefore: sb, actionType: aType, reference: ref0, user });
@@ -325,12 +331,10 @@ function App() {
         }
         if (isRestoring) {
             const s1 = computeStockBefores(order.products, inventory);
-            await Promise.all(order.products.map(p =>
-                updateInventoryStock(p.code, p.size, -Number(p.qty), inventory)
-            ));
+            stockChanges = order.products.map(p => ({ code: p.code, size: p.size, qty: -Number(p.qty) }));
             stockFlags = { stockDeducted: true, deductedProducts: order.products };
             const ref1 = order.merchantOrderId || order.storeOrderId || activeId;
-            order.products.forEach((p, i) => {
+            writeStockLogs = () => order.products.forEach((p, i) => {
                 let sb = s1[i]; const qty = Number(p.qty || 0);
                 for (let u = 0; u < qty; u++) {
                     logInventoryMovement({ productCode: p.code, productName: p.name || p.code, size: p.size, qtyChange: -1, stockBefore: sb, actionType: 'Restore', reference: ref1, user });
@@ -338,6 +342,7 @@ function App() {
                 }
             });
         }
+        let stockResults = [];
 
         // WooCommerce status to sync to, if this status change is actually changing
         // (guard prevents re-firing wooUpdateOrder on an already-Returned order, e.g.
@@ -365,28 +370,46 @@ function App() {
 
             // Stamp BEFORE any background WooCommerce call starts (not after), so
             // guard 4c in the webhook handler reliably skips the resulting bounce-back.
-            await updateDoc(orderRef, {
+            const orderUpdate = {
                 ...cleanExtraData,
                 ...stockFlags,
                 status: newStatus,
                 history: arrayUnion(historyEntry),
                 ...(order.wc_order_id ? { _omsEditedAt: serverTimestamp() } : {})
-            });
+            };
+            if (stockChanges) {
+                // Re-checks the order status inside the transaction, so a second
+                // click / another user can't restore or deduct the same stock twice.
+                stockResults = await applyInventoryChanges(stockChanges, inventory, {
+                    orderRef,
+                    expectOrder: (o) => (o && o.status === order.status) ? true
+                        : "This order's status was changed meanwhile. Reload and try again.",
+                    write: (tx) => tx.update(orderRef, orderUpdate),
+                });
+                if (writeStockLogs) writeStockLogs();
+            } else {
+                await updateDoc(orderRef, orderUpdate);
+            }
         } catch (err) {
             console.error("Update Status Error:", err);
+            if (stockChanges) alert(err?.message || 'Status update failed.');
             return;
         }
 
         // Background WooCommerce sync — fires only after the Firestore write above
         // (including the _omsEditedAt stamp) has committed.
         if (becomingInactive && wasActive && order.type === 'Online' && !order.wc_order_id) {
-            // Orders without a wc_order_id need manual WooCommerce stock restore
-            adjustWooStock(order.products, +1).catch(e =>
+            // Orders without a wc_order_id need manual WooCommerce stock restore:
+            // the website gets the exact quantity OMS now has.
+            syncWooStock(stockResults).catch(e =>
                 console.error('[WooStock] Cancel restore failed:', e)
             );
         }
-        if (isRestoring && order.type === 'Online') {
-            adjustWooStock(order.products, -1).catch(e =>
+        // A reactivated order takes its stock again on the website too. A store
+        // order linked to a website order counts as well: WooCommerce gave its
+        // stock back when it was cancelled there.
+        if (isRestoring && (order.type === 'Online' || order.wc_order_id)) {
+            syncWooStock(stockResults).catch(e =>
                 console.error('[WooStock] Re-activate deduct failed:', e)
             );
         }
@@ -436,21 +459,31 @@ function App() {
                     ? (updatedData.isPartialExchange ? 'Partial Exchange' : 'Full Exchange')
                     : 'Order Edit');
 
+            // STEP 1 + STEP 2 + STEP 3 run as ONE Firestore transaction
+            // (applyInventoryChanges below): the old stock is restored, the new stock
+            // deducted and the order saved all together or not at all, from fresh
+            // inventory values, so only the real difference moves, nothing goes below
+            // 0, and a failed edit leaves no half-applied stock. Movement logs are
+            // written after it succeeded.
+            const stockChanges = [];
+            const stockLogs = [];
+
             // STEP 1: Restore old stock (if the order was active before the edit)
-            // Each updateInventoryStock targets a different inventory doc via increment(),
-            // so all calls within a batch can run concurrently.
+            // Restores what the order still holds (deductedProducts), so units already
+            // given back (e.g. by a website refund with restock) are not restored twice.
+            const oldHeld = heldByOrder(oldOrder);
             if (!['Cancelled', 'Returned'].includes(oldOrder.status)) {
-                const s1 = computeStockBefores(oldOrder.products || [], inventory);
-                await Promise.all((oldOrder.products || []).map(p =>
-                    updateInventoryStock(p.code, p.size, Number(p.qty), inventory)
-                ));
-                (oldOrder.products || []).forEach((p, i) => {
+                const s1 = computeStockBefores(oldHeld, inventory);
+                oldHeld.forEach(p =>
+                    stockChanges.push({ code: p.code, size: p.size, qty: Number(p.qty) })
+                );
+                stockLogs.push(() => oldHeld.forEach((p, i) => {
                     let sb = s1[i]; const qty = Number(p.qty || 0);
                     for (let u = 0; u < qty; u++) {
                         logInventoryMovement({ productCode: p.code, productName: p.name || p.code, size: p.size, qtyChange: +1, stockBefore: sb, actionType: step1ActionType, reference: editRef, user });
                         if (typeof sb === 'number') sb += 1;
                     }
-                });
+                }));
             }
 
             // STEP 2: Deduct new stock (if the resulting status is active).
@@ -459,7 +492,7 @@ function App() {
             // Skip when dispatching a return order — no stock movement needed.
             if (isActiveStatus && !isDispatchingReturnOrder) {
                 const wasActiveBeforeEdit = !['Cancelled', 'Returned'].includes(oldOrder.status);
-                const restoredProducts = wasActiveBeforeEdit ? (oldOrder.products || []) : [];
+                const restoredProducts = wasActiveBeforeEdit ? oldHeld : [];
                 const effectiveInventory = restoredProducts.length === 0
                     ? inventory
                     : inventory.map(item => {
@@ -479,16 +512,16 @@ function App() {
                         return { ...item, totalStock: Number(item.totalStock || 0) + addedQty };
                     });
                 const s2 = computeStockBefores(newProducts, effectiveInventory);
-                await Promise.all(newProducts.map(p =>
-                    updateInventoryStock(p.code, p.size, -Number(p.qty), effectiveInventory)
-                ));
-                newProducts.forEach((p, i) => {
+                newProducts.forEach(p =>
+                    stockChanges.push({ code: p.code, size: p.size, qty: -Number(p.qty) })
+                );
+                stockLogs.push(() => newProducts.forEach((p, i) => {
                     let sb = s2[i]; const qty = Number(p.qty || 0);
                     for (let u = 0; u < qty; u++) {
                         logInventoryMovement({ productCode: p.code, productName: p.name || p.code, size: p.size, qtyChange: -1, stockBefore: sb, actionType: step2ActionType, reference: editRef, user });
                         if (typeof sb === 'number') sb -= 1;
                     }
-                });
+                }));
             }
 
             // STEP 3: Database Operation
@@ -496,7 +529,19 @@ function App() {
             // eslint-disable-next-line no-unused-vars
             const { id, _logActionType, createdAt, ...dataToSave } = updatedData;
 
-            await updateDoc(orderRef, {
+            // The order must still be what this edit started from (status and
+            // products), re-checked inside the transaction, so the same edit can't be
+            // applied twice (double click, two users).
+            const productSig = (list) => (list || [])
+                .map(p => `${(p.code || '').toUpperCase()}|${(p.size || '').toUpperCase()}|${Number(p.qty || 0)}`)
+                .join(',');
+            const oldProductsSig = productSig(oldOrder.products);
+            const stockResults = await applyInventoryChanges(stockChanges, inventory, {
+                orderRef,
+                expectOrder: (o) => (o && o.status === oldOrder.status &&
+                    productSig(o.products) === oldProductsSig) ? true
+                    : 'This order was changed meanwhile. Reload and try again.',
+                write: (tx) => tx.update(orderRef, {
                 ...dataToSave,
                 status: newStatus,
                 lastEditedBy: user?.displayName || 'Admin',
@@ -512,7 +557,9 @@ function App() {
                 // syncInventory to deduct the original product again instead of
                 // restoring it.
                 ...(oldOrder.type === 'Online' ? { _omsEditedAt: serverTimestamp() } : {})
+                }),
             });
+            stockLogs.forEach(writeLogs => writeLogs());
 
             // Sync WooCommerce stock for Online orders.
             // Awaited sequentially: both calls read-then-write stock quantities,
@@ -531,74 +578,24 @@ function App() {
                     oldOrder.status !== newStatus &&
                     ['Cancelled', 'Returned'].includes(newStatus);
 
-                // _oms_partial_return stays on the original order after a partial return
-                // (webhook guard 4a and reports read it), so it alone can't mark THIS edit
-                // as a partial return — otherwise every later edit of that order (Received
-                // Product checkbox, full exchange, an unchanged save) took this branch and
-                // deducted its products from the website again. handlePartialReturnProcess
-                // also sends _logActionType 'Partial Return', which is never saved.
-                const isPartialReturn = !!updatedData._oms_partial_return && logHint === 'Partial Return';
                 // True when this edit was initiated by handlePartialExchangeProcess — a separate
-                // exchange order was already created via handleCreateOrder (which calls
-                // adjustWooStock for the exchange items). This flag prevents double-adjustment:
-                // (1) wooSyncOrder is skipped so WooCommerce doesn't auto-restock zeroed items,
-                // (2) newProducts (keptItems) are not re-deducted in the isPartialReturn branch.
+                // exchange order was already created via handleCreateOrder (which sets the
+                // website stock for the exchange items). wooSyncOrder is skipped so WooCommerce
+                // doesn't auto-restock zeroed items.
                 const isPartialExchangeFlow = !!updatedData._oms_partial_exchange;
 
                 (async () => {
-                    if (isPartialReturn) {
-                        // Delta-based restore: only adjust the items that were actually removed
-                        // from the original order (returned or exchanged), not the full
-                        // restore+re-deduct cycle that causes double-adjustment with wooSyncOrder.
-                        if (!wooWillAutoRestock) {
-                            const oldQtyMap = {};
-                            for (const p of (oldOrder.products || [])) {
-                                const key = `${(p.code || '').toUpperCase()}|${(p.size || '').toUpperCase()}`;
-                                if (!oldQtyMap[key]) oldQtyMap[key] = { p, qty: 0 };
-                                oldQtyMap[key].qty += Number(p.qty || 0);
-                            }
-                            const newQtyMap = {};
-                            for (const p of newProducts) {
-                                const key = `${(p.code || '').toUpperCase()}|${(p.size || '').toUpperCase()}`;
-                                if (!newQtyMap[key]) newQtyMap[key] = 0;
-                                newQtyMap[key] += Number(p.qty || 0);
-                            }
-                            const returnedItems = [];
-                            for (const [key, entry] of Object.entries(oldQtyMap)) {
-                                const returnedQty = entry.qty - (newQtyMap[key] || 0);
-                                if (returnedQty > 0) returnedItems.push({ ...entry.p, qty: returnedQty });
-                            }
-                            if (returnedItems.length > 0) await adjustWooStock(returnedItems, +1);
-                            // For a full exchange after partial return: the replacement items are
-                            // in newProducts and must be deducted here. For a partial exchange the
-                            // separate exchange order's handleCreateOrder already deducted them.
-                            // Deduct only the quantity added by this edit (new minus old), the
-                            // mirror of returnedItems above: products kept in the order were
-                            // already deducted from the website when it was placed.
-                            const addedItems = [];
-                            const addedSeen = {};
-                            for (const p of newProducts) {
-                                const key = `${(p.code || '').toUpperCase()}|${(p.size || '').toUpperCase()}`;
-                                if (addedSeen[key]) continue;
-                                addedSeen[key] = true;
-                                const addedQty = newQtyMap[key] - (oldQtyMap[key]?.qty || 0);
-                                if (addedQty > 0) addedItems.push({ ...p, qty: addedQty });
-                            }
-                            if (!isPartialExchangeFlow && addedItems.length > 0) {
-                                await adjustWooStock(addedItems, -1);
-                            }
-                        }
-                        // Skip wooSyncOrder for partial returns/exchanges — WooCommerce order keeps
-                        // original products; only OMS tracks the kept/returned split.
-                    } else if (!isDispatchingReturnOrder) {
-                        if (!['Cancelled', 'Returned'].includes(oldOrder.status) && !wooWillAutoRestock) {
-                            await adjustWooStock(oldOrder.products || [], +1);
-                        }
-                        if (isActiveStatus) {
-                            await adjustWooStock(newProducts, -1);
-                        }
+                    // Website stock = OMS stock. stockResults holds, for every item this edit
+                    // really changed in OMS, its exact quantity before and after (only the net
+                    // difference: returned / exchanged-out items back, added items deducted,
+                    // kept items unchanged — a partial return, partial exchange, full exchange,
+                    // qty change or product swap alike). The website gets that same quantity.
+                    // Not when WooCommerce restores the order's stock itself (cancel / return
+                    // synced below), and not for dispatching a return record (status-only
+                    // change, no stock movement).
+                    if (!wooWillAutoRestock && !isDispatchingReturnOrder) {
+                        await syncWooStock(stockResults);
                     }
-                    // isDispatchingReturnOrder: status-only change, no WooCommerce stock movement.
                 })().catch(e => console.error('[WooStock] Background sync failed:', e));
 
                 // Sync order details to WooCommerce (non-blocking) — skipped for partial returns,
@@ -618,7 +615,7 @@ function App() {
                 // Make the website order hold only what this OMS order still has. Products
                 // added by this edit (e.g. full exchange after a partial return) are not on
                 // the website order yet, so its line items are synced (products only).
-                // Both calls change no website stock (adjustWooStock above does that).
+                // Both calls change no website stock (syncWooStock above does that).
                 // Skipped when the website order is about to be cancelled: WooCommerce
                 // restores what it holds, which is what this order still has.
                 const isSplitOrder = !!updatedData._oms_partial_return || isPartialExchangeFlow;
@@ -660,7 +657,8 @@ function App() {
 
         } catch (err) {
             console.error("Inventory Sync Failure:", err);
-            alert("Error syncing inventory. Check console for details.");
+            // Nothing was applied (stock and order are one transaction).
+            alert(`Error syncing inventory. Nothing was changed.\n${err?.message || ''}`);
         }
     }, [orders, inventory, user]);
 
@@ -684,14 +682,6 @@ function App() {
 
             // CRITICAL: For RETURNED/CANCELLED orders, we DON'T touch inventory
 
-            // Only deduct inventory if creating a new ACTIVE order (not a return)
-            if (!['Cancelled', 'Returned'].includes(orderData.status)) {
-                const products = orderData.products || [];
-                await Promise.all(products.map(p =>
-                    updateInventoryStock(p.code, p.size, -Number(p.qty), inventory)
-                ));
-            }
-
             // Create new document in Firebase using your custom path
             const ordersRef = collection(db, 'artifacts', appId, 'public', 'data', 'orders');
 
@@ -700,19 +690,32 @@ function App() {
 
             const isActiveOrder = !['Cancelled', 'Returned'].includes(orderData.status);
 
-            const docRef = await addDoc(ordersRef, {
-                ...cleanOrderData,
-                createdAt: serverTimestamp(),
-                updatedAt: serverTimestamp(),
-                createdBy: user?.displayName || 'Admin',
-                stockDeducted: isActiveOrder,
-                deductedProducts: isActiveOrder ? (orderData.products || []) : [],
-            });
+            // Only deduct inventory if creating a new ACTIVE order (not a return).
+            // The deduction and the new order doc are ONE transaction: never below 0,
+            // and no order without its stock (or stock without its order).
+            const docRef = doc(ordersRef);
+            const stockResults = await applyInventoryChanges(
+                isActiveOrder
+                    ? (orderData.products || []).map(p => ({ code: p.code, size: p.size, qty: -Number(p.qty) }))
+                    : [],
+                inventory,
+                {
+                    write: (tx) => tx.set(docRef, {
+                        ...cleanOrderData,
+                        createdAt: serverTimestamp(),
+                        updatedAt: serverTimestamp(),
+                        createdBy: user?.displayName || 'Admin',
+                        stockDeducted: isActiveOrder,
+                        deductedProducts: isActiveOrder ? (orderData.products || []) : [],
+                    }),
+                }
+            );
 
-            // Deduct WooCommerce stock for new active online orders (e.g. partial exchange items).
-            // Return orders have status 'Returned' — isActiveOrder is false, no deduction.
+            // Website stock for new active online orders (e.g. partial exchange items):
+            // the exact quantity OMS now has. Return orders have status 'Returned' —
+            // isActiveOrder is false, no deduction.
             if (isActiveOrder && orderData.type === 'Online') {
-                adjustWooStock(orderData.products || [], -1).catch(e =>
+                syncWooStock(stockResults).catch(e =>
                     console.error('[WooStock] New active order deduct failed:', e)
                 );
             }
@@ -723,30 +726,61 @@ function App() {
             alert(`Failed to create return order: ${error.message}`);
             throw error;
         }
-    }, [inventory, user, adjustWooStock]);
+    }, [inventory, user]);
 
     // --- 7. INVENTORY IMPACT LOGIC: Permanent Deletion ---
     const handleDeleteOrder = useCallback(async (orderId) => {
         if (isQmtBlocked()) return;
         const order = orders.find(o => o.id === orderId);
+        const orderRef = doc(db, 'artifacts', appId, 'public', 'data', 'orders', orderId);
+        const archiveUpdate = {
+            archived: true,
+            archivedAt: serverTimestamp(),
+            archivedReason: 'deleted',
+        };
         if (order && !['Cancelled', 'Returned'].includes(order.status)) {
             const delRef = order.merchantOrderId || order.storeOrderId || orderId;
-            const delBefore = computeStockBefores(order.products, inventory);
-            await Promise.all(order.products.map(p =>
-                updateInventoryStock(p.code, p.size, Number(p.qty), inventory)
-            ));
-            order.products.forEach((p, i) => {
+            const held = heldByOrder(order);
+            const delBefore = computeStockBefores(held, inventory);
+            // Restore + archive in ONE transaction, re-checking the order inside it
+            // so a second delete can't restore the same stock again.
+            let stockResults;
+            try {
+                stockResults = await applyInventoryChanges(
+                    held.map(p => ({ code: p.code, size: p.size, qty: Number(p.qty) })),
+                    inventory,
+                    {
+                        orderRef,
+                        expectOrder: (o) => (o && !o.archived && o.status === order.status) ? true
+                            : 'This order was changed meanwhile. Reload and try again.',
+                        write: (tx) => tx.update(orderRef, { ...archiveUpdate, stockDeducted: false, deductedProducts: [] }),
+                    }
+                );
+            } catch (err) {
+                console.error('[DeleteOrder] failed:', err);
+                alert(err?.message || 'Delete failed.');
+                return;
+            }
+            held.forEach((p, i) => {
                 let sb = delBefore[i]; const qty = Number(p.qty || 0);
                 for (let u = 0; u < qty; u++) {
                     logInventoryMovement({ productCode: p.code, productName: p.name || p.code, size: p.size, qtyChange: +1, stockBefore: sb, actionType: 'Order Delete', reference: delRef, user });
                     if (typeof sb === 'number') sb += 1;
                 }
             });
-            // Restore WooCommerce stock for Online orders (fire-and-forget)
+            // Restore WooCommerce stock for Online orders (fire-and-forget): the
+            // exact quantity OMS now has. A linked website order keeps its line
+            // items but stops holding stock, so a later cancel / refund there can't
+            // give the same units back a second time (changes no stock itself).
             if (order.type === 'Online') {
-                adjustWooStock(order.products, +1).catch(e =>
+                syncWooStock(stockResults).catch(e =>
                     console.error('[WooStock] Delete restore failed:', e)
                 );
+                if (order.wc_order_id) {
+                    wooSyncOrderStock({ wc_order_id: order.wc_order_id, products: [] }).catch(e =>
+                        console.error('[WooSyncStock] Delete release failed:', e)
+                    );
+                }
             }
         }
         // Cancel corresponding WooCommerce order when a store order is deleted
@@ -755,11 +789,9 @@ function App() {
                 console.error('[WooOrder] Store delete cancel failed:', e)
             );
         }
-        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', orderId), {
-            archived: true,
-            archivedAt: serverTimestamp(),
-            archivedReason: 'deleted',
-        });
+        if (!(order && !['Cancelled', 'Returned'].includes(order.status))) {
+            await updateDoc(orderRef, archiveUpdate);
+        }
     }, [orders, inventory, user]);
 
     const handleRestoreOrder = useCallback(async (orderId) => {
@@ -777,10 +809,39 @@ function App() {
         if (isQmtBlocked()) return;
         try {
             const oldItem = inventory.find(i => i.id === id);
-            await updateDoc(
-                doc(db, 'artifacts', appId, 'public', 'data', 'inventory', id),
-                updatedData
-            );
+            const invRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventory', id);
+
+            // Stock quantities are applied as the change the user made (form value
+            // minus the value the form was opened with) onto the FRESH stock, in ONE
+            // transaction with the other fields: sales made meanwhile are not
+            // overwritten, nothing goes below 0, and only a real stock change moves
+            // (e.g. "Reset Initial Stock" sends no stock and changes none).
+            // Other edits (type change, new item) keep the plain update.
+            const stockChanges = [];
+            let otherFields = updatedData;
+            if (oldItem && oldItem.type === 'Variable' && updatedData.type === 'Variable' && updatedData.stock !== undefined) {
+                const { stock: newStock, ...rest } = updatedData;
+                otherFields = rest;
+                const oldStock = oldItem.stock || {};
+                const sizes = new Set([...Object.keys(oldStock), ...Object.keys(newStock || {})]);
+                for (const size of sizes) {
+                    const diff = Number((newStock || {})[size] || 0) - Number(oldStock[size] || 0);
+                    if (diff !== 0) stockChanges.push({ code: oldItem.code, size, qty: diff });
+                }
+            } else if (oldItem && oldItem.type === 'Single' && (updatedData.type === undefined || updatedData.type === 'Single') && updatedData.totalStock !== undefined) {
+                const { totalStock: newTotal, ...rest } = updatedData;
+                otherFields = rest;
+                const diff = Number(newTotal || 0) - Number(oldItem.totalStock || 0);
+                if (diff !== 0) stockChanges.push({ code: oldItem.code, size: '', qty: diff });
+            }
+            let stockResults = [];
+            if (stockChanges.length > 0) {
+                stockResults = await applyInventoryChanges(stockChanges, inventory, {
+                    write: (tx) => { if (Object.keys(otherFields).length > 0) tx.update(invRef, otherFields); },
+                });
+            } else {
+                await updateDoc(invRef, otherFields);
+            }
             if (!oldItem) return;
 
             const code = (updatedData.code || oldItem.code || '').toUpperCase();
@@ -788,39 +849,25 @@ function App() {
             const dateStr = new Date().toISOString().split('T')[0];
             const adjustedBy = user?.displayName || 'Admin';
 
-            const logAndSync = async (size, oldQty, newQty) => {
-                const diff = newQty - oldQty;
-                if (diff === 0) return;
-                const adjustmentType = diff > 0 ? 'Add' : 'Minus';
+            // One log entry per changed size, with the real (fresh) before / after.
+            for (const r of stockResults) {
+                const diff = r.after - r.before;
                 await addDoc(adjCol, {
                     productCode: code,
                     productName: updatedData.productName || oldItem.productName || '',
                     category: updatedData.category || oldItem.category || '',
-                    size,
-                    previousQty: oldQty,
-                    newQty,
+                    size: r.size || 'Free',
+                    previousQty: r.before,
+                    newQty: r.after,
                     change: diff,
-                    adjustmentType,
+                    adjustmentType: diff > 0 ? 'Add' : 'Minus',
                     adjustedBy,
                     date: dateStr,
                     timestamp: serverTimestamp()
                 });
-                adjustWooStock(
-                    [{ code, size: size === 'Free' ? '' : size, qty: Math.abs(diff) }],
-                    diff > 0 ? +1 : -1
-                ).catch(e => console.error('[WooStock] Inventory adj failed:', e));
-            };
-
-            if (oldItem.type === 'Variable' && updatedData.type === 'Variable') {
-                const oldStock = oldItem.stock || {};
-                const newStock = updatedData.stock || {};
-                const sizes = new Set([...Object.keys(oldStock), ...Object.keys(newStock)]);
-                for (const size of sizes) {
-                    await logAndSync(size, Number(oldStock[size] || 0), Number(newStock[size] || 0));
-                }
-            } else if (oldItem.type === 'Single') {
-                await logAndSync('Free', Number(oldItem.totalStock || 0), Number(updatedData.totalStock || 0));
             }
+            // Website stock = the exact quantity OMS now has.
+            syncWooStock(stockResults).catch(e => console.error('[WooStock] Inventory adj failed:', e));
 
             // Auto-archive when stock reaches 0
             if (!oldItem.archived && !recentlyRestoredRef.current.has(id)) {
@@ -839,7 +886,7 @@ function App() {
                 }
             }
         } catch (e) {
-            alert("Inventory update failed");
+            alert(`Inventory update failed${e?.message ? `\n${e.message}` : ''}`);
         }
     }, [inventory, user]);
     const handleDeleteInventory = useCallback(async (id) => {

@@ -1,4 +1,4 @@
-import { doc, updateDoc, increment, collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, increment, collection, addDoc, serverTimestamp, runTransaction } from 'firebase/firestore';
 import { db, appId } from './firebase';
 
 // --- User Access Configuration ---
@@ -117,6 +117,105 @@ export const downloadCSV = (data, filename) => {
 export const disableScroll = (e) => e.target.blur();
 
 // --- ATOMIC STOCK LOGIC ---
+// Applies signed stock changes [{code, size, qty}] (qty < 0 deducts, qty > 0
+// restores) in ONE Firestore transaction. Each inventory doc is read fresh
+// inside the transaction (React state can be stale, and other users can
+// change stock at the same time), so:
+//   - no item can end below 0: the whole change is refused with an
+//     "Insufficient stock" error and nothing is written;
+//   - several products change all together or not at all;
+//   - opts.orderRef + opts.expectOrder(order) re-check the order inside the
+//     same transaction (return true to go on, or an error message), so a
+//     double click / a second user can't apply the same change twice;
+//   - opts.write(tx, results) adds the order write to the same transaction.
+// Returns [{code, size, type, before, after}] for every item that changed:
+// the exact OMS quantities, used to set the same quantity on the website.
+export const applyInventoryChanges = async (changes, inventoryList, opts = {}) => {
+    const list = [];
+    for (const c of (changes || [])) {
+        const qty = Number(c.qty || 0);
+        if (!c.code || qty === 0) continue;
+        const targetCode = c.code.trim().toUpperCase();
+        const product = (inventoryList || []).find(p => p.code && p.code.toUpperCase() === targetCode);
+        if (!product) {
+            console.warn(`Stock Sync: Product ${c.code} not found in current inventory state.`);
+            continue;
+        }
+        if (product.type === 'Variable' && !(c.size ? normalizeSize(c.size) : null)) continue;
+        list.push({ ...c, qty, targetCode, product });
+    }
+
+    return runTransaction(db, async (tx) => {
+        // All reads first.
+        if (opts.orderRef && opts.expectOrder) {
+            const os = await tx.get(opts.orderRef);
+            const ok = opts.expectOrder(os.exists() ? os.data() : null);
+            if (ok !== true) {
+                throw new Error(typeof ok === 'string' ? ok : 'This order was changed meanwhile. Reload and try again.');
+            }
+        }
+        const ids = [...new Set(list.map(c => c.product.id))];
+        const snaps = await Promise.all(ids.map(id =>
+            tx.get(doc(db, 'artifacts', appId, 'public', 'data', 'inventory', id))));
+        const fresh = {};
+        ids.forEach((id, i) => { fresh[id] = snaps[i].exists() ? snaps[i].data() : null; });
+
+        const slots = new Map();
+        for (const c of list) {
+            const item = fresh[c.product.id];
+            if (!item) throw new Error(`Product ${c.targetCode} no longer exists in inventory`);
+            let field; let sizeKey = ''; let before;
+            if (item.type === 'Variable') {
+                const want = normalizeSize(c.size);
+                // Match by canonical form so "2XL" finds "XXL" keys and vice versa
+                sizeKey = Object.keys(item.stock || {}).find(k => normalizeSize(k) === want) || want;
+                field = `stock.${sizeKey}`;
+                before = Number(item.stock?.[sizeKey] || 0);
+            } else {
+                field = 'totalStock';
+                before = Number(item.totalStock || 0);
+            }
+            const k = `${c.product.id}|${field}`;
+            if (!slots.has(k)) slots.set(k, { id: c.product.id, field, code: c.targetCode, size: sizeKey, type: item.type, start: before, cur: before });
+            slots.get(k).cur += c.qty;
+        }
+
+        // Guard: refuse any change that would push stock below 0
+        for (const s of slots.values()) {
+            if (s.cur < 0 && s.cur < s.start) {
+                console.warn(`Stock guard: ${s.code}${s.size ? ` (${s.size})` : ''} has ${s.start}, cannot deduct ${s.start - s.cur}`);
+                throw new Error(`Insufficient stock for ${s.code}${s.size ? ` (${s.size})` : ''}: available ${s.start}, requested ${s.start - s.cur}`);
+            }
+        }
+
+        for (const s of slots.values()) {
+            if (s.cur !== s.start) {
+                tx.update(doc(db, 'artifacts', appId, 'public', 'data', 'inventory', s.id), {
+                    [s.field]: increment(s.cur - s.start)
+                });
+            }
+        }
+        const results = [...slots.values()]
+            .filter(s => s.cur !== s.start)
+            .map(s => ({ code: s.code, size: s.size, type: s.type, before: s.start, after: s.cur }));
+        if (opts.write) opts.write(tx, results);
+        return results;
+    });
+};
+
+// What an order currently holds (has deducted) from inventory. deductedProducts
+// follows every stock change of the order (edits, website refund restocks, ...);
+// an explicit stockDeducted false holds nothing (e.g. a website order whose stock
+// could not be deducted); orders saved before the flag existed hold their products.
+export const heldByOrder = (order) => {
+    if (!order) return [];
+    if (order.stockDeducted === true) {
+        return Array.isArray(order.deductedProducts) ? order.deductedProducts : (order.products || []);
+    }
+    if (order.stockDeducted === false) return [];
+    return order.products || [];
+};
+
 export const updateInventoryStock = async (productCode, size, qtyChange, inventoryList) => {
     if (!productCode || qtyChange === 0) return false;
 
@@ -130,43 +229,11 @@ export const updateInventoryStock = async (productCode, size, qtyChange, invento
         console.warn(`Stock Sync: Product ${productCode} not found in current inventory state.`);
         return false;
     }
-
-    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventory', product.id);
+    if (product.type === 'Variable' && !(size ? normalizeSize(size) : null)) return false;
 
     try {
-        if (product.type === 'Variable') {
-            const sizeKey = size ? normalizeSize(size) : null;
-            if (!sizeKey) return false;
-
-            // Match by canonical form so "2XL" finds "XXL" keys and vice versa
-            const actualKey = Object.keys(product.stock || {}).find(k => normalizeSize(k) === sizeKey) || sizeKey;
-
-            // Guard: refuse deduction if it would push stock below 0
-            if (qtyChange < 0) {
-                const currentStock = Number(product.stock?.[actualKey] || 0);
-                if (currentStock + qtyChange < 0) {
-                    console.warn(`Stock guard: ${targetCode} (${actualKey}) has ${currentStock}, cannot deduct ${Math.abs(qtyChange)}`);
-                    throw new Error(`Insufficient stock for ${targetCode} (${actualKey}): available ${currentStock}, requested ${Math.abs(qtyChange)}`);
-                }
-            }
-
-            await updateDoc(docRef, {
-                [`stock.${actualKey}`]: increment(qtyChange)
-            });
-        } else {
-            // Guard: refuse deduction if it would push stock below 0
-            if (qtyChange < 0) {
-                const currentStock = Number(product.totalStock || 0);
-                if (currentStock + qtyChange < 0) {
-                    console.warn(`Stock guard: ${targetCode} has ${currentStock}, cannot deduct ${Math.abs(qtyChange)}`);
-                    throw new Error(`Insufficient stock for ${targetCode}: available ${currentStock}, requested ${Math.abs(qtyChange)}`);
-                }
-            }
-
-            await updateDoc(docRef, {
-                totalStock: increment(qtyChange)
-            });
-        }
+        // Same transaction as applyInventoryChanges: fresh read, never below 0
+        await applyInventoryChanges([{ code: productCode, size, qty: qtyChange }], inventoryList);
         return true;
     } catch (err) {
         console.error("CRITICAL: updateInventoryStock failed:", err);

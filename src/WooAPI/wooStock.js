@@ -38,6 +38,57 @@ export async function adjustWooStock(products, delta) {
 }
 
 /**
+ * OMS → website exact stock: after an OMS inventory change, set each changed
+ * item's website stock to the same quantity the OMS now has.
+ * results = applyInventoryChanges() output [{code, size, before, after}].
+ * The Cloud Function sets `after` when the website still shows `before`;
+ * if the website shows something else (a website change not yet in OMS) it
+ * keeps that newer value, applies only this change, and records the item as
+ * a mismatch for reconciliation. The website never goes below 0.
+ * Fire-and-forget safe — errors are logged and offered for retry.
+ *
+ * @param {Array} results - [{code, size, before, after}]
+ */
+export async function syncWooStock(results) {
+    const items = (results || [])
+        .filter(r => r && r.code && Number(r.before) !== Number(r.after))
+        .map(r => ({ code: r.code, size: r.size || '', before: Number(r.before), after: Number(r.after) }));
+    if (items.length === 0) return;
+    const fn = httpsCallable(functions, 'wooSetStock');
+    // One ID per stock operation: a retry sends the same ID, and the Cloud
+    // Function skips the items it already set, so nothing moves twice.
+    const opId = (globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`);
+    const label = (p) => `${p.code}${p.size ? ` (${p.size})` : ''}`;
+    for (;;) {
+        let problem = '';
+        try {
+            const result = await fn({ items, opId });
+            const rows = result.data.results || [];
+            const mismatched = rows.filter(r => r.status === 'mismatch');
+            if (mismatched.length > 0) {
+                console.warn('[WooStock] OMS and website differ (recorded for reconciliation):',
+                    mismatched.map(r => `${label(r)}: OMS ${r.omsQty}, website ${r.websiteQty}`).join('; '));
+            }
+            console.log('[WooStock] set:', rows.length, 'items');
+            const failed = result.data.failed || [];
+            if (failed.length === 0) return;
+            problem = failed.map(f => `- ${label(f)}: ${f.reason}`).join('\n');
+        } catch (err) {
+            console.error('[WooStock] Failed:', err?.message || err);
+            problem = `- ${err?.message || err}`;
+        }
+        console.error('[WooStock] Website stock not updated:\n' + problem);
+        // OMS inventory is already updated; only the website stock is behind.
+        const retry = window.confirm(
+            `Website stock was NOT updated to match OMS for:\n${problem}\n\n` +
+            'OMS inventory is already updated. Retry the website update now?\n' +
+            '(Items that already succeeded will not be changed again.)'
+        );
+        if (!retry) return;
+    }
+}
+
+/**
  * Update a WooCommerce order's status via Cloud Function proxy.
  * Cancelling a WooCommerce order triggers its built-in stock restoration.
  *
