@@ -10,11 +10,30 @@ import { functions } from '../firebase';
  */
 export async function adjustWooStock(products, delta) {
     const fn = httpsCallable(functions, 'wooAdjustStock');
-    try {
-        const result = await fn({ products, delta });
-        console.log('[WooStock] adjusted:', result.data.adjusted, 'items');
-    } catch (err) {
-        console.error('[WooStock] Failed:', err?.message || err);
+    // One ID per stock operation: a retry sends the same ID, and the Cloud
+    // Function skips the items it already adjusted, so nothing moves twice.
+    const opId = (globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`);
+    const label = (p) => `${p.code}${p.size ? ` (${p.size})` : ''} x${p.qty}`;
+    for (;;) {
+        let problem = '';
+        try {
+            const result = await fn({ products, delta, opId });
+            console.log('[WooStock] adjusted:', result.data.adjusted, 'items');
+            const failed = result.data.failed || [];
+            if (failed.length === 0) return;
+            problem = failed.map(f => `- ${label(f)}: ${f.reason}`).join('\n');
+        } catch (err) {
+            console.error('[WooStock] Failed:', err?.message || err);
+            problem = `- ${err?.message || err}`;
+        }
+        console.error('[WooStock] Website stock not updated:\n' + problem);
+        // OMS inventory is already updated; only the website stock is behind.
+        const retry = window.confirm(
+            `Website stock was NOT ${delta < 0 ? 'reduced' : 'increased'} for:\n${problem}\n\n` +
+            'OMS inventory is already updated. Retry the website update now?\n' +
+            '(Items that already succeeded will not be changed again.)'
+        );
+        if (!retry) return;
     }
 }
 
@@ -33,6 +52,26 @@ export async function wooUpdateOrder(wcOrderId, status) {
         console.log(`[WooOrder] Order ${wcOrderId} status → ${status}`);
     } catch (err) {
         console.error('[WooOrder] Update failed:', err?.message || err);
+    }
+}
+
+/**
+ * After a partial return / partial exchange: make the stock the website
+ * order holds match the OMS order's remaining products, without changing
+ * its line items, so a later website cancel or refund cannot give returned
+ * or exchanged-out items back a second time. Changes no stock itself.
+ *
+ * @param {object} orderData - { wc_order_id, products }
+ */
+export async function wooSyncOrderStock(orderData) {
+    if (!orderData?.wc_order_id) return;
+    const fn = httpsCallable(functions, 'wooSyncOrderStock');
+    try {
+        const result = await fn(orderData);
+        console.log(`[WooSyncStock] Order ${orderData.wc_order_id}:`, result.data);
+    } catch (err) {
+        console.error('[WooSyncStock] Failed:', err?.message || err);
+        alert(`Website order #${orderData.wc_order_id} could not be updated after this return/exchange:\n${err?.message || err}\n\nSave the order again to retry.`);
     }
 }
 

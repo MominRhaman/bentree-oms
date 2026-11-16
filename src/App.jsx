@@ -3,7 +3,7 @@ import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { collection, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, arrayUnion, addDoc, query, orderBy, limit, where } from 'firebase/firestore';
 import { auth, db, appId } from './firebase';
 import { getStatusColor, updateInventoryStock, computeStockBefores, logInventoryMovement, GOOGLE_ACCOUNTS, getEmployeeDateWindow } from './utils';
-import { adjustWooStock, wooUpdateOrder, wooSyncOrder } from './WooAPI/wooStock';
+import { adjustWooStock, wooUpdateOrder, wooSyncOrder, wooSyncOrderStock } from './WooAPI/wooStock';
 import { useScanner } from './hooks/useScanner';
 import { Menu } from 'lucide-react';
 
@@ -531,7 +531,13 @@ function App() {
                     oldOrder.status !== newStatus &&
                     ['Cancelled', 'Returned'].includes(newStatus);
 
-                const isPartialReturn = !!updatedData._oms_partial_return;
+                // _oms_partial_return stays on the original order after a partial return
+                // (webhook guard 4a and reports read it), so it alone can't mark THIS edit
+                // as a partial return — otherwise every later edit of that order (Received
+                // Product checkbox, full exchange, an unchanged save) took this branch and
+                // deducted its products from the website again. handlePartialReturnProcess
+                // also sends _logActionType 'Partial Return', which is never saved.
+                const isPartialReturn = !!updatedData._oms_partial_return && logHint === 'Partial Return';
                 // True when this edit was initiated by handlePartialExchangeProcess — a separate
                 // exchange order was already created via handleCreateOrder (which calls
                 // adjustWooStock for the exchange items). This flag prevents double-adjustment:
@@ -566,8 +572,20 @@ function App() {
                             // For a full exchange after partial return: the replacement items are
                             // in newProducts and must be deducted here. For a partial exchange the
                             // separate exchange order's handleCreateOrder already deducted them.
-                            if (!isPartialExchangeFlow && newProducts.length > 0) {
-                                await adjustWooStock(newProducts, -1);
+                            // Deduct only the quantity added by this edit (new minus old), the
+                            // mirror of returnedItems above: products kept in the order were
+                            // already deducted from the website when it was placed.
+                            const addedItems = [];
+                            const addedSeen = {};
+                            for (const p of newProducts) {
+                                const key = `${(p.code || '').toUpperCase()}|${(p.size || '').toUpperCase()}`;
+                                if (addedSeen[key]) continue;
+                                addedSeen[key] = true;
+                                const addedQty = newQtyMap[key] - (oldQtyMap[key]?.qty || 0);
+                                if (addedQty > 0) addedItems.push({ ...p, qty: addedQty });
+                            }
+                            if (!isPartialExchangeFlow && addedItems.length > 0) {
+                                await adjustWooStock(addedItems, -1);
                             }
                         }
                         // Skip wooSyncOrder for partial returns/exchanges — WooCommerce order keeps
@@ -586,12 +604,38 @@ function App() {
                 // Sync order details to WooCommerce (non-blocking) — skipped for partial returns,
                 // partial exchange flows (exchange order's handleCreateOrder handles stock directly),
                 // and for dispatching return orders (no product data changed).
-                if (!isPartialReturn && !isPartialExchangeFlow && !isDispatchingReturnOrder) {
+                if (!updatedData._oms_partial_return && !isPartialExchangeFlow && !isDispatchingReturnOrder) {
                     wooSyncOrder({
                         ...updatedData,
                         wc_order_id: oldOrder.wc_order_id,
                         products: newProducts
                     }).catch(e => console.error('[WooSync] Background sync failed:', e));
+                }
+
+                // Orders split by a partial return / partial exchange keep their website
+                // line items, but those still held stock for the returned / exchanged-out
+                // items, so a later website cancel or refund gave them back a second time.
+                // Make the website order hold only what this OMS order still has. Products
+                // added by this edit (e.g. full exchange after a partial return) are not on
+                // the website order yet, so its line items are synced (products only).
+                // Both calls change no website stock (adjustWooStock above does that).
+                // Skipped when the website order is about to be cancelled: WooCommerce
+                // restores what it holds, which is what this order still has.
+                const isSplitOrder = !!updatedData._oms_partial_return || isPartialExchangeFlow;
+                if (isSplitOrder && !isDispatchingReturnOrder && !wooWillAutoRestock && oldOrder.wc_order_id) {
+                    const qtyKey = (p) => `${(p.code || '').toUpperCase()}|${(p.size || '').toUpperCase()}`;
+                    const prevQty = {};
+                    for (const p of (oldOrder.products || [])) prevQty[qtyKey(p)] = (prevQty[qtyKey(p)] || 0) + Number(p.qty || 0);
+                    const nextQty = {};
+                    for (const p of newProducts) nextQty[qtyKey(p)] = (nextQty[qtyKey(p)] || 0) + Number(p.qty || 0);
+                    const hasAdded = Object.keys(nextQty).some(k => nextQty[k] > (prevQty[k] || 0));
+                    if (hasAdded) {
+                        wooSyncOrder({ wc_order_id: oldOrder.wc_order_id, products: newProducts })
+                            .catch(e => console.error('[WooSync] Background sync failed:', e));
+                    } else {
+                        wooSyncOrderStock({ wc_order_id: oldOrder.wc_order_id, products: newProducts })
+                            .catch(e => console.error('[WooSyncStock] Background sync failed:', e));
+                    }
                 }
 
                 // Sync status to WooCommerce when transitioning to Cancelled/Returned
