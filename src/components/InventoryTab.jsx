@@ -223,7 +223,9 @@ const InventoryTab = ({ inventory, locations, orders, user, onEdit, onDelete, on
         };
 
         if (item.type === 'Variable') {
-            Object.entries(item.stock || {}).forEach(([size, qty]) => {
+            // Labels in size order (small to large): XS, S, M, L, XL, 2XL, 3XL; unknown sizes last
+            const sizeRank = (s) => { const i = SIZES.indexOf(s); return i === -1 ? SIZES.length : i; };
+            Object.entries(item.stock || {}).sort(([a], [b]) => sizeRank(a) - sizeRank(b)).forEach(([size, qty]) => {
                 const count = Number(qty || 0);
                 // Loop through the available stock quantity to generate multiple labels
                 for (let i = 0; i < count; i++) {

@@ -235,7 +235,14 @@ const SalesInventoryReport = ({ orders, inventory, adjustments, userRole }) => {
     // Inventory code → item map for name lookups
     const inventoryMap = useMemo(() => {
         const m = new Map();
-        inventory.forEach(i => { if (i.code) m.set(i.code.toUpperCase(), i); });
+        inventory.forEach(i => {
+            if (!i.code) return;
+            const key = i.code.toUpperCase();
+            // An archived item must not replace an active item with the same code
+            const existing = m.get(key);
+            if (existing && !existing.archived && i.archived) return;
+            m.set(key, i);
+        });
         return m;
     }, [inventory]);
 
