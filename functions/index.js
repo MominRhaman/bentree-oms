@@ -382,20 +382,27 @@ async function applyInventoryTx(changes, logCtx, orderOpts) {
  * @return {Promise<object>} see applyInventoryTx
  */
 async function deductInventory(products, logCtx, orderOpts) {
-  return applyInventoryTx((products || []).map((p) =>
-    ({p, qty: -Number(p.qty || 0)})), logCtx || null, orderOpts);
+  const toChanges = (list) => (list || []).map((p) =>
+    ({p, qty: -Number(p.qty || 0)}));
+  return applyInventoryTx(typeof products === "function" ?
+    (o) => toChanges(products(o)) : toChanges(products),
+  logCtx || null, orderOpts);
 }
 
 /**
  * Restore stock for every product in the list (all or nothing).
- * @param {Array} products
+ * @param {Array|Function} products - list, or order → list (order as
+ *   read inside the transaction)
  * @param {object} [logCtx] - optional logging context
  * @param {object} [orderOpts] - see applyInventoryTx
  * @return {Promise<object>} see applyInventoryTx
  */
 async function restoreInventory(products, logCtx, orderOpts) {
-  return applyInventoryTx((products || []).map((p) =>
-    ({p, qty: Number(p.qty || 0)})), logCtx || null, orderOpts);
+  const toChanges = (list) => (list || []).map((p) =>
+    ({p, qty: Number(p.qty || 0)}));
+  return applyInventoryTx(typeof products === "function" ?
+    (o) => toChanges(products(o)) : toChanges(products),
+  logCtx || null, orderOpts);
 }
 
 /**
@@ -849,7 +856,8 @@ async function syncSplitOrderFromWebhook(data, docId) {
       if (left > 0) remaining.push({...h.p, qty: left});
     }
     const update = {wcRestockBaseline: newBaseline, updatedAt: new Date(),
-      wcStatus: data.status};
+      wcStatus: data.status,
+      ...(order.wcOrderDeleted ? {wcOrderDeleted: false} : {})};
     if (restoredList.length > 0) {
       update.deductedProducts = remaining;
       update.stockDeducted = remaining.length > 0;
@@ -1049,6 +1057,9 @@ exports.woocommerceWebhook = onRequest(async (req, res) => {
               updatedAt: new Date(),
               stockDeducted: false,
               deductedProducts: [],
+              // Confirmed by WooCommerce: the linked website order is gone,
+              // so "Push to Website" is offered again for this order.
+              wcOrderDeleted: true,
             }),
           });
       if (out.skipped) {
@@ -1058,6 +1069,7 @@ exports.woocommerceWebhook = onRequest(async (req, res) => {
               updatedAt: new Date(),
               stockDeducted: false,
               deductedProducts: [],
+              wcOrderDeleted: true,
             },
             {merge: true},
         );
@@ -1122,11 +1134,15 @@ exports.woocommerceWebhook = onRequest(async (req, res) => {
         status: orderData.status,
         updatedAt: orderData.updatedAt,
         wcStatus: data.status,
+        // A webhook other than order.deleted: the website order exists
+        // (e.g. restored from the Trash), so it is linked again.
+        ...(existing.wcOrderDeleted ? {wcOrderDeleted: false} : {}),
       };
       await orderRef.set(scopedUpdate, {merge: true});
     } else {
-      await orderRef.set({...orderData, wcStatus: data.status},
-          {merge: true});
+      await orderRef.set({...orderData, wcStatus: data.status,
+        ...(existing.wcOrderDeleted ? {wcOrderDeleted: false} : {})},
+      {merge: true});
     }
     logger.info("Order saved", {
       orderId: data.id, status: orderData.status,
@@ -2527,6 +2543,52 @@ async function findPushedWooOrder(api, docId, since) {
 }
 
 /**
+ * Is the website order linked to this OMS order (wc_order_id) still there?
+ * Asked once when the order popup opens, so "Push to Website" is offered for
+ * an order whose website order was deleted even when no order.deleted webhook
+ * marked it (wcOrderDeleted). Same checks as wooPushOrder step 2:
+ *   - exists: the ID is this order on the website (tag or phone);
+ *   - trash: it is in the WooCommerce Trash;
+ *   - missing: WooCommerce says the ID is not an order (deleted);
+ *   - other: the ID now belongs to another customer's order;
+ *   - unknown: the website could not be reached / answered with an error.
+ * Only a definite answer is saved (wcOrderDeleted true for trash / missing /
+ * other, false for exists); unknown keeps the link as it is, so a network
+ * error never makes a linked order look missing. Creates nothing.
+ */
+exports.wooCheckOrderLink = onCall(async (request) => {
+  requireRole(request, FULL_ACCESS_ROLES, "check website orders");
+  const docId = String((request.data && request.data.orderId) || "");
+  if (!docId) throw new HttpsError("invalid-argument", "Missing order ID.");
+  const ref = ordersCol().doc(docId);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    throw new HttpsError("not-found", "Order not found in OMS.");
+  }
+  const order = snap.data();
+  const wcId = Number(order.wc_order_id);
+  if (!(wcId > 0)) return {state: "none"};
+  let state;
+  try {
+    const wc = await fetchWooOrderOrNull(makeWooApi(), wcId);
+    if (!wc) state = "missing";
+    else if (!isSameWooOrder(wc, docId, order)) state = "other";
+    else state = wc.status === "trash" ? "trash" : "exists";
+  } catch (err) {
+    logger.warn("wooCheckOrderLink: website not verified",
+        {docId, wcId, err: err.message});
+    return {state: "unknown", wcOrderId: wcId,
+      error: "Website order could not be verified right now."};
+  }
+  const deleted = state !== "exists";
+  if ((order.wcOrderDeleted === true) !== deleted) {
+    await ref.update({wcOrderDeleted: deleted});
+  }
+  logger.info("wooCheckOrderLink", {docId, wcId, state});
+  return {state, wcOrderId: wcId};
+});
+
+/**
  * Push an existing OMS order to the website (e.g. one that was removed from
  * WooCommerce), without changing website or OMS inventory.
  *
@@ -2579,11 +2641,14 @@ exports.wooPushOrder = onCall(async (request) => {
   });
 
   const api = makeWooApi();
-  const oldWcId = order.wc_order_id || null;
+  // Only a real website order ID counts as a link (0 / text is no link).
+  const oldWcId = Number(order.wc_order_id) > 0 ? order.wc_order_id : null;
 
   const finish = async (result, wc, extra = {}) => {
     await ref.update({
       "wc_order_id": wc.id,
+      // Linked to an existing website order again ("Push to Website" hidden).
+      "wcOrderDeleted": false,
       "wcPush.status": result,
       "wcPush.wcOrderId": wc.id,
       "wcPush.previousWcOrderId": oldWcId && Number(oldWcId) !== wc.id ?

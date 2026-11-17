@@ -141,6 +141,36 @@ export async function wooPushOrder(orderId) {
     return result.data;
 }
 
+// Answers of wooCheckOrderLink per OMS order + website order ID, so reopening
+// the same order popup doesn't ask the website again for a short while.
+// Only definite answers are kept; "unknown" (website not reachable) is asked
+// again next time.
+const linkCheckCache = new Map();
+const LINK_CHECK_TTL_MS = 120000;
+
+/**
+ * Is the website order linked to this OMS order still on the website?
+ * Read-only on the website; creates nothing.
+ *
+ * @param {string} orderId - OMS Firestore order doc ID
+ * @param {number|string} wcOrderId - the linked website order ID
+ * @returns {object} { state: 'exists'|'trash'|'missing'|'other'|'none'|'unknown', wcOrderId }
+ */
+export async function wooCheckOrderLink(orderId, wcOrderId) {
+    const key = `${orderId}|${wcOrderId}`;
+    const hit = linkCheckCache.get(key);
+    if (hit && Date.now() - hit.at < LINK_CHECK_TTL_MS) return hit.result;
+    const fn = httpsCallable(functions, 'wooCheckOrderLink');
+    try {
+        const { data } = await fn({ orderId });
+        if (data.state !== 'unknown') linkCheckCache.set(key, { at: Date.now(), result: data });
+        return data;
+    } catch (err) {
+        console.warn('[WooLinkCheck] Failed:', err?.message || err);
+        return { state: 'unknown', wcOrderId, error: err?.message || String(err) };
+    }
+}
+
 /**
  * Sync OMS order edits (customer, products, notes, shipping)
  * to WooCommerce. Fire-and-forget safe.
