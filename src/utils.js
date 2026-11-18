@@ -78,16 +78,18 @@ export const buildSizeItemMap = (inventory) => {
     return map;
 };
 
-// Every size of one product, read from its own stock map (one key per size
-// variation), zero-stock sizes included. Labels are kept as saved; each
-// size appears once. [] for single products and unknown codes.
+// The available sizes of one product: the sizes in its own stock map that
+// have stock (more than 0). The inventory form saves every standard size in
+// the stock map (0 when not entered), so sizes without stock are left out.
+// Labels are kept as saved; each size appears once, smallest to largest.
+// [] for single products and unknown codes.
 export const getProductSizes = (item) => {
     if (!item || item.type !== 'Variable' || !item.stock || typeof item.stock !== 'object') return [];
     const seen = new Set();
     const sizes = [];
     for (const key of Object.keys(item.stock)) {
         const id = key.trim().toUpperCase();
-        if (!id || seen.has(id)) continue;
+        if (!id || seen.has(id) || !(Number(item.stock[key] || 0) > 0)) continue;
         seen.add(id);
         sizes.push(key);
     }

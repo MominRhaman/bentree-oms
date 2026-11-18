@@ -505,7 +505,7 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
             const sizeItem = sizeItemMap.get(value.trim().toUpperCase());
             const sizes = getProductSizes(sizeItem);
             const curSize = (newProducts[index].size || '').trim().toUpperCase();
-            const belongs = sizes.length > 0
+            const belongs = sizeItem?.type === 'Variable'
                 ? sizes.some(s => s.trim().toUpperCase() === curSize)
                 : curSize === 'FREE';
             if (sizeItem && curSize && !belongs) {

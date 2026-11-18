@@ -13,6 +13,7 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
     const productRefs = useRef([]);
     // Size dropdown: the selected product's own sizes (see getProductSizes)
     const sizeItemMap = useMemo(() => buildSizeItemMap(inventory), [inventory]);
+    const realSizesOf = (code) => getProductSizes(sizeItemMap.get((code || '').trim().toUpperCase()));
 
     // --- FIX: Added missing state declaration ---
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -140,7 +141,9 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
         np[index].price = item.mrp || '';
 
         if (item.type === 'Variable' && item.stock) {
-            const sizes = Object.keys(item.stock);
+            // First available size (stock keys when no size has stock)
+            const realSizes = realSizesOf(item.code);
+            const sizes = realSizes.length > 0 ? realSizes : Object.keys(item.stock);
             if (sizes.length > 0) np[index].size = sizes[0];
         } else {
             np[index].size = 'Free';
@@ -509,7 +512,9 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
             if (foundItem) {
                 np[idx].price = foundItem.mrp || '';
                 if (foundItem.type === 'Variable' && foundItem.stock) {
-                    const sizes = Object.keys(foundItem.stock);
+                    // First available size (stock keys when no size has stock)
+                    const realSizes = realSizesOf(foundItem.code);
+                    const sizes = realSizes.length > 0 ? realSizes : Object.keys(foundItem.stock);
                     if (sizes.length > 0) np[idx].size = sizes[0];
                 } else {
                     np[idx].size = '';
@@ -563,7 +568,7 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
                             {isCompletingPartialExchange ? 'New Items to Give:' : 'Product Items:'}
                         </h4>
                         {newProducts.map((p, i) => {
-                            const availableSizes = getProductSizes(sizeItemMap.get((p.code || '').trim().toUpperCase()));
+                            const availableSizes = realSizesOf(p.code);
                             const hasError = errors[i];
 
                             return (

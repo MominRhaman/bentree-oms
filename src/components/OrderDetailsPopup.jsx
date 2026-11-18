@@ -241,7 +241,9 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
             if (foundItem) {
                 newProducts[index].price = foundItem.mrp || 0;
                 if (foundItem.type === 'Variable' && foundItem.stock) {
-                    const sizes = Object.keys(foundItem.stock);
+                    // First available size (stock keys when no size has stock)
+                    const realSizes = getAvailableSizes(value);
+                    const sizes = realSizes.length > 0 ? realSizes : Object.keys(foundItem.stock);
                     if (sizes.length > 0) newProducts[index].size = sizes[0];
                 } else {
                     newProducts[index].size = 'Free';
