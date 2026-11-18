@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { X, Edit2, Save, Trash2, Printer, MapPin, User, Package, Plus, Clock, RefreshCw, AlertTriangle, RotateCcw, CheckCircle, Eye, Zap, ArrowLeft, Globe } from 'lucide-react';
-import { disableScroll } from '../utils';
+import { disableScroll, buildSizeItemMap, getProductSizes } from '../utils';
 import InvoiceGenerator from './InvoiceGenerator';
 import { wooPushOrder, wooCheckOrderLink } from '../WooAPI/wooStock';
 
@@ -97,18 +97,15 @@ const OrderDetailsPopup = ({ order, onClose, getStatusColor, onEdit, onCreate, i
         () => new Map((inventory || []).map(i => [i.code?.toUpperCase(), i])),
         [inventory]
     );
+    // Size dropdown: the selected product's own sizes (see getProductSizes)
+    const sizeItemMap = useMemo(() => buildSizeItemMap(inventory), [inventory]);
 
     if (!order || !editedOrder) return null;
 
     // --- Helper: Get Sizes for a Code ---
     const getAvailableSizes = (code) => {
         if (!code || !inventory || !inventory.length) return [];
-        const item = inventoryCodeMap.get(code.toUpperCase());
-        if (!item) return [];
-        if (item.type === 'Variable' && item.stock) {
-            return Object.keys(item.stock);
-        }
-        return [];
+        return getProductSizes(sizeItemMap.get(code.trim().toUpperCase()));
     };
 
     // --- Stock Logic ---

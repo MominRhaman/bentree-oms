@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Save, AlertTriangle, Plus, Trash2, XCircle, Zap } from 'lucide-react';
 import { collection, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db, appId, auth } from '../firebase';
-import { applyInventoryChanges, disableScroll, computeStockBefores, logInventoryMovement } from '../utils';
+import { applyInventoryChanges, disableScroll, computeStockBefores, logInventoryMovement, buildSizeItemMap, getProductSizes } from '../utils';
 import { CreateOrder } from '../WooAPI/CreateOrder.jsx';
 import { useScanner } from '../hooks/useScanner';
 
@@ -165,6 +165,9 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
         () => new Map(inventory.map(i => [i.code?.toUpperCase(), i])),
         [inventory]
     );
+    // Size dropdown: the selected product's own sizes (see getProductSizes)
+    const sizeItemMap = useMemo(() => buildSizeItemMap(inventory), [inventory]);
+    const sizesOf = (code) => getProductSizes(sizeItemMap.get((code || '').trim().toUpperCase()));
 
     // --- STRICT INVENTORY CHECKER ---
     const getStockError = (p, allProducts = []) => {
@@ -496,6 +499,18 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
             if (foundItem) {
                 newProducts[index].price = foundItem.mrp || '';
             }
+            // A size the newly selected product doesn't have (e.g. kept from
+            // the previous product) is cleared. A single product keeps only
+            // its existing "Free" size.
+            const sizeItem = sizeItemMap.get(value.trim().toUpperCase());
+            const sizes = getProductSizes(sizeItem);
+            const curSize = (newProducts[index].size || '').trim().toUpperCase();
+            const belongs = sizes.length > 0
+                ? sizes.some(s => s.trim().toUpperCase() === curSize)
+                : curSize === 'FREE';
+            if (sizeItem && curSize && !belongs) {
+                newProducts[index].size = '';
+            }
         }
 
         setFormData({ ...formData, products: newProducts });
@@ -767,13 +782,17 @@ const NewOrderForm = ({ user, existingOrders, setActiveTab, inventory }) => {
                                                 onChange={e => updateProduct(idx, 'size', e.target.value)}
                                             >
                                                 <option value="">Size</option>
-                                                <option value="XS">XS</option>
-                                                <option value="S">S</option>
-                                                <option value="M">M</option>
-                                                <option value="L">L</option>
-                                                <option value="XL">XL</option>
-                                                <option value="2XL">2XL</option>
-                                                <option value="3XL">3XL</option>
+                                                {(() => {
+                                                    // This product's own sizes (zero stock included); the row's
+                                                    // current value is kept visible if it isn't one of them.
+                                                    const sizes = sizesOf(prod.code);
+                                                    return (
+                                                        <>
+                                                            {prod.size && !sizes.includes(prod.size) && <option value={prod.size}>{prod.size}</option>}
+                                                            {sizes.map(sz => <option key={sz} value={sz}>{sz}</option>)}
+                                                        </>
+                                                    );
+                                                })()}
                                             </select>
                                         </div>
 

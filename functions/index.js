@@ -1118,6 +1118,15 @@ exports.woocommerceWebhook = onRequest(async (req, res) => {
       // collected amounts so OMS payment tracking stays consistent.
       const advance = Number(existing.advanceAmount || 0);
       const collected = Number(existing.collectedAmount || 0);
+      // Website orders the OMS created before wooCreateOrder sent the
+      // delivery charge have no shipping line, so their website total has
+      // no delivery charge. Keep the OMS delivery charge (and its share of
+      // the grand total) instead of replacing it with 0.
+      if ((data.shipping_lines || []).length === 0 &&
+          Number(existing.deliveryCharge || 0) > 0) {
+        orderData.deliveryCharge = Number(existing.deliveryCharge);
+        orderData.grandTotal += orderData.deliveryCharge;
+      }
       const scopedUpdate = {
         recipientName: orderData.recipientName,
         recipientPhone: orderData.recipientPhone,
@@ -1438,6 +1447,13 @@ exports.wooCreateOrder = onCall(async (request) => {
         country: "BD",
       },
       line_items: lineItems,
+      // The OMS delivery charge (as wooPushOrder sends it). Without it the
+      // website order had shipping 0, and a later webhook copied that 0
+      // into the OMS order.
+      shipping_lines: Number(order.deliveryCharge || 0) ? [{
+        method_title: "Shipping", method_id: "flat_rate",
+        total: Number(order.deliveryCharge).toFixed(2),
+      }] : [],
       customer_note: order.specialInstructions ||
         order.remarks ||
         (isStore ? `Store sale by: ${order.salesByName || "—"}` : ""),

@@ -61,6 +61,43 @@ export const normalizeSize = (s) => {
     return SIZE_ALIASES[upper] || upper;
 };
 
+// Size dropdowns: smallest to largest. Sizes not listed here come after,
+// with their own label.
+const SIZE_DISPLAY_ORDER = ['XXS', ...SIZES];
+
+// code -> inventory item for size dropdowns. An active item wins over an
+// archived one with the same code (some codes have an archived duplicate).
+export const buildSizeItemMap = (inventory) => {
+    const map = new Map();
+    for (const i of inventory || []) {
+        const code = (i.code || '').trim().toUpperCase();
+        if (!code) continue;
+        const cur = map.get(code);
+        if (!cur || (cur.archived && !i.archived)) map.set(code, i);
+    }
+    return map;
+};
+
+// Every size of one product, read from its own stock map (one key per size
+// variation), zero-stock sizes included. Labels are kept as saved; each
+// size appears once. [] for single products and unknown codes.
+export const getProductSizes = (item) => {
+    if (!item || item.type !== 'Variable' || !item.stock || typeof item.stock !== 'object') return [];
+    const seen = new Set();
+    const sizes = [];
+    for (const key of Object.keys(item.stock)) {
+        const id = key.trim().toUpperCase();
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        sizes.push(key);
+    }
+    const rank = (s) => {
+        const i = SIZE_DISPLAY_ORDER.indexOf(normalizeSize(s));
+        return i === -1 ? SIZE_DISPLAY_ORDER.length : i;
+    };
+    return sizes.sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+};
+
 export const EXPENSE_FIELDS = [
     'media', 'salary', 'rent', 'utility', 'vat',
     'codCharge', 'food', 'transport', 'accessories', 'paymentGatewayFees', 'maintenanceRepairs', 'others'

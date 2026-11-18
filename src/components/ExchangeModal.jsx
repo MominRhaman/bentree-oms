@@ -1,5 +1,6 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { Plus, Trash2, X, RefreshCw, AlertTriangle } from 'lucide-react';
+import { buildSizeItemMap, getProductSizes } from '../utils';
 
 // Added 'user' to the props list below
 const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user }) => {
@@ -10,6 +11,8 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
     const [errors, setErrors] = useState({});
     const suggestionRef = useRef(null);
     const productRefs = useRef([]);
+    // Size dropdown: the selected product's own sizes (see getProductSizes)
+    const sizeItemMap = useMemo(() => buildSizeItemMap(inventory), [inventory]);
 
     // --- FIX: Added missing state declaration ---
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -560,8 +563,7 @@ const ExchangeModal = ({ order, onClose, onConfirm, onCreate, inventory, user })
                             {isCompletingPartialExchange ? 'New Items to Give:' : 'Product Items:'}
                         </h4>
                         {newProducts.map((p, i) => {
-                            const invItem = inventory.find(inv => inv.code.toUpperCase() === (p.code || '').toUpperCase());
-                            const availableSizes = (invItem && invItem.type === 'Variable' && invItem.stock) ? Object.keys(invItem.stock) : [];
+                            const availableSizes = getProductSizes(sizeItemMap.get((p.code || '').trim().toUpperCase()));
                             const hasError = errors[i];
 
                             return (
