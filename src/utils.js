@@ -155,6 +155,24 @@ export const downloadCSV = (data, filename) => {
 
 export const disableScroll = (e) => e.target.blur();
 
+// Inventory lookup by uppercase code. Returns exactly what
+// inventory.find(i => i.code.toUpperCase() === code) returns: the FIRST item
+// with that code (a later duplicate, e.g. an archived copy, never replaces it),
+// or undefined. Built once per inventory list instead of scanning the whole
+// list for every product. If any item has no string code, the plain find() is
+// used, so the result stays identical.
+export const makeInventoryCodeLookup = (inventory) => {
+    if (!inventory.every(i => typeof i.code === 'string')) {
+        return (code) => inventory.find(i => i.code.toUpperCase() === code);
+    }
+    const map = new Map();
+    inventory.forEach(i => {
+        const key = i.code.toUpperCase();
+        if (!map.has(key)) map.set(key, i);
+    });
+    return (code) => map.get(code);
+};
+
 // --- ATOMIC STOCK LOGIC ---
 // Applies signed stock changes [{code, size, qty}] (qty < 0 deducts, qty > 0
 // restores) in ONE Firestore transaction. Each inventory doc is read fresh

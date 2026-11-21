@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Download, Filter, Edit, Trash2, CheckCircle, ShoppingBag, XCircle, Search, CreditCard } from 'lucide-react';
 import SearchBar from './SearchBar';
 import OrderDetailsPopup from './OrderDetailsPopup';
-import { INVENTORY_CATEGORIES, downloadCSV, getEmployeeDateWindow, clampToDateWindow } from '../utils';
+import { INVENTORY_CATEGORIES, downloadCSV, getEmployeeDateWindow, clampToDateWindow, makeInventoryCodeLookup } from '../utils';
 
 const CANCEL_ORDER_CONFIRM = 'Cancel this Store Order? Stock will be restored and recorded in Movement Log.';
 const PAYMENT_MODES = ['Cash', 'Card', 'bKash', 'Nagad', 'MFS', 'Bank Transfer'];
@@ -46,6 +46,9 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
             )
         );
     }, [orders, isCheckoutMode, checkoutSearch]);
+
+    // Same result as inventory.find(i => i.code.toUpperCase() === code), without a scan per product
+    const findInventoryByCode = useMemo(() => makeInventoryCodeLookup(inventory), [inventory]);
 
     // --- HISTORY DATA LOGIC ---
     const { salesData, totals } = useMemo(() => {
@@ -98,7 +101,7 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
             // Category filter: include order if any product matches
             if (catFilter && catFilter !== "") {
                 const hasMatch = (order.products || []).some(p => {
-                    const inv = inventory.find(i => i.code.toUpperCase() === (p.code || '').toUpperCase());
+                    const inv = findInventoryByCode((p.code || '').toUpperCase());
                     return (inv ? inv.category : 'N/A') === catFilter;
                 });
                 if (!hasMatch) return;
@@ -109,7 +112,7 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
             let totalQty = 0;
             let totalCOGS = 0;
             (order.products || []).forEach(prod => {
-                const invItem = inventory.find(i => i.code.toUpperCase() === (prod.code || '').toUpperCase());
+                const invItem = findInventoryByCode((prod.code || '').toUpperCase());
                 const unitCost = invItem ? safeNum(invItem.unitCost) : 0;
                 totalQty += safeNum(prod.qty);
                 totalCOGS += unitCost * safeNum(prod.qty);
@@ -152,7 +155,7 @@ const StoreSalesTab = ({ orders, inventory, onUpdate, onEdit, onCreate, onDelete
         totals.orderCount = uniqueOrderIds.size;
 
         return { salesData: data, totals };
-    }, [orders, inventory, startDate, endDate, searchTerm, catFilter, paymentFilter, dueFilter, isCheckoutMode, isEmployeeUser, dateWindow]);
+    }, [orders, inventory, findInventoryByCode, startDate, endDate, searchTerm, catFilter, paymentFilter, dueFilter, isCheckoutMode, isEmployeeUser, dateWindow]);
 
     // Employee: keep typed/picked dates inside the 3-month window
     const handleDateInput = (e, setter) => {

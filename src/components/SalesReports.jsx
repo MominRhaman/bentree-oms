@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Download, Filter, MapPin } from 'lucide-react';
 import SearchBar from './SearchBar';
 import OrderDetailsPopup from './OrderDetailsPopup';
-import { INVENTORY_CATEGORIES, downloadCSV } from '../utils';
+import { INVENTORY_CATEGORIES, downloadCSV, makeInventoryCodeLookup } from '../utils';
 
 const SalesReports = ({ orders, inventory }) => {
     // --- Filter States ---
@@ -15,6 +15,9 @@ const SalesReports = ({ orders, inventory }) => {
 
     // --- UI States ---
     const [selectedOrder, setSelectedOrder] = useState(null);
+
+    // Same result as inventory.find(i => i.code.toUpperCase() === code), without a scan per product
+    const findInventoryByCode = useMemo(() => makeInventoryCodeLookup(inventory), [inventory]);
 
     // --- MAIN DATA CALCULATION ---
     const { stats, salesData, totals } = useMemo(() => {
@@ -98,7 +101,7 @@ const SalesReports = ({ orders, inventory }) => {
                 (order.products || []).forEach(p => {
                     let prodDiscount = safeNum(p.discountValue);
                     if (!prodDiscount) {
-                        const invItem = inventory.find(i => i.code.toUpperCase() === (p.code || '').toUpperCase());
+                        const invItem = findInventoryByCode((p.code || '').toUpperCase());
                         const mrp = invItem ? safeNum(invItem.mrp) : 0;
                         const price = safeNum(p.price);
                         if (mrp > price && price > 0) {
@@ -130,7 +133,7 @@ const SalesReports = ({ orders, inventory }) => {
             // Category filter: include order if any product matches
             if (catFilter && catFilter !== "") {
                 const hasMatch = (order.products || []).some(p => {
-                    const inv = inventory.find(i => i.code.toUpperCase() === (p.code || '').toUpperCase());
+                    const inv = findInventoryByCode((p.code || '').toUpperCase());
                     return (inv ? inv.category : 'N/A') === catFilter;
                 });
                 if (!hasMatch) return;
@@ -141,7 +144,7 @@ const SalesReports = ({ orders, inventory }) => {
             let totalQty = 0;
             let totalCOGS = 0;
             (order.products || []).forEach(prod => {
-                const invItem = inventory.find(i => i.code.toUpperCase() === (prod.code || '').toUpperCase());
+                const invItem = findInventoryByCode((prod.code || '').toUpperCase());
                 const unitCost = invItem ? safeNum(invItem.unitCost) : 0;
                 totalQty += safeNum(prod.qty);
                 totalCOGS += unitCost * safeNum(prod.qty);
@@ -219,7 +222,7 @@ const SalesReports = ({ orders, inventory }) => {
             salesData: data,
             totals
         };
-    }, [orders, inventory, startDate, endDate, searchTerm, catFilter, platformFilter, locationFilter]);
+    }, [orders, inventory, findInventoryByCode, startDate, endDate, searchTerm, catFilter, platformFilter, locationFilter]);
 
     // --- Handlers ---
     const handleExport = () => {

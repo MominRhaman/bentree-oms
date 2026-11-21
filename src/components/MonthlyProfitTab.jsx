@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { updateDoc, doc, collection, query, where, getDocs, addDoc } from 'firebase/firestore';
 import { db, appId } from '../firebase';
-import { EXPENSE_FIELDS, disableScroll } from '../utils';
+import { EXPENSE_FIELDS, disableScroll, makeInventoryCodeLookup } from '../utils';
 
 const MonthlyProfitTab = ({ orders, inventory, expenses }) => {
     // --- State ---
@@ -74,6 +74,9 @@ const MonthlyProfitTab = ({ orders, inventory, expenses }) => {
         alert(`Expenses Saved for ${new Date(start.year, start.month).toLocaleString('default', { month: 'long', year: 'numeric' })}`);
     };
 
+    // Same result as inventory.find(i => i.code.toUpperCase() === code), without a scan per product
+    const findInventoryByCode = useMemo(() => makeInventoryCodeLookup(inventory), [inventory]);
+
     // --- Calculations ---
     const financials = useMemo(() => {
         const startTimeValue = start.year * 12 + start.month;
@@ -131,7 +134,7 @@ const MonthlyProfitTab = ({ orders, inventory, expenses }) => {
         revenueOrders.forEach(o => {
             (o.products || []).forEach(p => {
                 if (p.code) {
-                    const invItem = inventory.find(i => i.code.toUpperCase() === p.code.toUpperCase());
+                    const invItem = findInventoryByCode(p.code.toUpperCase());
                     if (invItem) cogs += ((Number(invItem.unitCost) || 0) * (Number(p.qty) || 0));
                 }
             });
@@ -148,7 +151,7 @@ const MonthlyProfitTab = ({ orders, inventory, expenses }) => {
         }, 0);
 
         return { onlineNetSales, storeSales, returnLoss, totalRevenue, cogs, totalExp, netProfit: totalRevenue - cogs - totalExp };
-    }, [orders, inventory, expenses, startMonthInput, endMonthInput]);
+    }, [orders, inventory, findInventoryByCode, expenses, startMonthInput, endMonthInput]);
 
     return (
         <div className="space-y-6">
