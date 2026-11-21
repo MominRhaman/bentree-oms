@@ -14,6 +14,13 @@ const DispatchTab = ({ orders, onUpdate }) => {
         return res;
     }, [orders, filterDate, searchTerm]);
 
+    // Display order: rows waiting for Confirm Dispatch (Confirmed / Exchanged) first,
+    // then the rest. Stable sort, so each group keeps the incoming order-date sequence.
+    const sortedForDisplay = useMemo(() => {
+        const waiting = (o) => (o.status === 'Confirmed' || o.status === 'Exchanged') ? 0 : 1;
+        return [...filtered].sort((a, b) => waiting(a) - waiting(b));
+    }, [filtered]);
+
     // --- NEW LOGIC: Calculate group totals for bottom-to-top SL ---
     const counts = useMemo(() => {
         const pending = filtered.filter(o => o.status === 'Confirmed' || o.status === 'Exchanged').length;
@@ -87,7 +94,7 @@ const DispatchTab = ({ orders, onUpdate }) => {
                         </tr>
                     </thead>
                     <tbody>
-                        {filtered.map((order) => {
+                        {sortedForDisplay.map((order) => {
                             const isExpress = order.isExpress === true;
                             const isPending = order.status === 'Confirmed' || order.status === 'Exchanged';
 

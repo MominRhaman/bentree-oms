@@ -116,14 +116,21 @@ const ConfirmedOrders = ({ allOrders, orders, onUpdate, onEdit, onCreate, onDele
         return { totalOrders, totalAmountExDelivery };
     }, [filteredOrders, isEmployeeUser, startDate, endDate, dateWindow]);
 
+    // Display order: Confirmed orders first, then every other status. Stable sort,
+    // so each group keeps the incoming order-date sequence. Applied before pagination.
+    const sortedForDisplay = useMemo(() => {
+        const rank = (o) => o.status === 'Confirmed' ? 0 : 1;
+        return [...filteredOrders].sort((a, b) => rank(a) - rank(b));
+    }, [filteredOrders]);
+
     // --- Pagination ---
     const PAGE_SIZE = 50;
     const [currentPage, setCurrentPage] = useState(0);
     const totalPages = Math.ceil(filteredOrders.length / PAGE_SIZE);
     const paginatedOrders = useMemo(() => {
         const start = currentPage * PAGE_SIZE;
-        return filteredOrders.slice(start, start + PAGE_SIZE);
-    }, [filteredOrders, currentPage]);
+        return sortedForDisplay.slice(start, start + PAGE_SIZE);
+    }, [sortedForDisplay, currentPage]);
 
     // Reset to first page when filters change
     const setSearchTermAndReset = useCallback((v) => { setSearchTerm(v); setCurrentPage(0); }, []);
