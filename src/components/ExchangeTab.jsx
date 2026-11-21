@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { ArrowRightLeft, Eye, CheckCircle, Clock } from 'lucide-react';
 import OrderDetailsPopup from './OrderDetailsPopup';
 import { getStatusColor } from '../utils';
@@ -9,12 +9,13 @@ const ExchangeTab = ({ orders, onCreate, onEdit, inventory, userRole }) => {
     const [selectedOrder, setSelectedOrder] = useState(null);
 
     // Filter to include both full exchanges and partial exchanges
-    const exchangeOrders = orders.filter(o =>
+    // (recomputed only when orders change, not on every render)
+    const exchangeOrders = useMemo(() => orders.filter(o =>
         o.status === 'Exchanged' ||
         o.exchangeDetails ||
         o.isPartialExchange === true ||
         (o.history || []).some(h => h.note?.toLowerCase().includes('partial exchange'))
-    );
+    ), [orders]);
 
     return (
         <div className="space-y-6">
