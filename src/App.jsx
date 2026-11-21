@@ -5,6 +5,7 @@ import { auth, db, appId } from './firebase';
 import { getStatusColor, applyInventoryChanges, heldByOrder, computeStockBefores, logInventoryMovement, GOOGLE_ACCOUNTS, getEmployeeDateWindow } from './utils';
 import { syncWooStock, wooUpdateOrder, wooSyncOrder, wooSyncOrderStock } from './WooAPI/wooStock';
 import { useScanner } from './hooks/useScanner';
+import { createOrdersSnapshotReader } from './ordersSnapshot';
 import { Menu } from 'lucide-react';
 
 // Component Imports — eagerly loaded (always visible)
@@ -207,14 +208,15 @@ function App() {
             ? query(ordersCol, where('createdAt', '>=', getEmployeeDateWindow().startInstant))
             : ordersCol;
 
+        // A new reader (empty cache) for every subscription: a user / role change or
+        // cleanup never carries orders over from the previous listener.
+        const readOrders = createOrdersSnapshotReader();
         const unsubOrders = onSnapshot(ordersSource, (snap) => {
             // 'estimate' gives a just-created order (serverTimestamp still pending) its
             // local time instead of null, so it sorts to the top immediately.
-            const data = snap.docs.map(d => ({ id: d.id, ...d.data({ serverTimestamps: 'estimate' }) }));
-            data.sort((a, b) =>
-                ((b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)) ||
-                ((b.createdAt?.nanoseconds || 0) - (a.createdAt?.nanoseconds || 0))
-            );
+            // Only added / modified documents are converted again (see ordersSnapshot.js);
+            // the result and its createdAt order are the same as converting every document.
+            const data = readOrders(snap);
             setOrders(data);
             setIsDataReceived(true);
         }, handleSnapshotError);
